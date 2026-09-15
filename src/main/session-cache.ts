@@ -108,22 +108,42 @@ function getDb(profile?: unknown): Database.Database | null {
   return getDbConnection(true, profile);
 }
 
+/**
+ * Session-rows-to-workspace grouping fallback: when a session has no desktop
+ * folder binding (created outside the desktop — CLI, gateway), derive the
+ * sidebar project folder from the backend's own workspace data, mirroring
+ * hermes-agent's `hermes_state_sessions._workspace_group_key`: git repo root
+ * when present, else cwd (issue #15).
+ */
+function workspaceFolderFromRow(row: {
+  git_repo_root?: string | null;
+  cwd?: string | null;
+}): string | null {
+  const repoRoot = row.git_repo_root?.trim();
+  if (repoRoot) return repoRoot;
+  return row.cwd?.trim() || null;
+}
+
 // Attach each session's linked folder in a single batched store read, so a
 // full sync stays a couple of queries rather than two per row. The result is
 // written into the JSON cache by `syncSessionCache`, which lets the renderer's
 // fast read path (`listCachedSessions`) stay DB-free.
+//
+// Folder precedence per session: an explicit desktop binding wins; an empty
+// sentinel row means the user deliberately unlinked the session (it must NOT
+// fall back to the derived cwd/repo folder); no row at all means derive from
+// the session's own workspace columns (issue #15).
 function attachContextFolders(
   sessions: CachedSession[],
-  profile?: unknown,
+  folders: Map<string, string>,
+  derived: Map<string, string | null>,
 ): CachedSession[] {
-  const folders = getSessionContextFolders(
-    sessions.map((s) => s.id),
-    profile,
-  );
-  return sessions.map((session) => ({
-    ...session,
-    contextFolder: folders.get(session.id) ?? null,
-  }));
+  return sessions.map((session) => {
+    if (folders.has(session.id)) {
+      return { ...session, contextFolder: folders.get(session.id) || null };
+    }
+    return { ...session, contextFolder: derived.get(session.id) ?? null };
+  });
 }
 
 // Reconcile visible session metadata; archive changes do not update started_at.
@@ -137,7 +157,8 @@ export function syncSessionCache(profile?: unknown): CachedSession[] {
     // and reappear on unarchive. Reuse cached titles to avoid rereading messages.
     const rows = db
       .prepare(
-        `SELECT s.id, s.started_at, s.source, s.message_count, s.model, s.title
+        `SELECT s.id, s.started_at, s.source, s.message_count, s.model, s.title,
+                s.cwd, s.git_repo_root
          FROM sessions s
          WHERE ${sessionVisibilityPredicate(db)}
          ORDER BY s.started_at DESC`,
@@ -149,6 +170,8 @@ export function syncSessionCache(profile?: unknown): CachedSession[] {
       message_count: number;
       model: string;
       title: string | null;
+      cwd: string | null;
+      git_repo_root: string | null;
     }>;
 
     // Index existing sessions by id once so the per-row update below is
@@ -204,7 +227,18 @@ export function syncSessionCache(profile?: unknown): CachedSession[] {
 
     // Rows absent from the visible set are removed only from the desktop
     // cache. Their session/message data and linked folders remain in the DB.
-    const allSessions = attachContextFolders(visibleSessions, profile);
+    const bindings = getSessionContextFolders(
+      visibleSessions.map((s) => s.id),
+      profile,
+    );
+    const derived = new Map<string, string | null>(
+      rows.map((row) => [row.id, workspaceFolderFromRow(row)]),
+    );
+    const allSessions = attachContextFolders(
+      visibleSessions,
+      bindings,
+      derived,
+    );
     allSessions.sort((a, b) => b.startedAt - a.startedAt);
 
     const updated: CacheData = {

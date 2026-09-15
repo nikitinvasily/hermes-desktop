@@ -89,6 +89,9 @@ vi.mock("better-sqlite3", () => {
     message_count: number;
     model: string;
     title: string | null;
+    cwd: string | null;
+    git_repo_root: string | null;
+    [key: string]: unknown;
   }
 
   interface MessageRow {
@@ -103,6 +106,7 @@ vi.mock("better-sqlite3", () => {
     sessions: Map<string, SessionRow>;
     messages: MessageRow[];
     nextMessageId: number;
+    contextFolders?: Map<string, string>;
   }
 
   const stores = new Map<string, Store>();
@@ -138,7 +142,8 @@ vi.mock("better-sqlite3", () => {
 
     run(...args: unknown[]): { changes: number } {
       if (this.sql.includes("INSERT OR REPLACE INTO sessions")) {
-        const [id, source, startedAt, messageCount, model, title] = args;
+        const [id, source, startedAt, messageCount, model, title, cwd, repo] =
+          args;
         this.store.sessions.set(String(id), {
           id: String(id),
           source: String(source),
@@ -147,7 +152,27 @@ vi.mock("better-sqlite3", () => {
           message_count: Number(messageCount),
           model: String(model),
           title: title === null || title === undefined ? null : String(title),
+          cwd: cwd ? String(cwd) : null,
+          git_repo_root: repo ? String(repo) : null,
         });
+        return { changes: 1 };
+      }
+
+      if (this.sql.includes("INSERT INTO desktop_session_context_folders")) {
+        // Context-folder binding write (issue #15): args are
+        // (session_id, folder_path) for both the sentinel upsert and the
+        // regular one.
+        const [sessionId, folderPath] = args;
+        const session = this.store.sessions.get(String(sessionId));
+        if (session) {
+          this.store.contextFolders = this.store.contextFolders ?? new Map();
+          this.store.contextFolders.set(
+            String(sessionId),
+            folderPath === null || folderPath === undefined
+              ? ""
+              : String(folderPath),
+          );
+        }
         return { changes: 1 };
       }
 
@@ -192,7 +217,7 @@ vi.mock("better-sqlite3", () => {
       throw new Error(`Unhandled fake run SQL: ${this.sql}`);
     }
 
-    all(): SessionRow[] {
+    all(): Array<Record<string, unknown>> {
       // These legacy fixtures predate the Agent's archive column.
       if (this.sql === "PRAGMA table_info(sessions)") return [];
       if (this.sql.includes("FROM sessions s")) {
@@ -201,22 +226,40 @@ vi.mock("better-sqlite3", () => {
         );
       }
 
-      // Context-folder batch read (issue #27). These tests never seed linked
-      // folders, so report none — `tableExists` returns false above, so this
-      // is only a defensive fallback if the lookup path ever changes.
+      // Context-folder batch read (issues #27, #15). Returns every stored
+      // binding INCLUDING empty-string sentinel rows (deliberate unlink):
+      // syncSessionCache distinguishes present-with-'' from absent to decide
+      // whether to derive the grouping folder from cwd/git_repo_root.
       if (this.sql.includes("desktop_session_context_folders")) {
-        return [];
+        const folders = this.store.contextFolders ?? new Map<string, string>();
+        return Array.from(folders.entries()).map(
+          ([session_id, folder_path]) => ({
+            session_id,
+            folder_path,
+          }),
+        );
       }
 
       throw new Error(`Unhandled fake all SQL: ${this.sql}`);
     }
 
-    get(...args: unknown[]): { content: string } | { id: string } | undefined {
+    get(
+      ...args: unknown[]
+    ): { content: string } | { id: string } | { name: string } | undefined {
       // `tableExists` probes sqlite_master before reading context folders
-      // (issue #27). The desktop context-folder table is never created in
-      // these tests, so report it absent — sessions then resolve to a null
-      // contextFolder instead of throwing on an unhandled query.
+      // (issue #27). Report the context-folder table absent unless a binding
+      // was actually written — the batch read above then returns [] and the
+      // derived cwd/repo fallback applies (issue #15).
       if (this.sql.includes("sqlite_master")) {
+        // `tableExists` passes the table NAME as a bound parameter, so match
+        // on args[0], not on the SQL text (issue #15: the context-folder
+        // table now matters for the sentinel/binding tests).
+        if (
+          args[0] === "desktop_session_context_folders" &&
+          this.store.contextFolders
+        ) {
+          return { name: "desktop_session_context_folders" };
+        }
         return undefined;
       }
 
@@ -280,6 +323,7 @@ import {
   syncSessionCache,
   updateSessionTitle,
 } from "../src/main/session-cache";
+import { setSessionContextFolder } from "../src/main/session-context-folder-store";
 import { closeDbConnection } from "../src/main/db";
 
 const CACHE_FILE = join(TEST_HOME, "desktop", "sessions.json");
@@ -299,6 +343,8 @@ function seedDb(
     model?: string;
     title?: string | null;
     firstUserMessage?: string;
+    cwd?: string | null;
+    git_repo_root?: string | null;
   }>,
   profile = "default",
 ): void {
@@ -311,7 +357,9 @@ function seedDb(
       ended_at INTEGER,
       message_count INTEGER,
       model TEXT,
-      title TEXT
+      title TEXT,
+      cwd TEXT,
+      git_repo_root TEXT
     );
     CREATE TABLE IF NOT EXISTS messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -322,8 +370,8 @@ function seedDb(
     );
   `);
   const insSession = db.prepare(
-    `INSERT OR REPLACE INTO sessions (id, source, started_at, ended_at, message_count, model, title)
-     VALUES (?, ?, ?, NULL, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO sessions (id, source, started_at, ended_at, message_count, model, title, cwd, git_repo_root)
+     VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
   );
   const insMessage = db.prepare(
     `INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)`,
@@ -336,6 +384,8 @@ function seedDb(
       s.message_count ?? 0,
       s.model ?? "gpt-4o",
       s.title ?? null,
+      s.cwd ?? null,
+      s.git_repo_root ?? null,
     );
     if (s.firstUserMessage) {
       insMessage.run(s.id, "user", s.firstUserMessage, s.started_at);
@@ -709,6 +759,88 @@ describe("syncSessionCache", () => {
     expect(result.every((r) => r.messageCount === 2)).toBe(true);
     expect(elapsed).toBeLessThan(500);
   }, 30000);
+
+  // @lat: [[connections#Test specifications#Connection-explicit session browsing#Derives workspace folder from cwd when no binding exists]]
+  it("derives the sidebar grouping folder from git_repo_root, else cwd, when no desktop binding exists (issue #15)", () => {
+    const now = Math.floor(Date.now() / 1000);
+    seedDb([
+      {
+        id: "s-cli",
+        started_at: now,
+        firstUserMessage: "cli session in a project folder",
+        cwd: "/Users/me/Documents/Hermes/infrastructure",
+      },
+      {
+        id: "s-repo",
+        started_at: now + 1,
+        firstUserMessage: "session inside a git repo subdirectory",
+        cwd: "/Users/me/projects/andrei/src",
+        git_repo_root: "/Users/me/projects/andrei",
+      },
+      {
+        id: "s-home",
+        started_at: now + 2,
+        firstUserMessage: "session started in home with no cwd",
+      },
+    ]);
+
+    const byId = new Map(syncSessionCache().map((r) => [r.id, r] as const));
+    // Plain cwd becomes the grouping folder.
+    expect(byId.get("s-cli")?.contextFolder).toBe(
+      "/Users/me/Documents/Hermes/infrastructure",
+    );
+    // git_repo_root wins over a deeper cwd (a checkout must not split).
+    expect(byId.get("s-repo")?.contextFolder).toBe("/Users/me/projects/andrei");
+    // No workspace data at all stays ungrouped.
+    expect(byId.get("s-home")?.contextFolder).toBeNull();
+  });
+
+  // @lat: [[connections#Test specifications#Connection-explicit session browsing#Explicit unlink sentinel beats derived folder]]
+  it("keeps a deliberate unlink (sentinel row) even when the session has a cwd (issue #15)", () => {
+    const future = Math.floor(Date.now() / 1000) + 600;
+    seedDb([
+      {
+        id: "s-unlinked",
+        started_at: future,
+        firstUserMessage: "user removed this session from its project",
+        cwd: "/Users/me/Documents/Hermes/infrastructure",
+      },
+    ]);
+    // First sync derives the folder from cwd (no binding row).
+    expect(syncSessionCache()[0]?.contextFolder).toBe(
+      "/Users/me/Documents/Hermes/infrastructure",
+    );
+
+    // "Move to project → Remove" writes the empty sentinel row.
+    setSessionContextFolder("s-unlinked", null);
+
+    // The derived cwd folder must NOT resurrect the removed grouping.
+    expect(syncSessionCache()[0]?.contextFolder).toBeNull();
+  });
+
+  // @lat: [[connections#Test specifications#Connection-explicit session browsing#Explicit binding beats derived folder]]
+  it("an explicit desktop binding wins over the derived cwd folder (issue #15)", () => {
+    const future = Math.floor(Date.now() / 1000) + 600;
+    seedDb([
+      {
+        id: "s-bound",
+        started_at: future,
+        firstUserMessage: "user moved this session to another project",
+        cwd: "/Users/me/projects/andrei",
+      },
+    ]);
+    // First sync derives from cwd.
+    expect(syncSessionCache()[0]?.contextFolder).toBe(
+      "/Users/me/projects/andrei",
+    );
+
+    // The user binds the session to a DIFFERENT folder via Move to project.
+    setSessionContextFolder("s-bound", "/Users/me/Documents/Hermes/mac");
+
+    expect(syncSessionCache()[0]?.contextFolder).toBe(
+      "/Users/me/Documents/Hermes/mac",
+    );
+  });
 });
 
 describe("updateSessionTitle", () => {

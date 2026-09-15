@@ -1394,17 +1394,23 @@ if not os.path.exists(db):
 conn = sqlite3.connect(db)
 conn.row_factory = sqlite3.Row
 rows = conn.execute(
-    "SELECT id, source, started_at, ended_at, message_count, model, title "
+    "SELECT id, source, started_at, ended_at, message_count, model, title, cwd, git_repo_root "
     "FROM sessions ORDER BY started_at DESC LIMIT ? OFFSET ?",
     (limit, offset)
 ).fetchall()
 result = []
 for r in rows:
+    # Workspace grouping key mirroring hermes-agent's
+    # hermes_state_sessions._workspace_group_key: git repo root when present,
+    # else cwd. Drives sidebar project grouping (issue #15).
+    repo_root = (r["git_repo_root"] or "").strip()
+    cwd = (r["cwd"] or "").strip()
+    folder = repo_root or cwd or None
     result.append({
         "id": r["id"], "source": r["source"] or "cli",
         "startedAt": r["started_at"], "endedAt": r["ended_at"],
         "messageCount": r["message_count"] or 0, "model": r["model"] or "",
-        "title": r["title"], "preview": ""
+        "title": r["title"], "preview": "", "contextFolder": folder
     })
 print(json.dumps(result))
 conn.close()
@@ -3280,7 +3286,12 @@ export async function sshListCachedSessions(
     source: s.source,
     messageCount: s.messageCount,
     model: s.model,
-    contextFolder: null,
+    // Workspace folder derived on the remote (git_repo_root || cwd) so SSH
+    // sessions group by project like local ones (issue #15).
+    contextFolder:
+      typeof s.contextFolder === "string" && s.contextFolder.trim()
+        ? s.contextFolder
+        : null,
   }));
 }
 

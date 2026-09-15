@@ -136,6 +136,11 @@ describe("remote session REST bridge", () => {
                   message_count: 2,
                   model: "custom/deepseek-v4-pro",
                   preview: "Cached remote preview",
+                  // Workspace fields the dashboard returns per row; the
+                  // cached-session shape derives contextFolder from them
+                  // (issue #15).
+                  git_repo_root: null,
+                  cwd: "/home/hermes/.hermes/workspace/diy",
                 },
               ],
             }),
@@ -429,10 +434,49 @@ describe("remote session REST bridge", () => {
         source: "chat",
         messageCount: 2,
         model: "custom/deepseek-v4-pro",
-        // Remote sessions have no local desktop folder binding (issue #27).
-        contextFolder: null,
+        // Workspace folder derived from the dashboard row's cwd so remote
+        // sessions group by project like local ones (issue #15).
+        contextFolder: "/home/hermes/.hermes/workspace/diy",
       },
     ]);
+  });
+
+  // @lat: [[connections#Test specifications#Connection-explicit session browsing#Remote rows carry workspace columns]]
+  it("prefers git_repo_root over cwd when deriving the workspace folder", async () => {
+    // Same profiles endpoint, but the row carries a repo root; the
+    // grouping key must be the repo root, not the inner cwd (a checkout must
+    // not split across worktrees — mirrors hermes-agent's
+    // _workspace_group_key). Replaces the beforeEach server (and baseUrl)
+    // with a fixture that only serves this shape; afterEach closes `server`.
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    server = http.createServer((req, res) => {
+      res.setHeader("Content-Type", "application/json");
+      res.end(
+        JSON.stringify({
+          sessions: [
+            {
+              id: "sess-repo",
+              source: "chat",
+              started_at: 1700000005,
+              message_count: 3,
+              model: "custom/deepseek-v4-pro",
+              preview: "Repo session",
+              git_repo_root: "/home/hermes/projects/andrei",
+              cwd: "/home/hermes/projects/andrei/src",
+            },
+          ],
+        }),
+      );
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", () => resolve()),
+    );
+    const address = server.address() as { port: number };
+    baseUrl = `http://127.0.0.1:${address.port}`;
+
+    const sessions = await remoteListCachedSessions(config(), 2, 0);
+
+    expect(sessions[0]?.contextFolder).toBe("/home/hermes/projects/andrei");
   });
 
   // @lat: [[connections#Test specifications#Connection-explicit session browsing#Scopes Remote list requests]]

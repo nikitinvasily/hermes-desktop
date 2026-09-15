@@ -11,6 +11,7 @@ Changes in this fork that are **not** (yet) in upstream.
 - **Schedules over SSH tunnels** (issue #1) — remote cron operations probe and use the dashboard endpoints (`/api/cron/jobs`) when the SSH tunnel targets `hermes dashboard`, fixing an empty Schedules tab. Key file: `src/main/cronjobs.ts`.
 - **Status-bar connection switcher** (PR #7, #9) — the status-bar mode chip switches between saved connections; a switch also activates a run for the newly selected connection.
 - **Sidebar new-chat buttons** (PR #12) — quick new-chat buttons on project headings and on the Chats header.
+- **Project grouping from the agent's own workspace data** (issue #15) — chats group by project for every connection type, not just locally created ones. When a session has no explicit desktop binding, the sidebar folder is derived from the session's `git_repo_root` (else `cwd`) in state.db — the same rule the agent core uses. This also fixes Remote/SSH connections, where the grouping folder was previously discarded and all chats fell into a flat list. A manual "Move to project" always wins; "Remove from project" is remembered and not overridden by the derived folder.
 
 Upstream merges are pulled regularly; fork commits live in `main` ahead of `upstream/main`.
 

@@ -31,8 +31,12 @@ function tableExists(db: Database.Database): boolean {
 }
 
 /**
- * Persist (or clear) the folder linked to a session. A null/empty folder
- * removes the row so an unlinked session doesn't restore a stale path.
+ * Persist (or clear) the folder linked to a session.
+ *
+ * A null/empty folder stores an EMPTY-STRING sentinel row rather than deleting:
+ * syncSessionCache derives the sidebar grouping folder from the session's own
+ * cwd/git_repo_root when no row exists, so "no row" now means "derive" and the
+ * sentinel is the only way to record a deliberate unlink (issue #15).
  */
 export function setSessionContextFolder(
   sessionId: string,
@@ -43,8 +47,17 @@ export function setSessionContextFolder(
   if (!db) return;
   ensureTable(db);
 
-  if (!folder) {
-    db.prepare(`DELETE FROM ${TABLE} WHERE session_id = ?`).run(sessionId);
+  const path = folder?.trim() || "";
+  if (!path) {
+    // Explicit unlink: keep a sentinel row so the derived cwd/repo folder does
+    // not resurrect the grouping the user removed.
+    db.prepare(
+      `INSERT INTO ${TABLE} (session_id, folder_path, updated_at)
+       VALUES (?, '', strftime('%s', 'now'))
+       ON CONFLICT(session_id) DO UPDATE SET
+         folder_path = '',
+         updated_at = excluded.updated_at`,
+    ).run(sessionId);
     return;
   }
 
@@ -72,8 +85,12 @@ export function getSessionContextFolder(sessionId: string): string | null {
  * Batch-read the folders linked to many sessions in a single pass: one
  * `tableExists` check and one chunked `IN (...)` query instead of two queries
  * per session. Used by the session cache so attaching folders to a full page
- * of rows stays a couple of queries rather than O(N). Sessions with no linked
- * folder are simply absent from the returned map.
+ * of rows stays a couple of queries rather than O(N).
+ *
+ * The map INCLUDES empty-string sentinel rows (deliberate unlink, issue #15):
+ * callers distinguish "row present with ''" (user removed the folder — do not
+ * derive from cwd) from "absent" (derive). Sessions with no linked folder are
+ * simply absent from the returned map.
  */
 export function getSessionContextFolders(
   sessionIds: string[],
@@ -96,7 +113,7 @@ export function getSessionContextFolders(
       )
       .all(...chunk) as Array<{ session_id: string; folder_path: string }>;
     for (const r of rows) {
-      if (r.folder_path) result.set(r.session_id, r.folder_path);
+      result.set(r.session_id, r.folder_path ?? "");
     }
   }
   return result;

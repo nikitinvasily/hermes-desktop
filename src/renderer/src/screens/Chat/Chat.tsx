@@ -230,7 +230,11 @@ function Chat({
   // nothing to load, so it starts unblocked.
   const contextFolderLoadedRef = useRef<boolean>(!initialSessionId);
 
-  // Restore the folder linked to a resumed session (once, on mount).
+  // Restore the folder linked to a resumed session (once, on mount). A null
+  // from the store is NOT applied: syncSessionCache now derives the sidebar
+  // grouping folder from the session's cwd/git_repo_root when no explicit
+  // binding exists (issue #15), and `contextFolder` here drives only the
+  // in-chat context, which stays unset unless a binding was stored.
   useEffect(() => {
     if (!initialSessionId) return;
     let cancelled = false;
@@ -239,6 +243,7 @@ function Chat({
         const folder =
           await window.hermesAPI.getSessionContextFolder(initialSessionId);
         if (!cancelled && folder) setContextFolder(folder);
+        else if (!cancelled) setContextFolder(null);
       } catch {
         /* best-effort — a missing folder just leaves the session unlinked */
       } finally {
@@ -252,9 +257,14 @@ function Chat({
 
   // Persist the linked folder for this session whenever it changes, once a
   // gateway session id exists. Gated on the load above so a resumed session's
-  // stored folder is never clobbered by the initial null.
+  // stored folder is never clobbered by the initial null. Skip no-op null
+  // writes: storing null marks a DELIBERATE unlink (sentinel row, issue #15),
+  // so merely opening an unbound session must not record one.
+  const lastPersistedFolderRef = useRef<string | null>(null);
   useEffect(() => {
     if (!hermesSessionId || !contextFolderLoadedRef.current) return;
+    if (lastPersistedFolderRef.current === contextFolder) return;
+    lastPersistedFolderRef.current = contextFolder;
     void window.hermesAPI
       .setSessionContextFolder(hermesSessionId, contextFolder)
       .then(() => {
