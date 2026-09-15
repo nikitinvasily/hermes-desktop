@@ -210,6 +210,10 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   const [pinnedOpen, setPinnedOpen] = useState(() =>
     readStoredOpen(PINNED_OPEN_KEY),
   );
+  // Folder path → human project name from the agent's projects.db / the
+  // dashboard projects tree (issue #23). Empty until loaded; the folder-slug
+  // fallback covers the gap.
+  const [projectNames, setProjectNames] = useState<Record<string, string>>({});
   // Row whose context menu is open, anchored to viewport coordinates.
   const [menuTarget, setMenuTarget] = useState<SidebarMenuTarget | null>(null);
   // Inline rename: the row id being edited and its working title.
@@ -468,6 +472,24 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     void refresh(true);
   }, [activeProfile, refresh]);
 
+  // Load folder→name once the section is open; reloaded on connection/profile
+  // switch so a different agent's projects get their own names (issue #23).
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void window.hermesAPI
+      .listProjectFolderNames(connectionId, activeProfile)
+      .then((names) => {
+        if (!cancelled) setProjectNames(names ?? {});
+      })
+      .catch(() => {
+        /* slug fallback stays in effect */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, connectionId, activeProfile]);
+
   // Keep the wrapper mounted so the collapse/expand animates with CSS grid
   // tracks. Effects above are still gated on `open`, so a collapsed sidebar
   // does no fetching while keeping the last-loaded list ready to animate.
@@ -484,6 +506,13 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
       groupSessionsByWorkspace(sessions.filter((s) => !pinnedIds.has(s.id))),
     [sessions, pinnedIds],
   );
+  // Resolve each group's display name: the agent project's human name when
+  // projects.db/the dashboard tree knows this folder, else the path's last
+  // segment (issue #23).
+  const displayName = useCallback(
+    (path: string): string => projectNames[path] || folderName(path),
+    [projectNames],
+  );
 
   // Every distinct project folder currently in use, so "Move to project" lists
   // them all — even ones whose only conversation is pinned or filtered out.
@@ -492,11 +521,14 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     for (const s of sessions) {
       const folder = s.contextFolder?.trim();
       if (folder && !byPath.has(folder)) {
-        byPath.set(folder, { path: folder, name: folderName(folder) });
+        byPath.set(folder, {
+          path: folder,
+          name: projectNames[folder] || folderName(folder),
+        });
       }
     }
     return Array.from(byPath.values());
-  }, [sessions]);
+  }, [sessions, projectNames]);
 
   const togglePinned = (): void => {
     setPinnedOpen((prev) => {
@@ -583,11 +615,18 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         ),
       );
       try {
-        await window.hermesAPI.setSessionContextFolder(id, normalized);
+        await window.hermesAPI.setSessionContextFolder(
+          id,
+          normalized,
+          connectionId,
+          activeProfile,
+        );
         // Other surfaces (chat view, Sessions screen) listen for this to
         // refresh their own grouping.
         window.dispatchEvent(
-          new CustomEvent("hermes-session-context-folder-changed"),
+          new CustomEvent("hermes-session-context-folder-changed", {
+            detail: { sessionId: id, folder: normalized },
+          }),
         );
       } catch (err) {
         console.error("Failed to move session to project", id, err);
@@ -598,7 +637,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         );
       }
     },
-    [],
+    [activeProfile, connectionId],
   );
 
   const handlePickNewFolder = useCallback(
@@ -871,7 +910,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
                           tabIndex={expanded && projectsOpen ? 0 : -1}
                         >
                           <Folder size={13} />
-                          <span>{group.name}</span>
+                          <span>{displayName(group.path)}</span>
                           {projectOpen ? (
                             <ChevronDown
                               className="sidebar-recent-disclosure-icon"
@@ -889,10 +928,10 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
                             type="button"
                             className="sidebar-recent-new-chat"
                             title={t("navigation.newChatInProject", {
-                              project: group.name,
+                              project: displayName(group.path),
                             })}
                             aria-label={t("navigation.newChatInProject", {
-                              project: group.name,
+                              project: displayName(group.path),
                             })}
                             onClick={(e) => {
                               e.stopPropagation();

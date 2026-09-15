@@ -967,11 +967,25 @@ const hermesAPI = {
   setSessionContextFolder: (
     sessionId: string,
     folder: string | null,
+    connectionId?: string,
+    profile?: string,
   ): Promise<boolean> =>
-    ipcRenderer.invoke("set-session-context-folder", sessionId, folder),
+    ipcRenderer.invoke(
+      "set-session-context-folder",
+      sessionId,
+      folder,
+      connectionId,
+      profile,
+    ),
 
   listRecentSessionContextFolders: (limit?: number): Promise<string[]> =>
     ipcRenderer.invoke("list-recent-session-context-folders", limit),
+
+  listProjectFolderNames: (
+    connectionId?: string,
+    profile?: string,
+  ): Promise<Record<string, string>> =>
+    ipcRenderer.invoke("list-project-folder-names", connectionId, profile),
 
   getSessionModelOverride: (
     sessionId: string,

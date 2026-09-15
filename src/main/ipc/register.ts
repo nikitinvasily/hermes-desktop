@@ -37,7 +37,15 @@ import {
   getSessionContextFolder,
   setSessionContextFolder,
   getRecentSessionContextFolders,
+  getAllSessionContextFolders,
 } from "../session-context-folder-store";
+import {
+  localProjectFolderNames,
+  remoteProjectFolderNames,
+  mergeDesktopBindingsIntoRemoteList,
+  moveSessionWorkspaceOnAgent,
+  type ProjectFolderNames,
+} from "../project-names";
 import {
   getSessionModelOverride,
   setSessionModelOverride,
@@ -221,6 +229,7 @@ import {
   syncSessionCache,
   listCachedSessions,
   updateSessionTitle,
+  type CachedSession,
 } from "../session-cache";
 import {
   remoteDeleteSession,
@@ -2453,9 +2462,48 @@ export function registerIpcHandlers(context: IpcContext): void {
 
   ipcMain.handle(
     "set-session-context-folder",
-    (_event, sessionId: string, folder: string | null) => {
+    async (
+      _event,
+      sessionId: string,
+      folder: string | null,
+      connectionId?: string,
+      profile?: string,
+    ) => {
       setSessionContextFolder(sessionId, folder);
+      // Re-home the session's workspace ON THE AGENT too, so the chat's
+      // working directory (not just the sidebar grouping) follows the
+      // Move-to-project choice (issue #23). Local agent sessions get the
+      // same treatment — the local dashboard speaks the same RPC.
+      void moveSessionWorkspaceOnAgent(
+        profile,
+        connectionId,
+        sessionId,
+        folder,
+      ).catch(() => undefined);
       return true;
+    },
+  );
+
+  // Folder path → human project name (issue #23). Local reads projects.db;
+  // Remote/SSH ask the agent dashboard's projects/tree endpoint, falling
+  // back to an empty map (the sidebar then shows the folder slug).
+  ipcMain.handle(
+    "list-project-folder-names",
+    (_event, connectionId?: string, profile?: string) => {
+      const conn = sessionConnection(connectionId);
+      const scopedProfile = activeSshProfile(profile);
+      if (conn.mode === "remote")
+        return remoteProjectFolderNames(
+          scopedRemoteSessionConfig(conn, scopedProfile),
+        );
+      if (conn.mode === "ssh" && conn.ssh)
+        return withSshDashboardSessions(
+          conn,
+          (config) => remoteProjectFolderNames(config),
+          () => Promise.resolve({} as ProjectFolderNames),
+          scopedProfile,
+        );
+      return Promise.resolve(localProjectFolderNames(scopedProfile));
     },
   );
 
@@ -2812,6 +2860,16 @@ export function registerIpcHandlers(context: IpcContext): void {
     },
   );
 
+  // Merge desktop-side Move-to-project bindings into a Remote/SSH session
+  // list (issue #23) — see mergeDesktopBindingsIntoRemoteList in
+  // project-names.ts for the precedence rules.
+  function mergeRemoteBindings(sessions: CachedSession[]): CachedSession[] {
+    return mergeDesktopBindingsIntoRemoteList(
+      sessions,
+      getAllSessionContextFolders(undefined),
+    );
+  }
+
   // Session cache (fast local cache with generated titles)
   ipcMain.handle(
     "list-cached-sessions",
@@ -2829,12 +2887,18 @@ export function registerIpcHandlers(context: IpcContext): void {
           scopedRemoteSessionConfig(conn, scopedProfile),
           limit,
           offset,
-        );
+        ).then((list) => mergeRemoteBindings(list));
       if (conn.mode === "ssh" && conn.ssh)
         return withSshDashboardSessions(
           conn,
-          (config) => remoteListCachedSessions(config, limit, offset),
-          () => sshListCachedSessions(conn.ssh!, limit, offset, scopedProfile),
+          (config) =>
+            remoteListCachedSessions(config, limit, offset).then((list) =>
+              mergeRemoteBindings(list),
+            ),
+          () =>
+            sshListCachedSessions(conn.ssh!, limit, offset, scopedProfile).then(
+              (list) => mergeRemoteBindings(list),
+            ),
           scopedProfile,
         );
       return listCachedSessions(limit, offset, scopedProfile);
@@ -2849,12 +2913,18 @@ export function registerIpcHandlers(context: IpcContext): void {
         return remoteListCachedSessions(
           scopedRemoteSessionConfig(conn, scopedProfile),
           50,
-        );
+        ).then((list) => mergeRemoteBindings(list));
       if (conn.mode === "ssh" && conn.ssh)
         return withSshDashboardSessions(
           conn,
-          (config) => remoteListCachedSessions(config, 50),
-          () => sshListCachedSessions(conn.ssh!, 50, 0, scopedProfile),
+          (config) =>
+            remoteListCachedSessions(config, 50).then((list) =>
+              mergeRemoteBindings(list),
+            ),
+          () =>
+            sshListCachedSessions(conn.ssh!, 50, 0, scopedProfile).then(
+              (list) => mergeRemoteBindings(list),
+            ),
           scopedProfile,
         );
       try {

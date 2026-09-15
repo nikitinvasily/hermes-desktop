@@ -147,6 +147,24 @@ The dashboard `/api/profiles/sessions` rows include `cwd` and `git_repo_root`; t
 
 Detail: repo root is preferred over a deeper cwd (a checkout must not split), mirroring the Local derivation.
 
+#### Remote project names map folder paths to labels
+
+Project groups show the user-defined project name, not the folder slug.
+
+Detail: Local reads `projects.db` directly; Remote/SSH read the dashboard `/api/profiles/projects/tree`, mapping the project's own path and its repo folder paths to the project `label`. A failed probe leaves the slug fallback intact.
+
+#### Manual Move-to-project survives a Remote sync
+
+Remote/SSH session lists merge the desktop's local binding store after fetching.
+
+Detail: an explicit binding overrides the derived folder, an empty sentinel unlinks, absent rows keep the derived folder — so Move to project over SSH no longer silently reverts.
+
+#### Move-to-project re-homes the session workspace on the agent
+
+Move to project also calls the gateway RPC `session.workspace.move` over the dashboard WebSocket, so the chat's working directory follows the move, not just the sidebar grouping.
+
+Detail: the RPC rewrites the session's `cwd`/`git_branch`/`git_repo_root` in the agent's own state.db (local agent included). An open chat tab listens for the folder-changed event and adopts the new folder for subsequent sends.
+
 ### Non-destructive registry recovery
 
 Malformed, duplicate-identity, and newer-version registries are rejected without changing `desktop.json`, so recovery cannot erase credentials or unrelated preferences.
