@@ -5,7 +5,7 @@
 
 ## Fork differences vs upstream
 
-Changes in this fork that are **not** (yet) in upstream. This section is part of the definition-of-done: every new fork change must be added here (see the post-task checklist in `AGENTS.md`).
+Changes in this fork that are **not** (yet) in upstream.
 
 - **Chat stream reconciliation** (PR #3, issue #2) — when the agent core delivers a damaged stream (lost chunks, stray characters, cut head fragments), the streamed text is reconciled against the final text instead of concatenating garbage into the message bubble. Key files: `src/renderer/src/lib/lossyText.ts`, `dashboardEventAdapter.ts`.
 - **Schedules over SSH tunnels** (issue #1) — remote cron operations probe and use the dashboard endpoints (`/api/cron/jobs`) when the SSH tunnel targets `hermes dashboard`, fixing an empty Schedules tab. Key file: `src/main/cronjobs.ts`.
