@@ -59,7 +59,8 @@ function seed(profile = "default", modern = true): DatabaseSync {
   databases.push(db);
   db.exec(`CREATE TABLE sessions (
     id TEXT PRIMARY KEY, title TEXT UNIQUE, source TEXT DEFAULT 'cli',
-    started_at REAL DEFAULT 1, message_count INTEGER DEFAULT 1, model TEXT DEFAULT 'test'
+    started_at REAL DEFAULT 1, message_count INTEGER DEFAULT 1, model TEXT DEFAULT 'test',
+    cwd TEXT, git_repo_root TEXT
     ${modern ? ", title_source TEXT DEFAULT 'llm'" : ""}
   ); INSERT INTO sessions (id, title) VALUES ('same-id', 'Original'), ('other', 'Taken');`);
   syncSessionCache(profile);
