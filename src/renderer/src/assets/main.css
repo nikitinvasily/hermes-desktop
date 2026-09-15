@@ -3358,6 +3358,10 @@ body:has(.shell-vibrant),
   white-space: pre-wrap;
 }
 
+.sidebar-project-dialog-warning {
+  color: var(--warning, #f5a623);
+}
+
 .sidebar-project-dialog .sidebar-session-delete-footer {
   margin-top: 16px;
 }

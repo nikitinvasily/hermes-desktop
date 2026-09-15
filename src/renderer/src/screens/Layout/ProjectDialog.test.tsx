@@ -9,10 +9,15 @@ import type { ProjectInfo } from "../../../../shared/projects";
 
 vi.mock("../../components/useI18n", () => ({
   useI18n: () => ({
-    t: (key: string, opts?: Record<string, unknown>): string =>
-      key === "navigation.projectDialog.deleteConfirm" && opts?.project
-        ? `Delete ${String(opts.project)}?`
-        : key,
+    t: (key: string, opts?: Record<string, unknown>): string => {
+      if (
+        key === "navigation.projectDialog.deleteConfirm" ||
+        key === "navigation.projectDialog.folderConflict"
+      ) {
+        return opts?.project ? `${key}:${String(opts.project)}` : key;
+      }
+      return key;
+    },
   }),
 }));
 
@@ -190,5 +195,47 @@ describe("ProjectDialog folder input by connection mode", () => {
     expect(
       screen.queryByPlaceholderText("navigation.projectDialog.pathPlaceholder"),
     ).toBeNull();
+  });
+});
+
+describe("ProjectDialog cross-project folder warning", () => {
+  it("warns when a folder belongs to another project", async () => {
+    const other: ProjectInfo = {
+      id: "p_other",
+      slug: "other",
+      name: "Other Project",
+      primaryPath: "/tmp/picked",
+      folders: [{ path: "/tmp/picked", isPrimary: true }],
+    };
+    const onMutate = vi.fn(async () => undefined);
+    render(
+      <ProjectDialog
+        state={{ mode: "create" }}
+        connectionMode="local"
+        onClose={vi.fn()}
+        onMutate={onMutate}
+        onChanged={vi.fn()}
+        existingProjects={[other]}
+      />,
+    );
+    fireEvent.change(
+      screen.getByLabelText("navigation.projectDialog.nameLabel"),
+      {
+        target: { value: "Shares folder" },
+      },
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "navigation.projectDialog.addFolder",
+      }),
+    );
+    await waitFor(() => {
+      // The interpolated warning names the owning project.
+      expect(
+        screen.getByText(
+          "navigation.projectDialog.folderConflict:Other Project",
+        ),
+      ).toBeTruthy();
+    });
   });
 });

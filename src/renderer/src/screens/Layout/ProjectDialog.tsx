@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "../../components/useI18n";
 import { Folder, Plus, X } from "../../assets/icons";
@@ -42,6 +42,10 @@ interface ProjectDialogProps {
   onMutate: (mutation: ProjectMutation) => Promise<unknown>;
   /** Called after any successful mutation so the sidebar refreshes. */
   onChanged: () => void;
+  /** All known projects — used to warn when a folder already belongs to one
+   * (the backend only refuses duplicate PRIMARY folders, so a folder can
+   * silently join two projects; surface that before submit). */
+  existingProjects?: ProjectInfo[];
 }
 
 export default function ProjectDialog({
@@ -50,6 +54,7 @@ export default function ProjectDialog({
   onClose,
   onMutate,
   onChanged,
+  existingProjects,
 }: ProjectDialogProps): React.JSX.Element {
   const { t } = useI18n();
   const isEdit = state.mode === "edit";
@@ -75,6 +80,22 @@ export default function ProjectDialog({
   }, []); // eslint-disable-line react-hooks/exhaustive-deps -- focus once per open
 
   const primary = folders.find((f) => f.isPrimary) ?? folders[0] ?? null;
+
+  // The backend refuses only duplicate PRIMARY folders; a folder can still
+  // belong to another project as a secondary one. Warn before submit so the
+  // user knowingly shares (or re-picks) the folder.
+  const conflictingFolder = useMemo(() => {
+    const owner = new Map<string, string>();
+    for (const p of existingProjects ?? []) {
+      if (isEdit && p.id === project?.id) continue;
+      for (const f of p.folders) {
+        if (f.path) owner.set(f.path, p.name);
+      }
+    }
+    if (owner.size === 0) return null;
+    const hit = folders.find((f) => owner.has(f.path));
+    return hit ? { path: hit.path, project: owner.get(hit.path) ?? "" } : null;
+  }, [existingProjects, folders, isEdit, project?.id]);
 
   function addFolder(path: string): void {
     const trimmed = path.trim();
@@ -323,6 +344,17 @@ export default function ProjectDialog({
         )}
 
         {error && <div className="sidebar-project-dialog-error">{error}</div>}
+
+        {conflictingFolder && !error && (
+          <div
+            className="sidebar-project-dialog-hint sidebar-project-dialog-warning"
+            role="status"
+          >
+            {t("navigation.projectDialog.folderConflict", {
+              project: conflictingFolder.project,
+            })}
+          </div>
+        )}
 
         <div className="sidebar-session-delete-footer">
           <button

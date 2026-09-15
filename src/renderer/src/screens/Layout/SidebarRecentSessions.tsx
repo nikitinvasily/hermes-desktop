@@ -1308,6 +1308,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
             onClose={() => setProjectDialog(null)}
             onMutate={handleProjectMutate}
             onChanged={handleProjectChanged}
+            existingProjects={projects ?? undefined}
           />,
           document.body,
         )}
