@@ -47,6 +47,7 @@ export { MessageSquare as ChatBubble } from "lucide-react";
 export { Square as Stop } from "lucide-react";
 export { Globe } from "lucide-react";
 export { Check } from "lucide-react";
+export { ChevronUp } from "lucide-react";
 export { Ban } from "lucide-react";
 export { RotateCcw } from "lucide-react";
 export { Loader2 as Spinner } from "lucide-react";

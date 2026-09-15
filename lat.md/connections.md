@@ -23,6 +23,8 @@ Settings can create, rename, select, edit, test, and remove saved Local, Remote/
 
 [[src/renderer/src/components/settings/ConnectionPane.tsx]] places the saved-connection selector above the existing mode editor, so editing and testing continue through one established form. The final record cannot be removed.
 
+The status bar offers a second entry point: when the registry holds more than one record, its mode chip becomes a connection switcher popover ([[src/renderer/src/screens/Layout/StatusBar.tsx]]). Selecting a record routes through the same `selectConnection` IPC, so the main process still owns validation and tunnel teardown. A warning row appears when switching away from the active SSH record, since that stops the one shared tunnel described by [[main-process#SSH dashboard transport]].
+
 Selecting or removing the active record stops the one global SSH tunnel before later work reconnects it to the new target, preserving [[main-process#SSH dashboard transport]]. Removing a record aborts only legacy runs keyed to that connection.
 
 ## Per-connection status
