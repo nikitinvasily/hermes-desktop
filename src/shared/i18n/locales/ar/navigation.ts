@@ -1,6 +1,7 @@
 export default {
   chat: "محادثة",
   newChat: "محادثة جديدة",
+  newChatInProject: "محادثة جديدة في {{project}}",
   sessions: "الجلسات",
   discover: "اكتشف",
   agents: "الملفات الشخصية",

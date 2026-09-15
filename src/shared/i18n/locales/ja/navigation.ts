@@ -1,6 +1,7 @@
 export default {
   chat: "チャット",
   newChat: "新しいチャット",
+  newChatInProject: "{{project}} で新しいチャット",
   sessions: "セッション",
   projects: "プロジェクト",
   chats: "チャット",

@@ -2696,6 +2696,56 @@ body:has(.shell-vibrant),
   flex-direction: column;
 }
 
+/* Heading row: toggle + inline "new chat" (+) action. */
+.sidebar-recent-section-row,
+.sidebar-recent-project-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.sidebar-recent-section-row .sidebar-recent-section-toggle,
+.sidebar-recent-project-row .sidebar-recent-project-heading {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+/* Inline + button on section/project heading rows. Hidden until the row is
+   hovered/focused (like the … options control on session rows). */
+.sidebar-recent-new-chat {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-right: 6px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm, 6px);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity var(--transition),
+    background var(--transition),
+    color var(--transition);
+}
+
+.sidebar-recent-section-row:hover .sidebar-recent-new-chat,
+.sidebar-recent-section-row:focus-within .sidebar-recent-new-chat,
+.sidebar-recent-project-row:hover .sidebar-recent-new-chat,
+.sidebar-recent-project-row:focus-within .sidebar-recent-new-chat {
+  opacity: 1;
+}
+
+.sidebar-recent-new-chat:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
 .sidebar-recent-section-toggle {
   width: 100%;
   min-width: 0;
