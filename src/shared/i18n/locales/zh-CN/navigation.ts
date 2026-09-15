@@ -1,6 +1,7 @@
 export default {
   chat: "聊天",
   newChat: "新建聊天",
+  newChatInProject: "在 {{project}} 中新建聊天",
   sessions: "会话",
   projects: "项目",
   chats: "聊天",

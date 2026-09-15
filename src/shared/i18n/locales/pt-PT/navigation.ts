@@ -1,6 +1,7 @@
 export default {
   chat: "Chat",
   newChat: "Novo chat",
+  newChatInProject: "Novo chat em {{project}}",
   sessions: "Sessões",
   projects: "Projetos",
   chats: "Chats",

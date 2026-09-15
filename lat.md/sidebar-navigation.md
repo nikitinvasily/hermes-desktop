@@ -44,6 +44,12 @@ When [[src/renderer/src/screens/Chat/Chat.tsx#Chat]] saves a session context fol
 
 Projects and Chats are top-level collapsible sections, and each project folder can also be expanded or collapsed. [[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx]] persists those disclosure states in `localStorage`; the sidebar CSS keeps section and folder rows on the same left rail, keeps disclosure arrows right-aligned, animates each disclosure with grid-row transitions, and removes hidden rows from keyboard tab order.
 
+### New chat from a heading
+
+Each project heading and the Chats section header carry a hover-revealed `+` that starts a new chat with the working folder pre-bound (project) or explicitly unbound (Chats).
+
+[[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx]] renders the `+` inside a `.sidebar-recent-project-row` / `.sidebar-recent-section-row` flex row beside the toggle, `stopPropagation` on click so the disclosure state is untouched, and reports the folder through `onNewChatInProject(folder | null)`. [[src/renderer/src/screens/Layout/Layout.tsx#Layout]]'s `handleNewChatInProject` mints the run via [[src/renderer/src/screens/Layout/chatRuns.ts#mintRun]] with `initialContextFolder`, never reusing a scratch tab (the binding is part of the intent), and [[src/renderer/src/screens/Chat/Chat.tsx#Chat]] seeds its `contextFolder` state from that prop on mount — the existing persist effect then links the session after its first turn. Resumed sessions ignore the prop: their stored folder is authoritative. [[src/renderer/src/screens/Layout/SidebarRecentSessions.test.tsx]] covers both buttons reporting the right folder.
+
 ## Row context menu
 
 Each sidebar session row exposes a ChatGPT-style options menu — Pin, Rename, Copy session ID, Move to project, and Delete — opened from a hover-revealed `…` button or by right-clicking the row.

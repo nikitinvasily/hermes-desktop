@@ -21,6 +21,9 @@ export interface ChatRun {
   title?: string;
   /** Seed transcript when the run was opened from history. */
   seed?: ChatMessage[];
+  /** Working folder the chat was created with (sidebar project `+`). Seeded
+   *  into Chat's contextFolder state on mount; null = unbound chat. */
+  initialContextFolder?: string | null;
 }
 
 /** A blank chat that can be reassigned to another profile without losing work. */
@@ -33,6 +36,7 @@ export function mintRun(
   connectionId: string,
   profile: string,
   seed?: ChatMessage[],
+  initialContextFolder?: string | null,
 ): ChatRun {
   return {
     runId:
@@ -44,6 +48,7 @@ export function mintRun(
     sessionId: null,
     loading: false,
     seed,
+    initialContextFolder: initialContextFolder ?? null,
   };
 }
 

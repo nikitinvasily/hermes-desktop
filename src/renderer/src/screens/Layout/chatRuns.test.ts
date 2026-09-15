@@ -121,6 +121,7 @@ describe("chat run profile transitions", () => {
         profile: "alfie",
         sessionId: null,
         loading: false,
+        initialContextFolder: null,
       },
     ]);
     randomUUID.mockRestore();
@@ -171,6 +172,7 @@ describe("chat run profile transitions", () => {
       sessionId: null,
       loading: false,
       seed: undefined,
+      initialContextFolder: null,
     });
     randomUUID.mockRestore();
   });
@@ -245,5 +247,23 @@ describe("chrome-style tab shortcuts", () => {
     expect(runIdAtOrdinal(three, 4)).toBeNull();
     expect(runIdAtOrdinal([], 1)).toBeNull();
     expect(runIdAtOrdinal([], 9)).toBeNull();
+  });
+});
+
+describe("chat run project folder seeding", () => {
+  it("mints a run with the given initial context folder", () => {
+    vi.spyOn(crypto, "randomUUID").mockReturnValueOnce(
+      "00000000-0000-4000-8000-00000000000b",
+    );
+    const r = mintRun("connection-main", "default", undefined, "/tmp/proj");
+    expect(r.initialContextFolder).toBe("/tmp/proj");
+  });
+
+  it("defaults the initial context folder to null when omitted", () => {
+    vi.spyOn(crypto, "randomUUID").mockReturnValueOnce(
+      "00000000-0000-4000-8000-00000000000c",
+    );
+    const r = mintRun("connection-main", "default");
+    expect(r.initialContextFolder).toBeNull();
   });
 });

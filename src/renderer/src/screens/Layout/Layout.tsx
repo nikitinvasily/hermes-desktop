@@ -482,6 +482,20 @@ function Layout({
     goTo("chat");
   }, [runs, activeRunId, connectionId, activeProfile, goTo]);
 
+  // New chat bound to a project folder (sidebar project `+`) or explicitly
+  // unbound (Chats header `+`). Unlike handleNewChat, never reuses a scratch
+  // tab: the folder binding is part of what the user asked for, so each click
+  // mints a fresh run seeded with that folder.
+  const handleNewChatInProject = useCallback(
+    (folder: string | null) => {
+      const run = mintRun(connectionId, activeProfile, undefined, folder);
+      setRuns((prev) => [...prev, run]);
+      setActiveRunId(run.runId);
+      goTo("chat");
+    },
+    [connectionId, activeProfile, goTo],
+  );
+
   // Listen for menu IPC events (Cmd+N, Cmd+K from app menu)
   useEffect(() => {
     const cleanupNewChat = window.hermesAPI.onMenuNewChat(() => {
@@ -785,6 +799,7 @@ function Layout({
                   loadingSessionIds={loadingSessionIds}
                   resumingSessionId={resumingSessionId}
                   onSelect={handleResumeSession}
+                  onNewChatInProject={handleNewChatInProject}
                   onSessionDeleted={(id) => {
                     // If the open chat was the one deleted, drop to a fresh chat
                     // so the user isn't left viewing a now-gone conversation.
@@ -917,6 +932,7 @@ function Layout({
                   connectionId={run.connectionId}
                   initialMessages={run.seed}
                   initialSessionId={run.sessionId}
+                  initialContextFolder={run.initialContextFolder}
                   active={run.runId === activeRunId}
                   profile={run.profile}
                   onNewChat={handleNewChat}

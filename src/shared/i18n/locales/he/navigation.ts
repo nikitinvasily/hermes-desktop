@@ -1,6 +1,7 @@
 export default {
   chat: "צ'אט",
   newChat: "צ'אט חדש",
+  newChatInProject: "צ'אט חדש ב-{{project}}",
   sessions: "סשנים",
   projects: "פרויקטים",
   chats: "צ'אטים",

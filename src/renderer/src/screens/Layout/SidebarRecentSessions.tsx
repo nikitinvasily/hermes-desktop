@@ -17,6 +17,7 @@ import {
   Loader,
   MoreHorizontal,
   Pin,
+  Plus,
   X,
 } from "../../assets/icons";
 import { confirmSessionRename } from "../Sessions/confirmSessionRename";
@@ -166,6 +167,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   loadingSessionIds,
   resumingSessionId,
   onSelect,
+  onNewChatInProject,
   onSessionDeleted,
   scrollRootRef,
 }: {
@@ -180,6 +182,9 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   /** A session whose history is being fetched for resume (transient spinner). */
   resumingSessionId: string | null;
   onSelect: (sessionId: string) => void;
+  /** Start a new chat bound to a project folder (project `+`) or unbound
+   *  (Chats header `+`, folder = null). */
+  onNewChatInProject?: (folder: string | null) => void;
   /** Notifies Layout when a row is deleted so it can leave a stale active chat. */
   onSessionDeleted?: (sessionId: string) => void;
   /** Scroll container owned by Layout; nearing its bottom loads the next page. */
@@ -856,28 +861,49 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
                   const visible = expanded && projectsOpen && projectOpen;
                   return (
                     <div className="sidebar-recent-project" key={group.path}>
-                      <button
-                        type="button"
-                        className="sidebar-recent-project-heading"
-                        title={group.path}
-                        onClick={() => toggleProjectFolder(group.path)}
-                        aria-expanded={projectOpen}
-                        tabIndex={expanded && projectsOpen ? 0 : -1}
-                      >
-                        <Folder size={13} />
-                        <span>{group.name}</span>
-                        {projectOpen ? (
-                          <ChevronDown
-                            className="sidebar-recent-disclosure-icon"
-                            size={12}
-                          />
-                        ) : (
-                          <ChevronRight
-                            className="sidebar-recent-disclosure-icon"
-                            size={12}
-                          />
+                      <div className="sidebar-recent-project-row">
+                        <button
+                          type="button"
+                          className="sidebar-recent-project-heading"
+                          title={group.path}
+                          onClick={() => toggleProjectFolder(group.path)}
+                          aria-expanded={projectOpen}
+                          tabIndex={expanded && projectsOpen ? 0 : -1}
+                        >
+                          <Folder size={13} />
+                          <span>{group.name}</span>
+                          {projectOpen ? (
+                            <ChevronDown
+                              className="sidebar-recent-disclosure-icon"
+                              size={12}
+                            />
+                          ) : (
+                            <ChevronRight
+                              className="sidebar-recent-disclosure-icon"
+                              size={12}
+                            />
+                          )}
+                        </button>
+                        {onNewChatInProject && (
+                          <button
+                            type="button"
+                            className="sidebar-recent-new-chat"
+                            title={t("navigation.newChatInProject", {
+                              project: group.name,
+                            })}
+                            aria-label={t("navigation.newChatInProject", {
+                              project: group.name,
+                            })}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onNewChatInProject(group.path);
+                            }}
+                            tabIndex={expanded && projectsOpen ? 0 : -1}
+                          >
+                            <Plus size={13} />
+                          </button>
                         )}
-                      </button>
+                      </div>
                       <div
                         className={`sidebar-recent-collapse ${
                           projectOpen ? "expanded" : ""
@@ -897,26 +923,43 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
           </div>
         )}
         <div className="sidebar-recent-section">
-          <button
-            type="button"
-            className="sidebar-recent-section-toggle"
-            onClick={toggleChats}
-            aria-expanded={chatsOpen}
-            tabIndex={expanded ? 0 : -1}
-          >
-            <span>{t("navigation.chats")}</span>
-            {chatsOpen ? (
-              <ChevronDown
-                className="sidebar-recent-disclosure-icon"
-                size={13}
-              />
-            ) : (
-              <ChevronRight
-                className="sidebar-recent-disclosure-icon"
-                size={13}
-              />
+          <div className="sidebar-recent-section-row">
+            <button
+              type="button"
+              className="sidebar-recent-section-toggle"
+              onClick={toggleChats}
+              aria-expanded={chatsOpen}
+              tabIndex={expanded ? 0 : -1}
+            >
+              <span>{t("navigation.chats")}</span>
+              {chatsOpen ? (
+                <ChevronDown
+                  className="sidebar-recent-disclosure-icon"
+                  size={13}
+                />
+              ) : (
+                <ChevronRight
+                  className="sidebar-recent-disclosure-icon"
+                  size={13}
+                />
+              )}
+            </button>
+            {onNewChatInProject && (
+              <button
+                type="button"
+                className="sidebar-recent-new-chat"
+                title={t("navigation.newChat")}
+                aria-label={t("navigation.newChat")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onNewChatInProject(null);
+                }}
+                tabIndex={expanded ? 0 : -1}
+              >
+                <Plus size={13} />
+              </button>
             )}
-          </button>
+          </div>
           <div
             className={`sidebar-recent-collapse ${chatsOpen ? "expanded" : ""}`}
           >
