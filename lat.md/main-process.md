@@ -48,7 +48,7 @@ Because electron-vite emits a bundled main file at `out/main/index.js`, packaged
 
 Menu, updater, and context-menu behavior live in focused modules.
 
-[[src/main/app/menu.ts#buildMenu]] owns the application menu, [[src/main/app/updater.ts#setupUpdater]] owns update IPC and electron-updater events, and [[src/main/app/context-menu.ts#showChatContextMenu]] owns the chat right-click menu.
+[[src/main/app/menu.ts#buildMenu]] owns the application menu — on macOS its About item is a custom `dialog.showMessageBox` (not `role: "about"`) so it can display the same commit-hash-suffixed version string as the About pane. [[src/main/app/updater.ts#setupUpdater]] owns update IPC and electron-updater events, and [[src/main/app/context-menu.ts#showChatContextMenu]] owns the chat right-click menu.
 
 Release builds keep a Help-menu Developer Tools toggle as a production diagnostics escape hatch without changing renderer sandbox or Node isolation.
 
