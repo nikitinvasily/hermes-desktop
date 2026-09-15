@@ -72,6 +72,32 @@ describe("mergeStreamedWithFinal", () => {
     );
   });
 
+  // Real-world regression: a damaged Russian stream carries not just dropped
+  // chunks but a cut head ("У" instead of "Уведомление"), a missing space and
+  // a stray backtick from an unassembled markdown span. Before the junk-
+  // budget matcher this fell through to the concatenate branch and the user
+  // saw the garbled text stacked above the clean final in one bubble.
+  it("replaces a damaged stream with stray chars and a cut head", () => {
+    const final =
+      "Уведомление про npm install — это финальный лог уже завершенной установки (908 пакетов за 2 минуты, нативный better-sqlite3 пересобран под arm64, 4 умеренных уязвимости — типично для Electron-стека, не блокер). Ничего нового делать не нужно. Текущее состояние: npm run dev работает, приложение запущено. Готов к доработкам — что правим?";
+    const streamed =
+      "Уомление про npm install — это ф пересобран под arm64, Текущее состояние:npm run dev` работает, приложение запущено. Готов";
+    expect(mergeStreamedWithFinal(streamed, final)).toBe(final);
+  });
+
+  it("keeps stacking for genuinely different texts of similar shape", () => {
+    // Similar length and language as the regression above, but the streamed
+    // text is a genuinely distinct segment (pre-tool-call narration), not a
+    // damaged copy: the similarity fallback must not erase it.
+    const streamed =
+      "Проверяю установку зависимостей и запускаю сборку в dev-режиме.";
+    const final =
+      "Уведомление про npm install — это финальный лог уже завершенной установки. Ничего нового делать не нужно.";
+    expect(mergeStreamedWithFinal(streamed, final)).toBe(
+      `${streamed}\n\n${final}`,
+    );
+  });
+
   it("still concatenates a short lead-in even if it is a subsequence", () => {
     // Guard: a tiny streamed fragment is a subsequence of almost anything;
     // treat it as the pre-tool-call text it usually is.
