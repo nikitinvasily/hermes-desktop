@@ -37,7 +37,14 @@ function setAutoUpgradeEnabled(enabled: boolean): void {
 }
 
 export function setupUpdater({ getMainWindow }: UpdaterDeps): void {
-  ipcMain.handle("get-app-version", () => app.getVersion());
+  // Displayed version includes the short commit hash when it was baked in at
+  // build time (fork builds): "0.7.7 (520eaf2)". app.getVersion() alone stays
+  // the bare semver for anything that parses it.
+  ipcMain.handle("get-app-version", () =>
+    __HERMES_COMMIT_HASH__
+      ? `${app.getVersion()} (${__HERMES_COMMIT_HASH__})`
+      : app.getVersion(),
+  );
   ipcMain.handle("get-auto-upgrade-enabled", () => getAutoUpgradeEnabled());
   ipcMain.handle("set-auto-upgrade-enabled", (_event, enabled: boolean) => {
     setAutoUpgradeEnabled(enabled);
