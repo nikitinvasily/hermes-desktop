@@ -268,6 +268,19 @@ function normalizeSessionSummary(row: RemoteRecord): SessionSummary {
   };
 }
 
+/**
+ * Workspace grouping key mirroring hermes-agent's
+ * `hermes_state_sessions._workspace_group_key`: git repo root when present
+ * (a checkout must not split across worktrees), else the session's cwd.
+ * Drives sidebar project grouping so remote/SSH sessions group like local
+ * ones (issue #15).
+ */
+function workspaceFolder(row: RemoteRecord): string | null {
+  const repoRoot = nullableString(row.git_repo_root)?.trim();
+  if (repoRoot) return repoRoot;
+  return nullableString(row.cwd)?.trim() || null;
+}
+
 function normalizeCachedSession(row: RemoteRecord): CachedSession {
   const summary = normalizeSessionSummary(row);
   return {
@@ -277,7 +290,7 @@ function normalizeCachedSession(row: RemoteRecord): CachedSession {
     source: summary.source,
     messageCount: summary.messageCount,
     model: summary.model,
-    contextFolder: null,
+    contextFolder: workspaceFolder(row),
   };
 }
 

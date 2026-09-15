@@ -34,6 +34,10 @@ export interface SessionSummary {
   model: string;
   title: string | null;
   preview: string;
+  /** Workspace folder (git_repo_root || cwd) from the backend, when the
+   * listing path provides it. Optional so existing callers are unaffected;
+   * cached-session paths use it for sidebar project grouping (issue #15). */
+  contextFolder?: string | null;
 }
 
 export interface SessionMessage {

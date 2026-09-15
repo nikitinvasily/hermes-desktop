@@ -127,6 +127,26 @@ Remote profile-list requests send the selected profile to the Agent dashboard in
 
 Local cache synchronization reads the selected profile database, writes that profile's desktop cache, and cannot leak the default profile's sessions into the result.
 
+#### Derives workspace folder from cwd when no binding exists
+
+Sessions created outside the desktop have no context-folder row, so sync derives the grouping folder from the session's workspace columns.
+
+Details: `git_repo_root` when present, else `cwd` — mirroring hermes-agent's `_workspace_group_key` so a checkout never splits across subdirectories.
+
+#### Explicit binding beats derived folder
+
+A user-chosen Move-to-project binding overrides whatever the session's cwd would derive, so manual organization always wins.
+
+#### Explicit unlink sentinel beats derived folder
+
+Move to project → Remove stores an empty-string sentinel row; a later sync must not resurrect the cwd-derived grouping the user removed, while sessions with no row at all keep deriving from their workspace columns.
+
+#### Remote rows carry workspace columns
+
+The dashboard `/api/profiles/sessions` rows include `cwd` and `git_repo_root`; the Remote cached-session mapping derives the grouping folder from them so Remote sessions group like Local ones.
+
+Detail: repo root is preferred over a deeper cwd (a checkout must not split), mirroring the Local derivation.
+
 ### Non-destructive registry recovery
 
 Malformed, duplicate-identity, and newer-version registries are rejected without changing `desktop.json`, so recovery cannot erase credentials or unrelated preferences.
