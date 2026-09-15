@@ -204,6 +204,11 @@ describe("Cron SSH fallback", () => {
       if (target === "http://127.0.0.1:18642/health") {
         return { ok: true } as Response;
       }
+      // Flavor probe: this fallback port targets the gateway api_server,
+      // which has no dashboard route — the miss selects the legacy flavor.
+      if (target === "http://127.0.0.1:18642/api/cron/jobs") {
+        return { ok: false } as Response;
+      }
       if (target === "http://127.0.0.1:18642/api/jobs?include_disabled=true") {
         return {
           ok: true,
@@ -228,6 +233,18 @@ describe("Cron SSH fallback", () => {
     );
     expect(fetchSpy).toHaveBeenNthCalledWith(
       2,
+      "http://127.0.0.1:18642/api/cron/jobs",
+      expect.objectContaining({ method: "GET" }),
+    );
+    // remoteFetch re-resolves the base URL (no /health cache), so the port
+    // fallback is probed again before the actual legacy list request.
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      3,
+      "http://127.0.0.1:18642/health",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      4,
       "http://127.0.0.1:18642/api/jobs?include_disabled=true",
       expect.any(Object),
     );
@@ -258,8 +275,17 @@ describe("Cron SSH fallback", () => {
       expect.any(Error),
     );
     consoleErrorSpy.mockRestore();
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(fetchSpy).toHaveBeenCalledWith(
+    // /health is probed twice — once by the flavor probe and once by
+    // remoteFetch's own base-URL resolution — and both fail, so the original
+    // getApiUrl error propagates and no authenticated request leaves the host.
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:18642/health",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      2,
       "http://127.0.0.1:18642/health",
       expect.objectContaining({ method: "GET" }),
     );

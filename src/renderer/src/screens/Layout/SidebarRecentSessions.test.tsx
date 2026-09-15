@@ -38,6 +38,7 @@ beforeEach(() => {
     value: {
       listCachedSessions,
       syncSessionCache,
+      listProjectFolderNames: vi.fn(async () => ({})),
       setSessionContextFolder: vi.fn(async () => undefined),
       getSessionContextFolder: vi.fn(async () => null),
       updateSessionTitle: vi.fn(async () => undefined),
@@ -48,8 +49,8 @@ beforeEach(() => {
       onMenuSearchSessions: vi.fn(() => () => undefined),
     },
   });
-  // localStorage is unavailable in this jsdom build; the component guards all
-  // access in try/catch, so default (open) disclosure state applies.
+  // The component guards all localStorage access in try/catch, so the
+  // default (open) disclosure state applies in tests.
   listCachedSessions.mockImplementation(
     async (
       _limit: number,

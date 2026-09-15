@@ -6,7 +6,9 @@ Jobs explicitly marked `completed` keep that terminal state even though Hermes a
 
 ## Remote endpoint flavors
 
-The remote HTTP cron surface has two disjoint endpoint sets: the gateway api_server (`/api/jobs`, `{jobs:[...]}` wrapper, `POST .../run`) and the unified dashboard (`/api/cron/jobs`, bare array, `POST .../trigger`, `?profile=` scoping). The SSH tunnel points at whichever the active chat transport selected, so [[src/main/cronjobs.ts#remoteCronFlavor]] probes `/api/cron/jobs` before each operation and routes accordingly — a probe cache would go stale because the stable local tunnel port hides a dashboard↔gateway target flip behind it.
+The remote HTTP cron surface has two disjoint endpoint sets: the gateway api_server (`/api/jobs`, `{jobs:[...]}` wrapper, `POST .../run`) and the unified dashboard (`/api/cron/jobs`, bare array, `POST .../trigger`).
+
+The SSH tunnel points at whichever the active chat transport selected, so [[src/main/cronjobs.ts#remoteCronFlavor]] probes `/api/cron/jobs` before each operation and routes accordingly — a probe cache would go stale because the stable local tunnel port hides a dashboard↔gateway target flip behind it.
 
 ## Test specifications
 

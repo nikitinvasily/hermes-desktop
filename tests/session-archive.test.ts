@@ -74,7 +74,8 @@ function seedProfile(
     CREATE TABLE sessions (
       id TEXT PRIMARY KEY, source TEXT DEFAULT 'cli', started_at REAL,
       ended_at REAL, message_count INTEGER DEFAULT 1,
-      model TEXT DEFAULT 'test-model', title TEXT
+      model TEXT DEFAULT 'test-model', title TEXT,
+      cwd TEXT, git_repo_root TEXT
       ${hasArchiveColumn ? ", archived INTEGER NOT NULL DEFAULT 0" : ""}
     );
     CREATE TABLE messages (
