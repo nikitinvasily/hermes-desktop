@@ -643,10 +643,22 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   }, [sessions, pinnedIds, projects]);
   // Resolve each group's display name: the agent project's human name when
   // projects.db/the dashboard tree knows this folder, else the path's last
-  // segment (issue #23).
+  // segment (issue #23). The projects list is a second name source so a
+  // just-created project shows its name before the names map reloads.
+  const projectNamesFromList = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const p of projects ?? []) {
+      for (const f of p.folders) {
+        if (f.path) map[f.path] = p.name;
+      }
+      if (p.primaryPath) map[p.primaryPath] = p.name;
+    }
+    return map;
+  }, [projects]);
   const displayName = useCallback(
-    (path: string): string => projectNames[path] || folderName(path),
-    [projectNames],
+    (path: string): string =>
+      projectNames[path] || projectNamesFromList[path] || folderName(path),
+    [projectNames, projectNamesFromList],
   );
 
   // Every distinct project folder currently in use, so "Move to project" lists
