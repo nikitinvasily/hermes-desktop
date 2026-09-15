@@ -10,9 +10,12 @@ const listCachedSessions = vi.fn(
     _offset: number,
     _connectionId: string,
     _profile: string,
-  ) => [] as Array<{ id: string; title: string; contextFolder?: string | null }>,
+  ) =>
+    [] as Array<{ id: string; title: string; contextFolder?: string | null }>,
 );
-const syncSessionCache = vi.fn(async () => [] as Array<Record<string, unknown>>);
+const syncSessionCache = vi.fn(
+  async () => [] as Array<Record<string, unknown>>,
+);
 
 vi.mock("../../components/useI18n", () => ({
   useI18n: () => ({
