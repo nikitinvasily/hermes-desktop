@@ -3,6 +3,15 @@
 - Run `lat search` to find sections relevant to your task. Read them to understand the design intent before writing code.
 - Run `lat expand` on user prompts to expand any `[[refs]]` — this resolves section names to file locations and provides context.
 
+# Task workflow
+
+Once a task's implementation plan is agreed (bug fix or feature), track it through GitHub and a dedicated branch:
+
+1. Create an Issue describing the problem/feature (what, why, expected behavior) — the single source of truth for the task.
+2. Branch off `main` (or off the feature branch when fixing that feature before it lands): `fix/<slug>` for bug fixes, `feat/<slug>` for features, `docs/<slug>` for lat.md-only changes.
+3. Open a PR with `Fixes #N` (or `Closes #N`) in the body, verify CI/lint/typecheck, then merge with a merge commit and delete the branch.
+4. Note: GitHub auto-closes `Fixes #N` only when the PR reaches the default branch (`main`). When a fix merges into a feature branch first, close the Issue manually with a comment pointing at the PR.
+
 # Post-task checklist (REQUIRED — do not skip)
 
 After EVERY task, before responding to the user:
