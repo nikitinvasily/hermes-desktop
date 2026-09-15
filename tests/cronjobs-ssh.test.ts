@@ -57,6 +57,116 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchSpy);
 });
 
+describe("SSH dashboard transport cron jobs", () => {
+  // The unified dashboard (dashboard chat transport) has no /api/jobs — the
+  // Schedules screen silently rendered empty. The cron layer must probe the
+  // dashboard route and use its endpoint set (bare-array list, /trigger).
+  it("lists jobs through /api/cron/jobs when the tunnel targets a dashboard", async () => {
+    connectionRef.value = {
+      mode: "ssh",
+      ssh: sshConfig,
+    };
+    fetchSpy.mockImplementation(async (url: string) => {
+      if (String(url).includes("/api/cron/jobs")) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: "dash-job",
+              name: "Dash brief",
+              schedule: { kind: "daily", display: "daily at 09:00" },
+              state: "active",
+              enabled: true,
+              deliver: "telegram",
+            },
+          ],
+        };
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    const { listCronJobs } = await import("../src/main/cronjobs");
+    const jobs = await listCronJobs();
+
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]).toMatchObject({
+      id: "dash-job",
+      name: "Dash brief",
+      state: "active",
+    });
+    const requested = fetchSpy.mock.calls.map(([url]) => String(url));
+    expect(
+      requested.some((url) =>
+        url.endsWith("/api/cron/jobs?include_disabled=true"),
+      ),
+    ).toBe(true);
+    expect(requested.some((url) => url.includes("/api/jobs?"))).toBe(false);
+  });
+
+  it("fires a dashboard job through POST /api/cron/jobs/:id/trigger", async () => {
+    connectionRef.value = {
+      mode: "ssh",
+      ssh: sshConfig,
+    };
+    fetchSpy.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (String(url).endsWith("/api/cron/jobs") && init?.method !== "POST") {
+        return { ok: true, json: async () => [] };
+      }
+      if (String(url).includes("/trigger") && init?.method === "POST") {
+        return { ok: true, json: async () => ({}) };
+      }
+      throw new Error(
+        `unexpected fetch: ${String(url)} ${JSON.stringify(init)}`,
+      );
+    });
+
+    const { triggerCronJob } = await import("../src/main/cronjobs");
+    const result = await triggerCronJob("dash-job");
+
+    expect(result).toEqual({ success: true, error: undefined });
+    const fired = fetchSpy.mock.calls.find(([url]) =>
+      String(url).includes("/trigger"),
+    );
+    expect(fired && String(fired[0])).toContain(
+      "/api/cron/jobs/dash-job/trigger",
+    );
+  });
+
+  it("keeps legacy /api/jobs routes when the probe misses (gateway api_server)", async () => {
+    connectionRef.value = {
+      mode: "ssh",
+      ssh: sshConfig,
+    };
+    fetchSpy.mockImplementation(async (url: string) => {
+      if (String(url).includes("/api/cron/jobs")) {
+        return { ok: false, status: 404, json: async () => ({}) };
+      }
+      if (String(url).includes("/api/jobs")) {
+        return {
+          ok: true,
+          json: async () => ({
+            jobs: [
+              {
+                id: "legacy-job",
+                name: "Legacy brief",
+                state: "active",
+                enabled: true,
+              },
+            ],
+          }),
+        };
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    const { listCronJobs } = await import("../src/main/cronjobs");
+    const jobs = await listCronJobs();
+
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]).toMatchObject({ id: "legacy-job" });
+  });
+});
+
 describe("SSH profile cron jobs", () => {
   // @lat: [[scheduled-jobs#Test specifications#Completed jobs remain completed]]
   it("preserves completed state for disabled jobs returned by the API", async () => {

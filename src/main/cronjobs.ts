@@ -245,10 +245,48 @@ async function isCronFallbackHealthy(
 
 async function remoteJsonError(res: Response): Promise<string> {
   try {
-    const body = (await res.json()) as { error?: string };
-    return body.error || `HTTP ${res.status}`;
+    const body = (await res.json()) as {
+      error?: string;
+      detail?: string;
+    };
+    // FastAPI dashboards put the message in `detail`; the gateway api_server
+    // uses `error`. Surface whichever is present.
+    return body.error || body.detail || `HTTP ${res.status}`;
   } catch {
     return `HTTP ${res.status}`;
+  }
+}
+
+// The remote HTTP cron surface has two flavors, disjoint by endpoint:
+// - the gateway api_server (`/v1` transport): `/api/jobs` with a
+//   `{jobs: [...]}` wrapper and `POST .../run` to fire;
+// - the unified dashboard (`/api/*` transport): `/api/cron/jobs` with a bare
+//   array response and `POST .../trigger` to fire.
+// Asking one for the other's route is a silent 404 — the Schedules screen
+// rendered empty against a dashboard because `/api/jobs` does not exist
+// there. Probe before each operation (uncached: the local tunnel port is
+// stable but the remote target behind it flips dashboard↔gateway when the
+// user switches chat transport, so a cached flavor would go stale).
+type RemoteCronFlavor = "dashboard" | "legacy";
+
+async function remoteCronFlavor(
+  headers: Record<string, string>,
+): Promise<RemoteCronFlavor> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3000);
+  try {
+    const res = await fetch(`${await getCronApiUrl(headers)}/api/cron/jobs`, {
+      method: "GET",
+      headers,
+      signal: controller.signal,
+    });
+    return res.ok ? "dashboard" : "legacy";
+  } catch {
+    // Unreachable remote / dead tunnel: keep the legacy routes so the
+    // subsequent request fails with the same behavior as before.
+    return "legacy";
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -275,14 +313,25 @@ export async function listCronJobs(
 
   if (isRemoteMode()) {
     try {
-      const qs = includeDisabled ? "?include_disabled=true" : "";
-      const res = await remoteFetch(`/api/jobs${qs}`);
+      const headers = getRemoteAuthHeader();
+      const flavor = await remoteCronFlavor(headers);
+      const profileQs =
+        profile && profile !== "default"
+          ? `${includeDisabled ? "&" : "?"}profile=${encodeURIComponent(profile)}`
+          : "";
+      const path =
+        flavor === "dashboard"
+          ? `/api/cron/jobs${includeDisabled ? "?include_disabled=true" : ""}${profileQs}`
+          : `/api/jobs${includeDisabled ? "?include_disabled=true" : ""}`;
+      const res = await remoteFetch(path);
       if (!res.ok) {
         console.error("[CRON] remote list failed:", await remoteJsonError(res));
         return [];
       }
-      const body = (await res.json()) as { jobs?: Record<string, unknown>[] };
-      const raw = body.jobs || [];
+      const body = (await res.json()) as
+        | Record<string, unknown>[]
+        | { jobs?: Record<string, unknown>[] };
+      const raw = Array.isArray(body) ? body : body.jobs || [];
       const jobs: CronJob[] = [];
       for (const job of raw) {
         const normalized = normalizeJob(job);
@@ -376,7 +425,13 @@ export async function createCronJob(
 
   if (isRemoteMode()) {
     try {
-      const res = await remoteFetch("/api/jobs", {
+      const headers = getRemoteAuthHeader();
+      const flavor = await remoteCronFlavor(headers);
+      const path =
+        flavor === "dashboard"
+          ? `/api/cron/jobs${profile && profile !== "default" ? `?profile=${encodeURIComponent(profile)}` : ""}`
+          : "/api/jobs";
+      const res = await remoteFetch(path, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -410,7 +465,17 @@ export async function removeCronJob(
   }
   if (isRemoteMode()) {
     try {
-      const res = await remoteFetch(`/api/jobs/${encodeURIComponent(jobId)}`, {
+      const headers = getRemoteAuthHeader();
+      const flavor = await remoteCronFlavor(headers);
+      const base =
+        flavor === "dashboard"
+          ? `/api/cron/jobs/${encodeURIComponent(jobId)}`
+          : `/api/jobs/${encodeURIComponent(jobId)}`;
+      const qs =
+        flavor === "dashboard" && profile && profile !== "default"
+          ? `?profile=${encodeURIComponent(profile)}`
+          : "";
+      const res = await remoteFetch(`${base}${qs}`, {
         method: "DELETE",
       });
       if (!res.ok) {
@@ -435,8 +500,20 @@ async function remoteJobAction(
     return { success: sshResult.success, error: sshResult.error };
   }
   try {
+    const headers = getRemoteAuthHeader();
+    const flavor = await remoteCronFlavor(headers);
+    // The dashboard fires a job with POST .../trigger; the gateway
+    // api_server uses POST .../run for the same action.
+    const actionPath =
+      action === "run" && flavor === "dashboard" ? "trigger" : action;
+    const qs =
+      flavor === "dashboard" && profile && profile !== "default"
+        ? `?profile=${encodeURIComponent(profile)}`
+        : "";
     const res = await remoteFetch(
-      `/api/jobs/${encodeURIComponent(jobId)}/${action}`,
+      flavor === "dashboard"
+        ? `/api/cron/jobs/${encodeURIComponent(jobId)}/${actionPath}${qs}`
+        : `/api/jobs/${encodeURIComponent(jobId)}/${actionPath}`,
       { method: "POST" },
     );
     if (!res.ok) {
