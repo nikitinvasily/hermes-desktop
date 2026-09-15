@@ -9,10 +9,8 @@ Changes in this fork that are **not** (yet) in upstream. This section is part of
 
 - **Chat stream reconciliation** (PR #3, issue #2) — when the agent core delivers a damaged stream (lost chunks, stray characters, cut head fragments), the streamed text is reconciled against the final text instead of concatenating garbage into the message bubble. Key files: `src/renderer/src/lib/lossyText.ts`, `dashboardEventAdapter.ts`.
 - **Schedules over SSH tunnels** (issue #1) — remote cron operations probe and use the dashboard endpoints (`/api/cron/jobs`) when the SSH tunnel targets `hermes dashboard`, fixing an empty Schedules tab. Key file: `src/main/cronjobs.ts`.
-- **Commit hash in version** (PR #4, #5) — the displayed app version and the macOS About menu item include the short commit hash of the build.
 - **Status-bar connection switcher** (PR #7, #9) — the status-bar mode chip switches between saved connections; a switch also activates a run for the newly selected connection.
 - **Sidebar new-chat buttons** (PR #12) — quick new-chat buttons on project headings and on the Chats header.
-- **Task workflow** (PR #11) — every change goes through Issue → branch (`fix/`, `feat/`, `docs/`) → PR with `Fixes #N`, recorded in `AGENTS.md`.
 
 Upstream merges are pulled regularly; fork commits live in `main` ahead of `upstream/main`.
 
