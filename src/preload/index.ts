@@ -1658,8 +1658,8 @@ const hermesAPI = {
     },
     profile?: string,
   ) => ipcRenderer.invoke("kanban-create-task", input, profile),
-  selectFolder: (): Promise<string | null> =>
-    ipcRenderer.invoke("select-folder"),
+  selectFolder: (defaultPath?: string): Promise<string | null> =>
+    ipcRenderer.invoke("select-folder", defaultPath),
   readDirectory: (
     dirPath: string,
   ): Promise<{ name: string; isDirectory: boolean }[] | null> =>

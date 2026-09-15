@@ -38,6 +38,17 @@ beforeEach(() => {
     writable: true,
     value: {
       selectFolder: vi.fn(async () => "/tmp/picked"),
+      readDirectory: vi.fn(
+        async (
+          path: string,
+        ): Promise<{ name: string; isDirectory: boolean }[] | null> =>
+          path === "~"
+            ? [
+                { name: "home", isDirectory: true },
+                { name: "file.txt", isDirectory: false },
+              ]
+            : null,
+      ),
     },
   });
 });
@@ -178,8 +189,14 @@ describe("ProjectDialog edit", () => {
 });
 
 describe("ProjectDialog folder input by connection mode", () => {
-  it("remote mode shows a path text input instead of the picker", () => {
+  it("remote mode shows the folder browser plus a manual path input", async () => {
     renderDialog("create", "remote");
+    // Browser: initial load at the agent's ~ lists subdirectories only.
+    const entry = await screen.findByRole("button", { name: /home/ });
+    expect(entry).toBeTruthy();
+    // Non-directories are filtered out of the browser list.
+    expect(screen.queryByText("file.txt")).toBeNull();
+    // Manual input stays as the fallback path.
     expect(
       screen.getByPlaceholderText("navigation.projectDialog.pathPlaceholder"),
     ).toBeTruthy();
@@ -187,7 +204,37 @@ describe("ProjectDialog folder input by connection mode", () => {
       screen.queryByRole("button", {
         name: "navigation.projectDialog.addFolder",
       }),
-    ).toBeTruthy(); // the Add button stays, next to the input
+    ).toBeTruthy();
+  });
+
+  it("browser navigation adds the visited directory as a folder", async () => {
+    const { onMutate } = renderDialog("create", "ssh");
+    fireEvent.change(
+      screen.getByLabelText("navigation.projectDialog.nameLabel"),
+      { target: { value: "Remote Project" } },
+    );
+    const addCurrent = await screen.findByRole("button", {
+      name: "navigation.projectDialog.addCurrent",
+    });
+    fireEvent.click(addCurrent);
+    // "~" itself becomes the folder chip (the chip list renders it).
+    expect(
+      document.querySelector(".sidebar-project-dialog-folder-path")
+        ?.textContent,
+    ).toBe("~");
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "navigation.projectDialog.createAction",
+      }),
+    );
+    await waitFor(() => {
+      expect(onMutate).toHaveBeenCalledWith({
+        op: "create",
+        name: "Remote Project",
+        folders: ["~"],
+        primaryPath: "~",
+      });
+    });
   });
 
   it("local mode shows the native picker button", () => {

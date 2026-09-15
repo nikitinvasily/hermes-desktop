@@ -57,7 +57,11 @@ export default {
     primaryBadge: "Primary",
     pathPlaceholder: "/path/on/the/agent/host",
     remoteHint:
-      "Remote connection: enter a path on the agent's filesystem (no local picker).",
+      "Navigate the agent host's directories and add the current one, or type a path by hand.",
+    browseUp: "Up one level",
+    addCurrent: "Add this folder",
+    browseUnavailable:
+      "Directory browsing is unavailable for this connection — type the path by hand.",
     folderDuplicate: "This folder is already in the list.",
     folderConflict:
       'A folder in this list already belongs to project "{{project}}". Sharing a folder between projects is allowed, but sessions in it will group under one project.',

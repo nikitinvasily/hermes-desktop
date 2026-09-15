@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "../../components/useI18n";
 import { Folder, Plus, X } from "../../assets/icons";
@@ -73,6 +73,41 @@ export default function ProjectDialog({
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
+
+  // Remote/ssh folder browser state (issue #27 follow-up): the agent host's
+  // directories, read through the existing read-directory IPC (ssh exec or
+  // local readdir; HTTP-remote returns null → falls back to manual input).
+  const [browsePath, setBrowsePath] = useState("~");
+  const [browseEntries, setBrowseEntries] = useState<
+    { name: string; isDirectory: boolean }[] | null
+  >(null);
+  const [browseLoading, setBrowseLoading] = useState(false);
+  const [browseFailed, setBrowseFailed] = useState(false);
+
+  const loadBrowse = useCallback(async (path: string): Promise<void> => {
+    setBrowseLoading(true);
+    setBrowseFailed(false);
+    try {
+      const entries = await window.hermesAPI.readDirectory(path);
+      if (!entries) {
+        setBrowseFailed(true);
+        setBrowseEntries(null);
+        return;
+      }
+      setBrowsePath(path);
+      setBrowseEntries(entries.filter((e) => e.isDirectory));
+    } catch {
+      setBrowseFailed(true);
+      setBrowseEntries(null);
+    } finally {
+      setBrowseLoading(false);
+    }
+  }, []);
+
+  // Open the browser at the agent's home on first render in remote modes.
+  useEffect(() => {
+    if (connectionMode !== "local") void loadBrowse("~");
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- initial load only
 
   useEffect(() => {
     nameRef.current?.focus();
@@ -312,34 +347,94 @@ export default function ProjectDialog({
             {t("navigation.projectDialog.addFolder")}
           </button>
         ) : (
-          <div className="sidebar-project-dialog-manual">
-            <input
-              className="sidebar-project-dialog-input"
-              type="text"
-              placeholder={t("navigation.projectDialog.pathPlaceholder")}
-              value={manualPath}
-              disabled={submitting}
-              onChange={(e) => setManualPath(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  addFolder(manualPath);
-                }
-              }}
-            />
-            <button
-              type="button"
-              className="btn btn-secondary"
-              disabled={submitting || !manualPath.trim()}
-              onClick={() => addFolder(manualPath)}
-            >
-              {t("navigation.projectDialog.addFolder")}
-            </button>
-          </div>
-        )}
-        {connectionMode !== "local" && (
-          <div className="sidebar-project-dialog-hint">
-            {t("navigation.projectDialog.remoteHint")}
+          <div className="sidebar-project-dialog-browser">
+            {!browseFailed && (
+              <>
+                <div className="sidebar-project-dialog-browser-bar">
+                  <button
+                    type="button"
+                    className="sidebar-project-dialog-folder-action"
+                    disabled={submitting || browseLoading || browsePath === "/"}
+                    onClick={() =>
+                      void loadBrowse(
+                        browsePath.replace(/[^/]+\/?$/, "") || "/",
+                      )
+                    }
+                    title={t("navigation.projectDialog.browseUp")}
+                    aria-label={t("navigation.projectDialog.browseUp")}
+                  >
+                    ↑
+                  </button>
+                  <span
+                    className="sidebar-project-dialog-browser-path"
+                    title={browsePath}
+                  >
+                    {browsePath}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-secondary sidebar-project-dialog-browser-add"
+                    disabled={submitting || browseLoading}
+                    onClick={() => addFolder(browsePath)}
+                  >
+                    {t("navigation.projectDialog.addCurrent")}
+                  </button>
+                </div>
+                <div className="sidebar-project-dialog-browser-list">
+                  {browseLoading ? (
+                    <div className="sidebar-project-dialog-empty">
+                      {t("common.loadingShort")}
+                    </div>
+                  ) : (
+                    (browseEntries ?? []).map((entry) => (
+                      <button
+                        type="button"
+                        key={entry.name}
+                        className="sidebar-project-dialog-browser-entry"
+                        disabled={submitting}
+                        onClick={() =>
+                          void loadBrowse(
+                            `${browsePath.replace(/\/$/, "")}/${entry.name}`,
+                          )
+                        }
+                      >
+                        <Folder size={12} />
+                        <span>{entry.name}</span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </>
+            )}
+            <div className="sidebar-project-dialog-manual">
+              <input
+                className="sidebar-project-dialog-input"
+                type="text"
+                placeholder={t("navigation.projectDialog.pathPlaceholder")}
+                value={manualPath}
+                disabled={submitting}
+                onChange={(e) => setManualPath(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addFolder(manualPath);
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={submitting || !manualPath.trim()}
+                onClick={() => addFolder(manualPath)}
+              >
+                {t("navigation.projectDialog.addFolder")}
+              </button>
+            </div>
+            <div className="sidebar-project-dialog-hint">
+              {browseFailed
+                ? t("navigation.projectDialog.browseUnavailable")
+                : t("navigation.projectDialog.remoteHint")}
+            </div>
           </div>
         )}
 

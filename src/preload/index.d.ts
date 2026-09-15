@@ -1182,7 +1182,7 @@ interface HermesAPI {
     input: KanbanCreateTaskInput,
     profile?: string,
   ) => Promise<{ success: boolean; data?: { id: string }; error?: string }>;
-  selectFolder: () => Promise<string | null>;
+  selectFolder: (defaultPath?: string) => Promise<string | null>;
   readDirectory: (
     dirPath: string,
   ) => Promise<{ name: string; isDirectory: boolean }[] | null>;

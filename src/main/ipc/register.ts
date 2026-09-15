@@ -9,7 +9,8 @@ import {
   dialog,
   clipboard,
 } from "electron";
-import { extname } from "path";
+import { extname, join } from "path";
+import { homedir } from "os";
 import { randomUUID } from "crypto";
 import { readdir, readFile, stat } from "fs/promises";
 import { getActiveProfileNameSync } from "../utils";
@@ -3390,11 +3391,20 @@ export function registerIpcHandlers(context: IpcContext): void {
     (_event, input: CreateTaskInput, profile?: string) =>
       kanbanCreateTask(input, profile),
   );
-  ipcMain.handle("select-folder", async (event) => {
+  ipcMain.handle("select-folder", async (event, defaultPath?: string) => {
     const win = BrowserWindow.fromWebContents(event.sender);
+    // Default to ~/Documents: project folders almost always live there,
+    // and starting the picker at / makes users walk the whole tree.
+    const start = defaultPath?.trim() || join(homedir(), "Documents");
     const result = win
-      ? await dialog.showOpenDialog(win, { properties: ["openDirectory"] })
-      : await dialog.showOpenDialog({ properties: ["openDirectory"] });
+      ? await dialog.showOpenDialog(win, {
+          defaultPath: start,
+          properties: ["openDirectory"],
+        })
+      : await dialog.showOpenDialog({
+          defaultPath: start,
+          properties: ["openDirectory"],
+        });
     if (result.canceled || result.filePaths.length === 0) return null;
     return result.filePaths[0];
   });
