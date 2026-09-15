@@ -44,4 +44,28 @@ export default {
     deleteConfirmAction: "Delete",
     deleting: "Deleting…",
   },
+  projectDialog: {
+    createTitle: "New project",
+    editTitle: "Edit project",
+    deleteTitle: "Delete project",
+    nameLabel: "Name",
+    foldersLabel: "Folders",
+    foldersEmpty: "No folders yet. Add the project's working directory.",
+    addFolder: "Add folder",
+    removeFolder: "Remove folder",
+    makePrimary: "Primary",
+    primaryBadge: "Primary",
+    pathPlaceholder: "/path/on/the/agent/host",
+    remoteHint:
+      "Remote connection: enter a path on the agent's filesystem (no local picker).",
+    folderDuplicate: "This folder is already in the list.",
+    folderRequired: "Add at least one folder.",
+    noSessions: "No chats yet",
+    saving: "Saving…",
+    createAction: "Create",
+    saveAction: "Save",
+    operationFailed: "Project operation failed.",
+    deleteConfirm:
+      'Delete project "{{project}}"? Its chats are NOT deleted — they move to the plain chat list. The project\'s folders are unlinked.',
+  },
 } as const;

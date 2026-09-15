@@ -3230,6 +3230,138 @@ body:has(.shell-vibrant),
   gap: 8px;
 }
 
+/* ── Project create/edit dialog (issue #27) ──
+   Reuses the delete-modal overlay/header/footer; the body is a form:
+   name input, folder chip list, add-folder row (picker or path input). */
+.sidebar-project-dialog {
+  width: min(440px, calc(100vw - 32px));
+  padding: 18px;
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-lg);
+  background: var(--bg-secondary);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+}
+
+.sidebar-project-dialog-label {
+  display: block;
+  margin: 12px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.sidebar-project-dialog-label:first-of-type {
+  margin-top: 0;
+}
+
+.sidebar-project-dialog-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-md);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.sidebar-project-dialog-empty {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-bottom: 8px;
+}
+
+.sidebar-project-dialog-folders {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.sidebar-project-dialog-folder {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.sidebar-project-dialog-folder > svg {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+}
+
+.sidebar-project-dialog-folder-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.sidebar-project-dialog-primary-badge,
+.sidebar-project-dialog-folder-action {
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+}
+
+.sidebar-project-dialog-primary-badge {
+  background: var(--accent-dim, rgba(127, 127, 127, 0.15));
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.sidebar-project-dialog-folder-action {
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+.sidebar-project-dialog-folder-action:hover {
+  color: var(--text-primary);
+}
+
+.sidebar-project-dialog-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sidebar-project-dialog-manual {
+  display: flex;
+  gap: 8px;
+}
+
+.sidebar-project-dialog-manual .sidebar-project-dialog-input {
+  flex: 1;
+}
+
+.sidebar-project-dialog-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.sidebar-project-dialog-error {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--danger, #e5484d);
+  white-space: pre-wrap;
+}
+
+.sidebar-project-dialog .sidebar-session-delete-footer {
+  margin-top: 16px;
+}
+
 /* Full-list sessions modal (sidebar "Show more" / Cmd+K). Reuses
    .models-modal-overlay for the backdrop; sized to 80% of the viewport. */
 .sessions-modal {

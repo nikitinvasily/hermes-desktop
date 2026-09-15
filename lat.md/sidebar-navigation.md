@@ -50,6 +50,16 @@ Each project heading and the Chats section header carry a hover-revealed `+` tha
 
 [[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx]] renders the `+` inside a `.sidebar-recent-project-row` / `.sidebar-recent-section-row` flex row beside the toggle, `stopPropagation` on click so the disclosure state is untouched, and reports the folder through `onNewChatInProject(folder | null)`. [[src/renderer/src/screens/Layout/Layout.tsx#Layout]]'s `handleNewChatInProject` mints the run via [[src/renderer/src/screens/Layout/chatRuns.ts#mintRun]] with `initialContextFolder`, never reusing a scratch tab (the binding is part of the intent), and [[src/renderer/src/screens/Chat/Chat.tsx#Chat]] seeds its `contextFolder` state from that prop on mount — the existing persist effect then links the session after its first turn. Resumed sessions ignore the prop: their stored folder is authoritative. [[src/renderer/src/screens/Layout/SidebarRecentSessions.test.tsx]] covers both buttons reporting the right folder.
 
+## Project management
+
+Projects are managed in place from the sidebar: the Projects header `+` opens a create dialog, and each project row (once the agent project list loads) shows hover actions to edit (rename + folders) and delete the project.
+
+The agent core owns the data (`~/.hermes/projects.db` via the tui_gateway `projects.*` JSON-RPC). [[src/main/projects.ts#localListProjects]] reads the local sqlite file read-only for listing; remote/SSH listing goes through the dashboard `/api/profiles/projects/tree` ([[src/main/projects.ts#remoteListProjects]]), with an SSH legacy fallback that parses the remote db via python3 ([[src/main/projects.ts#sshListProjects]]). All writes in every mode run through [[src/main/projects.ts#projectRpc]] — one `projects.*` JSON-RPC call over the dashboard WebSocket, the same transport as `moveSessionWorkspaceOnAgent`. Validation stays in one place on the agent: `projects.create` refuses a primary folder already owned by another project, and the dialog surfaces that backend error.
+
+[[src/renderer/src/screens/Layout/ProjectDialog.tsx]] is the single create/edit dialog. Folder selection depends on the connection mode (read from the connection registry): a local agent gets the native directory picker; remote/ssh agents get a text input, because the folder must exist on the agent's filesystem, not the desktop's. The edit mode diffs the folder list into `add_folder` / `remove_folder` / `set_primary` mutations, keeping exactly one primary folder (the first folder is primary, mirroring the backend's `create_project`). [[src/renderer/src/screens/Layout/ProjectDialog.test.tsx]] covers the mutation payloads and the local/remote input switch; [[src/main/projects.test.ts]] covers the local read mapping.
+
+Deleting a project asks for confirmation and only removes the project record — its chats are not deleted and stay in the plain chat list. Zero-session projects still render as (empty) groups: [[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx]] merges the agent project folders into the session-derived groups so a just-created project is visible before its first chat.
+
 ## Row context menu
 
 Each sidebar session row exposes a ChatGPT-style options menu — Pin, Rename, Copy session ID, Move to project, and Delete — opened from a hover-revealed `…` button or by right-clicking the row.

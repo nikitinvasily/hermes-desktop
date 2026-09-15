@@ -16,8 +16,10 @@ import {
   Folder,
   Loader,
   MoreHorizontal,
+  Pencil,
   Pin,
   Plus,
+  Trash,
   X,
 } from "../../assets/icons";
 import { confirmSessionRename } from "../Sessions/confirmSessionRename";
@@ -25,6 +27,8 @@ import SidebarSessionMenu, {
   type SidebarMenuProject,
   type SidebarMenuTarget,
 } from "./SidebarSessionMenu";
+import ProjectDialog, { type ProjectDialogState } from "./ProjectDialog";
+import type { ProjectInfo } from "../../../../shared/projects";
 
 interface RecentSession {
   id: string;
@@ -214,6 +218,23 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   // dashboard projects tree (issue #23). Empty until loaded; the folder-slug
   // fallback covers the gap.
   const [projectNames, setProjectNames] = useState<Record<string, string>>({});
+  // Agent-side projects (issue #27): every project with its folders, including
+  // zero-session ones, so the Projects section can render empty groups and
+  // offer edit/delete. Undefined until the first successful load.
+  const [projects, setProjects] = useState<ProjectInfo[] | null>(null);
+  // Project dialog (create/edit) and pending delete-project confirmation.
+  const [projectDialog, setProjectDialog] = useState<ProjectDialogState | null>(
+    null,
+  );
+  const [pendingDeleteProject, setPendingDeleteProject] =
+    useState<ProjectInfo | null>(null);
+  const [deletingProject, setDeletingProject] = useState(false);
+  const [projectError, setProjectError] = useState("");
+  // Active connection mode — drives the dialog's folder picker (native vs
+  // text input for paths on the agent host).
+  const [connectionMode, setConnectionMode] = useState<
+    "local" | "remote" | "ssh"
+  >("local");
   // Row whose context menu is open, anchored to viewport coordinates.
   const [menuTarget, setMenuTarget] = useState<SidebarMenuTarget | null>(null);
   // Inline rename: the row id being edited and its working title.
@@ -490,6 +511,84 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     };
   }, [open, connectionId, activeProfile]);
 
+  // Load the agent's project list (issue #27) — same triggers as the names
+  // map, plus an explicit refresh() after mutations. The registry read gives
+  // the active connection mode for the dialog's folder picker.
+  const refreshProjects = useCallback(async (): Promise<void> => {
+    try {
+      const list = await window.hermesAPI.listProjects(
+        connectionId,
+        activeProfile,
+      );
+      setProjects(Array.isArray(list) ? list : []);
+    } catch {
+      /* leave the previous list; the section falls back to session groups */
+    }
+  }, [connectionId, activeProfile]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setProjects(null);
+    void refreshProjects();
+    void window.hermesAPI
+      .getConnectionRegistry()
+      .then((registry) => {
+        if (cancelled) return;
+        const active = registry.connections.find(
+          (c) => c.connectionId === registry.activeConnectionId,
+        );
+        setConnectionMode(active?.mode ?? "local");
+      })
+      .catch(() => {
+        /* default local stays */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, connectionId, activeProfile, refreshProjects]);
+
+  const handleProjectMutate = useCallback(
+    async (
+      mutation: import("../../../../shared/projects").ProjectMutation,
+    ): Promise<unknown> => {
+      return window.hermesAPI.projectMutate(
+        mutation,
+        connectionId,
+        activeProfile,
+      );
+    },
+    [connectionId, activeProfile],
+  );
+
+  const handleProjectChanged = useCallback((): void => {
+    void refreshProjects();
+    // Project names may change too (create/rename) — reload the name map so
+    // the group heading updates without waiting for the next section open.
+    void window.hermesAPI
+      .listProjectFolderNames(connectionId, activeProfile)
+      .then((names) => setProjectNames(names ?? {}))
+      .catch(() => undefined);
+  }, [connectionId, activeProfile, refreshProjects]);
+
+  const confirmDeleteProject = useCallback(async (): Promise<void> => {
+    if (!pendingDeleteProject) return;
+    setDeletingProject(true);
+    setProjectError("");
+    try {
+      await handleProjectMutate({
+        op: "delete",
+        id: pendingDeleteProject.id,
+      });
+      setPendingDeleteProject(null);
+      handleProjectChanged();
+    } catch (err) {
+      setProjectError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeletingProject(false);
+    }
+  }, [pendingDeleteProject, handleProjectMutate, handleProjectChanged]);
+
   // Keep the wrapper mounted so the collapse/expand animates with CSS grid
   // tracks. Effects above are still gated on `open`, so a collapsed sidebar
   // does no fetching while keeping the last-loaded list ready to animate.
@@ -501,11 +600,38 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     () => sessions.filter((s) => pinnedIds.has(s.id)),
     [sessions, pinnedIds],
   );
-  const { projectGroups, chats } = useMemo(
-    () =>
-      groupSessionsByWorkspace(sessions.filter((s) => !pinnedIds.has(s.id))),
-    [sessions, pinnedIds],
-  );
+  const { projectGroups, chats } = useMemo(() => {
+    const base = groupSessionsByWorkspace(
+      sessions.filter((s) => !pinnedIds.has(s.id)),
+    );
+    // Agent-side project folders with zero sessions still render as (empty)
+    // groups (issue #27) — without this a just-created project is invisible
+    // until its first chat exists.
+    if (!projects || projects.length === 0) return base;
+    const known = new Set(base.projectGroups.map((g) => g.path));
+    const extra: Array<{
+      path: string;
+      name: string;
+      sessions: RecentSession[];
+    }> = [];
+    for (const p of projects) {
+      for (const f of p.folders) {
+        if (f.path && !known.has(f.path)) {
+          known.add(f.path);
+          extra.push({ path: f.path, name: folderName(f.path), sessions: [] });
+        }
+      }
+      if (p.primaryPath && !known.has(p.primaryPath)) {
+        known.add(p.primaryPath);
+        extra.push({
+          path: p.primaryPath,
+          name: folderName(p.primaryPath),
+          sessions: [],
+        });
+      }
+    }
+    return { ...base, projectGroups: [...base.projectGroups, ...extra] };
+  }, [sessions, pinnedIds, projects]);
   // Resolve each group's display name: the agent project's human name when
   // projects.db/the dashboard tree knows this folder, else the path's last
   // segment (issue #23).
@@ -869,26 +995,42 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         )}
         {projectGroups.length > 0 && (
           <div className="sidebar-recent-section">
-            <button
-              type="button"
-              className="sidebar-recent-section-toggle"
-              onClick={toggleProjects}
-              aria-expanded={projectsOpen}
-              tabIndex={expanded ? 0 : -1}
-            >
-              <span>{t("navigation.projects")}</span>
-              {projectsOpen ? (
-                <ChevronDown
-                  className="sidebar-recent-disclosure-icon"
-                  size={13}
-                />
-              ) : (
-                <ChevronRight
-                  className="sidebar-recent-disclosure-icon"
-                  size={13}
-                />
-              )}
-            </button>
+            <div className="sidebar-recent-section-row">
+              <button
+                type="button"
+                className="sidebar-recent-section-toggle"
+                onClick={toggleProjects}
+                aria-expanded={projectsOpen}
+                tabIndex={expanded ? 0 : -1}
+              >
+                <span>{t("navigation.projects")}</span>
+                {projectsOpen ? (
+                  <ChevronDown
+                    className="sidebar-recent-disclosure-icon"
+                    size={13}
+                  />
+                ) : (
+                  <ChevronRight
+                    className="sidebar-recent-disclosure-icon"
+                    size={13}
+                  />
+                )}
+              </button>
+              <button
+                type="button"
+                className="sidebar-recent-new-chat"
+                title={t("navigation.projectDialog.createTitle")}
+                aria-label={t("navigation.projectDialog.createTitle")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setProjectError("");
+                  setProjectDialog({ mode: "create" });
+                }}
+                tabIndex={expanded ? 0 : -1}
+              >
+                <Plus size={13} />
+              </button>
+            </div>
             <div
               className={`sidebar-recent-collapse ${
                 projectsOpen ? "expanded" : ""
@@ -898,6 +1040,13 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
                 {projectGroups.map((group) => {
                   const projectOpen = !closedProjectFolders.has(group.path);
                   const visible = expanded && projectsOpen && projectOpen;
+                  // The agent-side project record for this group, when the
+                  // project list has loaded (issue #27) — enables edit/delete.
+                  const projectRecord = projects?.find(
+                    (p) =>
+                      p.folders.some((f) => f.path === group.path) ||
+                      p.primaryPath === group.path,
+                  );
                   return (
                     <div className="sidebar-recent-project" key={group.path}>
                       <div className="sidebar-recent-project-row">
@@ -923,6 +1072,45 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
                             />
                           )}
                         </button>
+                        {projectRecord && (
+                          <>
+                            <button
+                              type="button"
+                              className="sidebar-recent-new-chat"
+                              title={t("navigation.projectDialog.editTitle")}
+                              aria-label={t(
+                                "navigation.projectDialog.editTitle",
+                              )}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setProjectError("");
+                                setProjectDialog({
+                                  mode: "edit",
+                                  project: projectRecord,
+                                });
+                              }}
+                              tabIndex={expanded && projectsOpen ? 0 : -1}
+                            >
+                              <Pencil size={12} />
+                            </button>
+                            <button
+                              type="button"
+                              className="sidebar-recent-new-chat"
+                              title={t("navigation.projectDialog.deleteTitle")}
+                              aria-label={t(
+                                "navigation.projectDialog.deleteTitle",
+                              )}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setProjectError("");
+                                setPendingDeleteProject(projectRecord);
+                              }}
+                              tabIndex={expanded && projectsOpen ? 0 : -1}
+                            >
+                              <Trash size={12} />
+                            </button>
+                          </>
+                        )}
                         {onNewChatInProject && (
                           <button
                             type="button"
@@ -949,8 +1137,14 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
                         }`}
                       >
                         <div className="sidebar-recent-collapse-inner">
-                          {group.sessions.map((s) =>
-                            renderSessionButton(s, true, visible),
+                          {group.sessions.length > 0 ? (
+                            group.sessions.map((s) =>
+                              renderSessionButton(s, true, visible),
+                            )
+                          ) : (
+                            <div className="sidebar-recent-empty">
+                              {t("navigation.projectDialog.noSessions")}
+                            </div>
                           )}
                         </div>
                       </div>
@@ -1098,6 +1292,81 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
                   disabled={deleting}
                 >
                   {deleting
+                    ? t("navigation.sessionMenu.deleting")
+                    : t("navigation.sessionMenu.deleteConfirmAction")}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+      {projectDialog &&
+        createPortal(
+          <ProjectDialog
+            state={projectDialog}
+            connectionMode={connectionMode}
+            onClose={() => setProjectDialog(null)}
+            onMutate={handleProjectMutate}
+            onChanged={handleProjectChanged}
+          />,
+          document.body,
+        )}
+      {pendingDeleteProject &&
+        createPortal(
+          <div
+            className="sidebar-session-delete-overlay"
+            role="presentation"
+            onClick={() => {
+              if (!deletingProject) setPendingDeleteProject(null);
+            }}
+          >
+            <div
+              className="sidebar-session-delete-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="sidebar-project-delete-title"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="sidebar-session-delete-header">
+                <h3 id="sidebar-project-delete-title">
+                  {t("navigation.projectDialog.deleteTitle")}
+                </h3>
+                <button
+                  type="button"
+                  className="btn-ghost sidebar-session-delete-close"
+                  onClick={() => setPendingDeleteProject(null)}
+                  disabled={deletingProject}
+                  aria-label={t("navigation.sessionMenu.deleteCancel")}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <p className="sidebar-session-delete-body">
+                {t("navigation.projectDialog.deleteConfirm", {
+                  project: pendingDeleteProject.name,
+                })}
+              </p>
+              {projectError && (
+                <div className="sidebar-project-dialog-error">
+                  {projectError}
+                </div>
+              )}
+              <div className="sidebar-session-delete-footer">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setPendingDeleteProject(null)}
+                  disabled={deletingProject}
+                >
+                  {t("navigation.sessionMenu.deleteCancel")}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  onClick={() => void confirmDeleteProject()}
+                  disabled={deletingProject}
+                >
+                  {deletingProject
                     ? t("navigation.sessionMenu.deleting")
                     : t("navigation.sessionMenu.deleteConfirmAction")}
                 </button>

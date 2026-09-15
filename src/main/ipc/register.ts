@@ -47,6 +47,14 @@ import {
   type ProjectFolderNames,
 } from "../project-names";
 import {
+  localListProjects,
+  remoteListProjects,
+  sshListProjects,
+  projectRpc,
+  type ProjectInfo,
+  type ProjectMutation,
+} from "../projects";
+import {
   getSessionModelOverride,
   setSessionModelOverride,
 } from "../session-model-override-store";
@@ -2504,6 +2512,45 @@ export function registerIpcHandlers(context: IpcContext): void {
           scopedProfile,
         );
       return Promise.resolve(localProjectFolderNames(scopedProfile));
+    },
+  );
+
+  // Project management (issue #27): list projects with their folders, and
+  // run create/rename/delete/folder mutations over the agent's projects.* RPC.
+  ipcMain.handle(
+    "list-projects",
+    async (
+      _event,
+      connectionId?: string,
+      profile?: string,
+    ): Promise<ProjectInfo[]> => {
+      const conn = sessionConnection(connectionId);
+      const scopedProfile = activeSshProfile(profile);
+      if (conn.mode === "remote")
+        return remoteListProjects(
+          scopedRemoteSessionConfig(conn, scopedProfile),
+        );
+      if (conn.mode === "ssh" && conn.ssh)
+        return withSshDashboardSessions(
+          conn,
+          (config) => remoteListProjects(config),
+          () => sshListProjects(conn.ssh!, scopedProfile),
+          scopedProfile,
+        );
+      return localListProjects(scopedProfile);
+    },
+  );
+
+  ipcMain.handle(
+    "project-mutate",
+    async (
+      _event,
+      mutation: ProjectMutation,
+      connectionId?: string,
+      profile?: string,
+    ) => {
+      const scopedProfile = activeSshProfile(profile);
+      return projectRpc(scopedProfile, connectionId, mutation);
     },
   );
 

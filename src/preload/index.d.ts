@@ -1,6 +1,7 @@
 import type { AppLocale } from "../shared/i18n/types";
 import type { Attachment } from "../shared/attachments";
 import type { SessionModelOverride } from "../shared/model-override";
+import type { ProjectInfo, ProjectMutation } from "../shared/projects";
 import type { DesktopSessionContinuationItem } from "../shared/session-continuation";
 import type { DesktopSessionLocalError } from "../shared/session-continuation";
 import type {
@@ -713,6 +714,15 @@ interface HermesAPI {
     connectionId?: string,
     profile?: string,
   ) => Promise<Record<string, string>>;
+  listProjects: (
+    connectionId?: string,
+    profile?: string,
+  ) => Promise<ProjectInfo[]>;
+  projectMutate: (
+    mutation: ProjectMutation,
+    connectionId?: string,
+    profile?: string,
+  ) => Promise<unknown>;
   getSessionModelOverride: (
     sessionId: string,
   ) => Promise<SessionModelOverride | null>;
