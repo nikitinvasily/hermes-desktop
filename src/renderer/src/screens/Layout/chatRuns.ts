@@ -57,11 +57,13 @@ export function patchRun(
 }
 
 /**
- * Keep the selected shell profile and the visible chat run in sync.
+ * Keep the selected shell profile/connection and the visible chat run in sync.
  *
- * Existing conversations remain under the profile they started with; switching
- * profiles activates a scratch run for the new profile instead of showing a
- * stale conversation from the previous one.
+ * Existing conversations remain under the connection and profile they started
+ * with; switching either activates a run for the new combination instead of
+ * showing a stale conversation from the previous one. Applies to profile
+ * switches (same connection) and connection switches from the status-bar
+ * chip or Settings alike.
  */
 export function selectProfileRunTransition(
   runs: ChatRun[],
