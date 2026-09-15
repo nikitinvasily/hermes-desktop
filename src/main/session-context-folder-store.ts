@@ -120,6 +120,28 @@ export function getSessionContextFolders(
 }
 
 /**
+ * Read EVERY stored binding (no id filter): session id → folder path, with
+ * empty-string sentinel rows preserved. Used by the remote/SSH session-list
+ * paths to merge desktop-side Move-to-project decisions into a list whose
+ * rows otherwise derive their folder from the remote agent's cwd alone
+ * (issue #23).
+ */
+export function getAllSessionContextFolders(
+  profile?: unknown,
+): Map<string, string> {
+  const result = new Map<string, string>();
+  const db = getDbConnection(true, profile);
+  if (!db || !tableExists(db)) return result;
+  const rows = db
+    .prepare(`SELECT session_id, folder_path FROM ${TABLE}`)
+    .all() as Array<{ session_id: string; folder_path: string }>;
+  for (const r of rows) {
+    result.set(r.session_id, r.folder_path ?? "");
+  }
+  return result;
+}
+
+/**
  * Drop a session's linked-folder row. Called from `deleteSessionRows` so it
  * runs inside the same delete transaction as the other per-session cleanup.
  */

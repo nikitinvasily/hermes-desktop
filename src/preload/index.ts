@@ -973,6 +973,12 @@ const hermesAPI = {
   listRecentSessionContextFolders: (limit?: number): Promise<string[]> =>
     ipcRenderer.invoke("list-recent-session-context-folders", limit),
 
+  listProjectFolderNames: (
+    connectionId?: string,
+    profile?: string,
+  ): Promise<Record<string, string>> =>
+    ipcRenderer.invoke("list-project-folder-names", connectionId, profile),
+
   getSessionModelOverride: (
     sessionId: string,
   ): Promise<SessionModelOverride | null> =>

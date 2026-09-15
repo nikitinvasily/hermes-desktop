@@ -707,6 +707,10 @@ interface HermesAPI {
     folder: string | null,
   ) => Promise<boolean>;
   listRecentSessionContextFolders: (limit?: number) => Promise<string[]>;
+  listProjectFolderNames: (
+    connectionId?: string,
+    profile?: string,
+  ) => Promise<Record<string, string>>;
   getSessionModelOverride: (
     sessionId: string,
   ) => Promise<SessionModelOverride | null>;
