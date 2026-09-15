@@ -53,6 +53,7 @@ import {
   sshListProjects,
   projectRpc,
   sshCreateDirectory,
+  sshResolvePath,
   type ProjectInfo,
   type ProjectMutation,
 } from "../projects";
@@ -2553,6 +2554,31 @@ export function registerIpcHandlers(context: IpcContext): void {
     ) => {
       const scopedProfile = activeSshProfile(profile);
       return projectRpc(scopedProfile, connectionId, mutation);
+    },
+  );
+
+  // Resolve a `~`-prefixed path to its absolute form ON THE AGENT HOST, so
+  // SSH-browsed folders are stored (and displayed) as the agent sees them
+  // (`~/.hermes/workspace/misc` → `/home/hermes/.hermes/workspace/misc`).
+  // Local expands ~ against the local home; HTTP-remote echoes the input back
+  // (no filesystem channel — the manual entry keeps the user's spelling).
+  ipcMain.handle(
+    "resolve-path",
+    async (_event, path: string, connectionId?: string) => {
+      const trimmed = path.trim();
+      if (!trimmed) return trimmed;
+      const conn = sessionConnection(connectionId);
+      if (conn.mode === "ssh" && conn.ssh) {
+        try {
+          return await sshResolvePath(conn.ssh, trimmed);
+        } catch {
+          return trimmed; // keep the user's spelling when the host is quiet
+        }
+      }
+      if (conn.mode === "remote") return trimmed;
+      if (trimmed.startsWith("~/"))
+        return resolve(join(homedir(), trimmed.slice(2)));
+      return resolve(trimmed);
     },
   );
 

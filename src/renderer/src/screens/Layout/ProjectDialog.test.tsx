@@ -44,6 +44,10 @@ beforeEach(() => {
             ? `/Users/test${path.slice(1)}`
             : `/remote${path.startsWith("/") ? "" : "/"}${path}`,
       ),
+      resolvePath: vi.fn(
+        async (path: string): Promise<string> =>
+          path.startsWith("~/") ? `/home/hermes${path.slice(1)}` : path,
+      ),
       readDirectory: vi.fn(
         async (
           path: string,
@@ -241,11 +245,14 @@ describe("ProjectDialog folder input by connection mode", () => {
       name: "navigation.projectDialog.addCurrent",
     });
     fireEvent.click(addCurrent);
-    // The current browser path becomes the folder chip.
-    expect(
-      document.querySelector(".sidebar-project-dialog-folder-path")
-        ?.textContent,
-    ).toBe("~/.hermes/workspace");
+    // The current browser path becomes the folder chip, resolved to the
+    // agent-side absolute spelling.
+    await waitFor(() => {
+      expect(
+        document.querySelector(".sidebar-project-dialog-folder-path")
+          ?.textContent,
+      ).toBe("/home/hermes/.hermes/workspace");
+    });
     fireEvent.click(
       screen.getByRole("button", {
         name: "navigation.projectDialog.createAction",
@@ -255,8 +262,8 @@ describe("ProjectDialog folder input by connection mode", () => {
       expect(onMutate).toHaveBeenCalledWith({
         op: "create",
         name: "Remote Project",
-        folders: ["~/.hermes/workspace"],
-        primaryPath: "~/.hermes/workspace",
+        folders: ["/home/hermes/.hermes/workspace"],
+        primaryPath: "/home/hermes/.hermes/workspace",
       });
     });
   });

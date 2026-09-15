@@ -3299,8 +3299,6 @@ body:has(.shell-vibrant),
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  direction: rtl;
-  text-align: left;
 }
 
 .sidebar-project-dialog-primary-badge,
@@ -3389,8 +3387,6 @@ body:has(.shell-vibrant),
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  direction: rtl;
-  text-align: left;
 }
 
 .sidebar-project-dialog-browser-add {

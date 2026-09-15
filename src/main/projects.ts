@@ -289,6 +289,32 @@ function rpcParamsForMutation(m: ProjectMutation): {
 }
 
 /**
+ * Resolve a possibly `~`-prefixed path on the SSH agent host to its absolute
+ * form (`~/.hermes/workspace/misc` → `/home/hermes/.hermes/workspace/misc`).
+ * Read-only; throws when the host is unreachable so callers can keep the
+ * original spelling.
+ */
+export async function sshResolvePath(
+  config: SshConfig,
+  path: string,
+): Promise<string> {
+  const script = `
+import json, os, sys
+payload = json.loads(sys.stdin.read() or "{}")
+raw = str(payload.get("path") or "")
+if raw.startswith("~/"):
+    raw = os.path.join(os.path.expanduser("~"), raw[2:])
+elif raw.startswith("$HOME/"):
+    raw = os.path.join(os.path.expanduser("~"), raw[6:])
+print(json.dumps({"path": os.path.abspath(os.path.expanduser(raw or "."))}))
+`;
+  const out = await sshPython(config, script, JSON.stringify({ path }));
+  const parsed = JSON.parse(out.trim()) as { path?: string };
+  if (!parsed.path) throw new Error("Path resolution returned no path.");
+  return parsed.path;
+}
+
+/**
  * Run one `projects.*` mutation against the agent's JSON-RPC over the
  * dashboard WebSocket (issue #27). Throws with the backend's error message on
  * failure (e.g. "folder already belongs to project '...'"), so the dialog can

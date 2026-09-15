@@ -1004,6 +1004,9 @@ const hermesAPI = {
   createDirectory: (path: string, connectionId?: string): Promise<string> =>
     ipcRenderer.invoke("create-directory", path, connectionId),
 
+  resolvePath: (path: string, connectionId?: string): Promise<string> =>
+    ipcRenderer.invoke("resolve-path", path, connectionId),
+
   getSessionModelOverride: (
     sessionId: string,
   ): Promise<SessionModelOverride | null> =>

@@ -152,9 +152,9 @@ export default function ProjectDialog({
       setNewFolderName("");
       if (connectionMode !== "local" && !browseFailed) {
         await loadBrowse(browsePath); // show the new subdirectory immediately
-        addFolder(created);
+        await addFolder(created);
       } else {
-        addFolder(created);
+        await addFolder(created);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -186,17 +186,26 @@ export default function ProjectDialog({
     return hit ? { path: hit.path, project: owner.get(hit.path) ?? "" } : null;
   }, [existingProjects, folders, isEdit, project?.id]);
 
-  function addFolder(path: string): void {
+  async function addFolder(path: string): Promise<void> {
     const trimmed = path.trim();
     if (!trimmed) return;
-    if (folders.some((f) => f.path === trimmed)) {
+    // Store the path the way the AGENT sees it: `~/.hermes/workspace/misc`
+    // resolves to `/home/hermes/.hermes/workspace/misc` on the agent host, so
+    // the chip, the saved project, and the sidebar all show one spelling.
+    let resolved = trimmed;
+    try {
+      resolved = await window.hermesAPI.resolvePath(trimmed, connectionId);
+    } catch {
+      /* keep the user's spelling */
+    }
+    if (folders.some((f) => f.path === resolved)) {
       setError(t("navigation.projectDialog.folderDuplicate"));
       return;
     }
     setError("");
     setFolders((prev) => [
       ...prev,
-      { path: trimmed, isPrimary: prev.length === 0 },
+      { path: resolved, isPrimary: prev.length === 0 },
     ]);
     setManualPath("");
   }
@@ -204,7 +213,7 @@ export default function ProjectDialog({
   async function handlePickFolder(): Promise<void> {
     try {
       const folder = await window.hermesAPI.selectFolder();
-      if (folder) addFolder(folder);
+      if (folder) await addFolder(folder);
     } catch {
       /* picker cancelled or unavailable */
     }
@@ -459,7 +468,7 @@ export default function ProjectDialog({
                     type="button"
                     className="btn btn-secondary sidebar-project-dialog-browser-add"
                     disabled={submitting || browseLoading}
-                    onClick={() => addFolder(browsePath)}
+                    onClick={() => void addFolder(browsePath)}
                   >
                     {t("navigation.projectDialog.addCurrent")}
                   </button>
@@ -501,7 +510,7 @@ export default function ProjectDialog({
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
-                    addFolder(manualPath);
+                    void addFolder(manualPath);
                   }
                 }}
               />
@@ -509,7 +518,7 @@ export default function ProjectDialog({
                 type="button"
                 className="btn btn-secondary"
                 disabled={submitting || !manualPath.trim()}
-                onClick={() => addFolder(manualPath)}
+                onClick={() => void addFolder(manualPath)}
               >
                 {t("navigation.projectDialog.addFolder")}
               </button>
