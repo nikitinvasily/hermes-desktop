@@ -548,6 +548,15 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     };
   }, [open, connectionId, activeProfile, refreshProjects]);
 
+  // Projects also refresh on the slow background cadence, so a project
+  // created by another surface (agent CLI, dashboard) shows up without a
+  // section remount.
+  useEffect(() => {
+    if (!open) return;
+    const timer = setInterval(() => void refreshProjects(), RECENT_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [open, refreshProjects]);
+
   const handleProjectMutate = useCallback(
     async (
       mutation: import("../../../../shared/projects").ProjectMutation,
