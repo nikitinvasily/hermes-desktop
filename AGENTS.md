@@ -17,6 +17,7 @@ Once a task's implementation plan is agreed (bug fix or feature), track it throu
 After EVERY task, before responding to the user:
 
 - [ ] Update `lat.md/` if you added or changed any functionality, architecture, tests, or behavior
+- [ ] Update the "Fork differences vs upstream" section in `README.md` if the change is fork-specific (a fix or feature not present in upstream). Do not remove entries when syncing with upstream; drop one only after upstream adopts the change
 - [ ] Run `lat check` — all wiki links and code refs must pass
 - [ ] Do not skip these steps. Do not consider your task done until both are complete.
 
