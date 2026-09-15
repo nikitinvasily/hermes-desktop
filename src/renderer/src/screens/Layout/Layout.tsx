@@ -115,6 +115,37 @@ function Layout({
   const [resumingSessionId, setResumingSessionId] = useState<string | null>(
     null,
   );
+  // Connection switches (status-bar chip or Settings) must not leave a chat
+  // from the previous connection visible. Same policy as profile switches:
+  // keep the old run mounted in the background, activate a run bound to the
+  // new connection. Runs on the previous connectionId stay reachable if the
+  // user switches back.
+  const connectionIdRef = useRef(connectionId);
+  if (
+    connectionIdRef.current !== connectionId &&
+    // Skip the boot-time ""→real-id fill: the initial scratch run is minted
+    // before the registry resolves and must not be treated as a switch.
+    connectionIdRef.current !== ""
+  ) {
+    connectionIdRef.current = connectionId;
+    if (runs.length > 0) {
+      const next = selectProfileRunTransition(
+        runs,
+        activeRunId,
+        connectionId,
+        activeProfile,
+      );
+      if (next.activeRunId !== activeRunId || next.runs !== runs) {
+        // Defer the setState: this runs during render of a parent-driven
+        // update (App's connectionId changed); scheduling our own update in
+        // the same commit keeps React happy.
+        queueMicrotask(() => {
+          setRuns(next.runs);
+          setActiveRunId(next.activeRunId);
+        });
+      }
+    }
+  }
   // Sessions whose resume is in flight — dedupes rapid double-clicks that would
   // otherwise mount two tabs for the same session (the live check straddles an
   // await, so it can't rely on `runs` state alone).

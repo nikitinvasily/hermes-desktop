@@ -54,4 +54,7 @@ export default {
   copied: "Copied!",
   showMore: "Show more",
   showLess: "Show less",
+  switchConnection: "Switch connection",
+  sshInterruptWarning:
+    "Switching away stops the shared SSH tunnel; SSH chats pause until you switch back.",
 } as const;
