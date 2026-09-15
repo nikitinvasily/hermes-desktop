@@ -158,4 +158,27 @@ describe("isLossyChunkCopy", () => {
     expect(full.includes(partial)).toBe(false);
     expect(isLossyChunkCopy(partial, full)).toBe(true);
   });
+
+  // A real damaged stream is not a surgical substring excision: besides
+  // dropped chunks it carries stray characters that exist nowhere in the
+  // canonical text (a backtick from a markdown span that never assembled)
+  // and head fragments cut to 1-2 chars. The matcher may skip a bounded
+  // number of such characters (5% of the partial, min 3) before giving up.
+  it("accepts a chunk-dropped copy with a stray char and a cut head", () => {
+    const full =
+      "Уведомление про npm install — это финальный лог уже завершенной установки (908 пакетов за 2 минуты, нативный better-sqlite3 пересобран под arm64, 4 умеренных уязвимости — типично для Electron-стека, не блокер). Ничего нового делать не нужно. Текущее состояние: npm run dev работает, приложение запущено. Готов к доработкам — что правим?";
+    // "У" (cut head), "ведомление" dropped after it, a stray backtick after
+    // "dev", a missing space after "состояние:" — all three mutations at once.
+    const partial =
+      "Уомление про npm install — это ф пересобран под arm64, Текущее состояние:npm run dev` работает, приложение запущено. Готов";
+    expect(isLossyChunkCopy(partial, full)).toBe(true);
+  });
+
+  it("rejects a partial with more junk than the budget allows", () => {
+    // 12 chars, four of them absent from the full text: over the 3-char
+    // budget, so the shape test must fail.
+    expect(
+      isLossyChunkCopy("abcdefzzzzgh", "abcdefgh ijkl mnop qrst uvwx"),
+    ).toBe(false);
+  });
 });

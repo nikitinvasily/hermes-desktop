@@ -27,6 +27,14 @@ const DENSE_SCRIPT_RE =
 // real streaming data to calibrate the threshold against.
 const DENSE_SCRIPT_MIN_RUN = 6;
 
+// Real damaged streams are not surgical substring excisions: they also carry
+// a few characters that exist nowhere in the canonical text — a stray
+// backtick from a markdown span that never assembled, a head fragment cut to
+// 1-2 chars at the stream start. The matcher may skip such chars, but only
+// a bounded number, so "unrelated text" still can't be skipped into a match.
+const MAX_JUNK_RATIO = 0.05;
+const MIN_JUNK_BUDGET = 3;
+
 function isDenseScriptChar(char: string): boolean {
   return DENSE_SCRIPT_RE.test(char);
 }
@@ -76,11 +84,22 @@ export function isLossyChunkCopy(
   if (partialChars.length >= fullChars.length) return false;
   if (partialChars.length < minCoverage * fullChars.length) return false;
 
-  const run =
-    minRun ??
-    (isDenseScriptHeavy(partial) || isDenseScriptHeavy(full)
-      ? DENSE_SCRIPT_MIN_RUN
-      : 3);
+  const denseScript = isDenseScriptHeavy(partial) || isDenseScriptHeavy(full);
+  const run = minRun ?? (denseScript ? DENSE_SCRIPT_MIN_RUN : 3);
+
+  // Budget of characters in `partial` that may fail to anchor anywhere in
+  // `full` (stray backticks, truncated head fragments) before the shape test
+  // gives up. Bounded by ratio AND a small absolute floor so both a short
+  // partial and a long one stay conservative. Dense-script text gets NO
+  // budget: its raised run length exists precisely because a coincidental
+  // run recurs by chance there (#793), and skipping unanchored chars would
+  // compound that coincidence into a false match.
+  let junkBudget = denseScript
+    ? 0
+    : Math.max(
+        Math.floor(MAX_JUNK_RATIO * partialChars.length),
+        Math.min(MIN_JUNK_BUDGET, partialChars.length - 1),
+      );
 
   // `run` counts CHARACTERS, and a JS string index counts UTF-16 code
   // units: a supplementary-plane ideograph (Extension B and later) is a
@@ -95,7 +114,19 @@ export function isLossyChunkCopy(
     const remaining = partialChars.length - i;
     const probeLen = Math.min(run, remaining);
     const at = indexOfSeq(fullChars, partialChars, i, probeLen, j);
-    if (at < 0) return false;
+    if (at < 0) {
+      // The probe didn't anchor: either this is a boundary stub (a 1-2 char
+      // head cut mid-word, e.g. "У" from "Уведомление") or a junk char that
+      // exists nowhere in the canonical text (a stray backtick from a
+      // markdown span that never assembled). Skip exactly ONE character
+      // against a bounded budget — skipping the whole probe would burn the
+      // budget on a single failure and jump past valid anchors. Exhausting
+      // the budget means the partial is not a copy of this full text.
+      junkBudget -= 1;
+      if (junkBudget < 0) return false;
+      i += 1;
+      continue;
+    }
     // A short trailing probe (the final run) may be under `run`; any other
     // run must anchor with at least `run` matching characters.
     if (probeLen < run && remaining > probeLen) return false;

@@ -446,6 +446,33 @@ function normalizeText(value: string): string {
 }
 
 /**
+ * Sørensen–Dice coefficient over character bigrams: 1.0 for identical
+ * strings, ~0 for unrelated ones. A cheap similarity signal for damaged
+ * streams the strict run-shape matcher still misses.
+ */
+function charBigramDice(a: string, b: string): number {
+  if (a.length < 2 || b.length < 2) return 0;
+  const grams = new Map<string, number>();
+  for (let i = 0; i < a.length - 1; i++) {
+    const gram = a.slice(i, i + 2);
+    grams.set(gram, (grams.get(gram) || 0) + 1);
+  }
+  let hits = 0;
+  for (let i = 0; i < b.length - 1; i++) {
+    const gram = b.slice(i, i + 2);
+    const count = grams.get(gram) || 0;
+    if (count > 0) {
+      grams.set(gram, count - 1);
+      hits++;
+    }
+  }
+  return (2 * hits) / (a.length - 1 + b.length - 1);
+}
+
+const SIMILARITY_MIN_LENGTH = 12;
+const SIMILARITY_THRESHOLD = 0.6;
+
+/**
  * Length of the longest suffix of `a` that is also a prefix of `b`, used to
  * stitch a re-streamed boundary without duplicating the shared run. The
  * overlap is rejected when it would splice the middle of a word on either
@@ -539,6 +566,24 @@ export function mergeStreamedWithFinal(
     const meaningful = shared.replace(/[\s\p{P}]/gu, "").length;
     const shorter = Math.min(streamedContent.length, finalContent.length);
     if (meaningful >= 3 && suffix / shorter >= 0.5) return finalContent;
+  }
+
+  // Similarity fallback: a damaged stream the strict run-shape matcher and
+  // the seam/suffix heuristics all missed can still be recognisably the SAME
+  // text as the final — e.g. a chunk-dropped copy with several stray
+  // characters. When character-bigram similarity is high, the final replaces
+  // the garble instead of stacking a near-duplicate above it. The minimum
+  // length keeps short lead-ins ("On it.") on the concatenate path, and the
+  // threshold is far above what unrelated same-language sentences score.
+  if (
+    // Code points, not UTF-16 units: a supplementary-plane string of 11
+    // ideographs is 22 code units and would slip past a unit-based check
+    // (the same trap the lossy-copy guards guard against).
+    [...normStreamed].length >= SIMILARITY_MIN_LENGTH &&
+    [...normFinal].length >= SIMILARITY_MIN_LENGTH &&
+    charBigramDice(normStreamed, normFinal) >= SIMILARITY_THRESHOLD
+  ) {
+    return finalContent;
   }
 
   return `${streamedContent}\n\n${finalContent}`;
