@@ -615,11 +615,18 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         ),
       );
       try {
-        await window.hermesAPI.setSessionContextFolder(id, normalized);
+        await window.hermesAPI.setSessionContextFolder(
+          id,
+          normalized,
+          connectionId,
+          activeProfile,
+        );
         // Other surfaces (chat view, Sessions screen) listen for this to
         // refresh their own grouping.
         window.dispatchEvent(
-          new CustomEvent("hermes-session-context-folder-changed"),
+          new CustomEvent("hermes-session-context-folder-changed", {
+            detail: { sessionId: id, folder: normalized },
+          }),
         );
       } catch (err) {
         console.error("Failed to move session to project", id, err);
@@ -630,7 +637,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         );
       }
     },
-    [],
+    [activeProfile, connectionId],
   );
 
   const handlePickNewFolder = useCallback(

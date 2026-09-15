@@ -43,6 +43,7 @@ import {
   localProjectFolderNames,
   remoteProjectFolderNames,
   mergeDesktopBindingsIntoRemoteList,
+  moveSessionWorkspaceOnAgent,
   type ProjectFolderNames,
 } from "../project-names";
 import {
@@ -2461,8 +2462,24 @@ export function registerIpcHandlers(context: IpcContext): void {
 
   ipcMain.handle(
     "set-session-context-folder",
-    (_event, sessionId: string, folder: string | null) => {
+    async (
+      _event,
+      sessionId: string,
+      folder: string | null,
+      connectionId?: string,
+      profile?: string,
+    ) => {
       setSessionContextFolder(sessionId, folder);
+      // Re-home the session's workspace ON THE AGENT too, so the chat's
+      // working directory (not just the sidebar grouping) follows the
+      // Move-to-project choice (issue #23). Local agent sessions get the
+      // same treatment — the local dashboard speaks the same RPC.
+      void moveSessionWorkspaceOnAgent(
+        profile,
+        connectionId,
+        sessionId,
+        folder,
+      ).catch(() => undefined);
       return true;
     },
   );

@@ -1,8 +1,10 @@
 import { join } from "path";
 import { existsSync } from "fs";
+import WebSocket from "ws";
 import Database from "better-sqlite3";
 import { profileHome } from "./utils";
 import { remoteRequestJson, type RemoteSessionConfig } from "./remote-sessions";
+import { freshDashboardWebSocketUrl } from "./dashboard";
 import type { CachedSession } from "./session-cache";
 
 /**
@@ -88,6 +90,76 @@ export function mergeDesktopBindingsIntoRemoteList(
     return bound === session.contextFolder
       ? session
       : { ...session, contextFolder: bound };
+  });
+}
+
+/**
+ * Re-home a session's workspace ON THE AGENT (issue #23): calls the gateway
+ * JSON-RPC `session.workspace.move` over the dashboard WebSocket, which
+ * rewrites the session's `cwd`/`git_branch`/`git_repo_root` in the agent's
+ * own state.db. This is what actually moves the chat's working directory —
+ * the desktop-side binding only controls sidebar grouping.
+ *
+ * Best-effort by design: when the dashboard is unreachable the caller keeps
+ * the desktop-side grouping change, and the remote cwd stays as it was.
+ */
+export async function moveSessionWorkspaceOnAgent(
+  profile: string | undefined,
+  connectionId: string | undefined,
+  sessionId: string,
+  folder: string | null,
+): Promise<boolean> {
+  if (!folder) return false; // Unlink is desktop-side only; nothing to move.
+  let wsUrl: string;
+  try {
+    wsUrl = await freshDashboardWebSocketUrl(profile, connectionId);
+  } catch {
+    return false;
+  }
+  return new Promise<boolean>((resolve) => {
+    const socket = new WebSocket(wsUrl);
+    const requestId = 1;
+    const timer = setTimeout(() => {
+      socket.terminate();
+      resolve(false);
+    }, 15_000);
+    timer.unref?.();
+    const finish = (ok: boolean): void => {
+      clearTimeout(timer);
+      try {
+        socket.close();
+      } catch {
+        /* already closed */
+      }
+      resolve(ok);
+    };
+    socket.on("open", () => {
+      socket.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: requestId,
+          method: "session.workspace.move",
+          params: { session_key: sessionId, cwd: folder },
+        }),
+      );
+    });
+    socket.on("message", (data) => {
+      try {
+        const frame = JSON.parse(String(data)) as {
+          id?: number;
+          error?: { message?: string };
+        };
+        if (frame.id !== requestId) return;
+        finish(!frame.error);
+      } catch {
+        /* ignore non-JSON frames */
+      }
+    });
+    socket.on("error", () => finish(false));
+    socket.on("close", () => {
+      clearTimeout(timer);
+      resolve(false);
+    });
   });
 }
 

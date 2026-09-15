@@ -270,7 +270,7 @@ function Chat({
       .then(() => {
         window.dispatchEvent(
           new CustomEvent("hermes-session-context-folder-changed", {
-            detail: { sessionId: hermesSessionId },
+            detail: { sessionId: hermesSessionId, folder: contextFolder },
           }),
         );
       })
@@ -278,6 +278,34 @@ function Chat({
         /* best-effort sidebar refresh signal */
       });
   }, [hermesSessionId, contextFolder]);
+
+  // A Move-to-project in the sidebar (or another surface) re-homes this
+  // session while its chat tab is open: follow the new folder so subsequent
+  // sends scope to it instead of silently keeping the old one (issue #23).
+  useEffect(() => {
+    const onFolderChanged = (event: Event): void => {
+      const detail = (
+        event as CustomEvent<{ sessionId?: string; folder?: string | null }>
+      ).detail;
+      const target = detail?.sessionId ?? hermesSessionId;
+      if (!target || target !== hermesSessionId) return;
+      const next = detail.folder ?? null;
+      if (next === contextFolder) return;
+      lastPersistedFolderRef.current = next;
+      setContextFolder(next);
+    };
+    window.addEventListener(
+      "hermes-session-context-folder-changed",
+      onFolderChanged,
+    );
+    return () => {
+      window.removeEventListener(
+        "hermes-session-context-folder-changed",
+        onFolderChanged,
+      );
+    };
+  }, [hermesSessionId, contextFolder]);
+
   // Whether the worktree panel is visible (only applies when contextFolder is set)
   // Default false so the panel doesn't open automatically and interfere with scrolling
   const [worktreeVisible, setWorktreeVisible] = useState<boolean>(false);
