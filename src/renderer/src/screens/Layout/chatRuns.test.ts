@@ -25,6 +25,49 @@ function run(
 }
 
 describe("chat run profile transitions", () => {
+  it("mints a run for the new connection instead of showing its stale chat", () => {
+    // Regression: switching connections (status-bar chip / Settings) used to
+    // leave the active tab on the old connection, so the chat list looked
+    // stale after switching back to local.
+    const randomUUID = vi
+      .spyOn(crypto, "randomUUID")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000009")
+      .mockReturnValueOnce("00000000-0000-4000-8000-00000000000a");
+    const sshRun = run("run-ssh", "default", {
+      connectionId: "connection-ssh",
+      sessionId: "session-ssh",
+    });
+
+    const toLocal = selectProfileRunTransition(
+      [sshRun],
+      sshRun.runId,
+      "connection-local",
+      "default",
+    );
+    expect(toLocal.activeRunId).toBe(
+      "run-00000000-0000-4000-8000-000000000009",
+    );
+    expect(toLocal.runs).toHaveLength(2);
+    expect(toLocal.runs.at(-1)).toMatchObject({
+      connectionId: "connection-local",
+      profile: "default",
+    });
+
+    // Switching back keeps the SSH run mounted but activates a fresh
+    // scratch for it (same policy as profile switches: never silently
+    // reopen a conversation).
+    const backToSsh = selectProfileRunTransition(
+      toLocal.runs,
+      toLocal.activeRunId,
+      "connection-ssh",
+      "default",
+    );
+    expect(backToSsh.activeRunId).not.toBe(toLocal.activeRunId);
+    expect(backToSsh.runs).toHaveLength(3);
+    expect(backToSsh.runs.map((r) => r.runId)).toContain(sshRun.runId);
+    randomUUID.mockRestore();
+  });
+
   it("re-homes a scratch run when switching profiles", () => {
     const runs = [run("run-a", "kitt")];
 
