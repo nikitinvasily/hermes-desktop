@@ -38,16 +38,27 @@ beforeEach(() => {
     writable: true,
     value: {
       selectFolder: vi.fn(async () => "/tmp/picked"),
+      createDirectory: vi.fn(
+        async (path: string): Promise<string> =>
+          path.startsWith("~/")
+            ? `/Users/test${path.slice(1)}`
+            : `/remote${path.startsWith("/") ? "" : "/"}${path}`,
+      ),
       readDirectory: vi.fn(
         async (
           path: string,
         ): Promise<{ name: string; isDirectory: boolean }[] | null> =>
-          path === "~"
+          path === "~/.hermes/workspace"
             ? [
-                { name: "home", isDirectory: true },
-                { name: "file.txt", isDirectory: false },
+                { name: "proj-a", isDirectory: true },
+                { name: "notes.txt", isDirectory: false },
               ]
-            : null,
+            : path === "~"
+              ? [
+                  { name: "home", isDirectory: true },
+                  { name: "file.txt", isDirectory: false },
+                ]
+              : null,
       ),
     },
   });
@@ -189,13 +200,13 @@ describe("ProjectDialog edit", () => {
 });
 
 describe("ProjectDialog folder input by connection mode", () => {
-  it("remote mode shows the folder browser plus a manual path input", async () => {
+  it("remote mode starts the browser at the agent's workspace dir", async () => {
     renderDialog("create", "remote");
-    // Browser: initial load at the agent's ~ lists subdirectories only.
-    const entry = await screen.findByRole("button", { name: /home/ });
+    // The initial load probes ~/.hermes/workspace and stays there.
+    const entry = await screen.findByRole("button", { name: /proj-a/ });
     expect(entry).toBeTruthy();
     // Non-directories are filtered out of the browser list.
-    expect(screen.queryByText("file.txt")).toBeNull();
+    expect(screen.queryByText("notes.txt")).toBeNull();
     // Manual input stays as the fallback path.
     expect(
       screen.getByPlaceholderText("navigation.projectDialog.pathPlaceholder"),
@@ -205,6 +216,19 @@ describe("ProjectDialog folder input by connection mode", () => {
         name: "navigation.projectDialog.addFolder",
       }),
     ).toBeTruthy();
+  });
+
+  it("falls back to the agent's home when the workspace dir is absent", async () => {
+    const entries = await window.hermesAPI.readDirectory("~/.hermes/workspace");
+    expect(entries).not.toBeNull(); // stub has the workspace; override it
+    (
+      window.hermesAPI.readDirectory as ReturnType<typeof vi.fn>
+    ).mockImplementation(async (path: string) =>
+      path === "~" ? [{ name: "home", isDirectory: true }] : null,
+    );
+    renderDialog("create", "ssh");
+    const entry = await screen.findByRole("button", { name: /home/ });
+    expect(entry).toBeTruthy();
   });
 
   it("browser navigation adds the visited directory as a folder", async () => {
@@ -217,11 +241,11 @@ describe("ProjectDialog folder input by connection mode", () => {
       name: "navigation.projectDialog.addCurrent",
     });
     fireEvent.click(addCurrent);
-    // "~" itself becomes the folder chip (the chip list renders it).
+    // The current browser path becomes the folder chip.
     expect(
       document.querySelector(".sidebar-project-dialog-folder-path")
         ?.textContent,
-    ).toBe("~");
+    ).toBe("~/.hermes/workspace");
     fireEvent.click(
       screen.getByRole("button", {
         name: "navigation.projectDialog.createAction",
@@ -231,9 +255,37 @@ describe("ProjectDialog folder input by connection mode", () => {
       expect(onMutate).toHaveBeenCalledWith({
         op: "create",
         name: "Remote Project",
-        folders: ["~"],
-        primaryPath: "~",
+        folders: ["~/.hermes/workspace"],
+        primaryPath: "~/.hermes/workspace",
       });
+    });
+  });
+
+  it("creates a folder under the current browser path and adds it", async () => {
+    renderDialog("create", "ssh");
+    await screen.findByRole("button", { name: /proj-a/ });
+    fireEvent.change(
+      screen.getByPlaceholderText(
+        "navigation.projectDialog.newFolderRemotePlaceholder",
+      ),
+      { target: { value: "brand-new" } },
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "navigation.projectDialog.newFolder",
+      }),
+    );
+    await waitFor(() => {
+      expect(window.hermesAPI.createDirectory).toHaveBeenCalledWith(
+        "~/.hermes/workspace/brand-new",
+        undefined,
+      );
+    });
+    await waitFor(() => {
+      expect(
+        document.querySelector(".sidebar-project-dialog-folder-path")
+          ?.textContent,
+      ).toBe("/Users/test/.hermes/workspace/brand-new");
     });
   });
 

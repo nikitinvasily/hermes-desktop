@@ -1326,6 +1326,8 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
           <ProjectDialog
             state={projectDialog}
             connectionMode={connectionMode}
+            connectionId={connectionId}
+            activeProfile={activeProfile}
             onClose={() => setProjectDialog(null)}
             onMutate={handleProjectMutate}
             onChanged={handleProjectChanged}

@@ -5,7 +5,7 @@ import Database from "better-sqlite3";
 import { profileHome } from "./utils";
 import { remoteRequestJson, type RemoteSessionConfig } from "./remote-sessions";
 import { freshDashboardWebSocketUrl } from "./dashboard";
-import { sshExec } from "./ssh-remote";
+import { sshPython } from "./ssh-remote";
 import type { SshConfig } from "./ssh-tunnel";
 import type {
   ProjectFolderInfo,
@@ -187,7 +187,7 @@ print(json.dumps(list(projects.values())))
 conn.close()
 `;
   try {
-    const out = await sshExec(config, "python3 -", script);
+    const out = await sshPython(config, script);
     const parsed = JSON.parse(out.trim() || "[]") as Array<
       Record<string, unknown>
     >;
@@ -207,6 +207,39 @@ conn.close()
   } catch {
     return [];
   }
+}
+
+/**
+ * Create a directory on the SSH agent host (issue #27 follow-up). Refuses
+ * paths outside the remote user's home — the desktop should not be able to
+ * mint arbitrary directories on a server it merely chats with. `~` and
+ * `$HOME` prefixes expand on the remote. Returns the absolute created path.
+ */
+export async function sshCreateDirectory(
+  config: SshConfig,
+  path: string,
+): Promise<string> {
+  const script = `
+import json, os, sys
+payload = json.loads(sys.stdin.read() or "{}")
+raw = str(payload.get("path") or "")
+if raw.startswith("~/"):
+    raw = os.path.join(os.path.expanduser("~"), raw[2:])
+elif raw.startswith("$HOME/"):
+    raw = os.path.join(os.path.expanduser("~"), raw[6:])
+path = os.path.abspath(os.path.expanduser(raw))
+home = os.path.expanduser("~")
+if path != home and not path.startswith(home + os.sep):
+    print(json.dumps({"error": "refusing to create a directory outside the remote home"}))
+    sys.exit(1)
+os.makedirs(path, exist_ok=True)
+print(json.dumps({"path": path}))
+`;
+  const out = await sshPython(config, script, JSON.stringify({ path }));
+  const parsed = JSON.parse(out.trim()) as { path?: string; error?: string };
+  if (parsed.error) throw new Error(parsed.error);
+  if (!parsed.path) throw new Error("Directory creation returned no path.");
+  return parsed.path;
 }
 
 function rpcParamsForMutation(m: ProjectMutation): {

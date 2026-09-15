@@ -1001,6 +1001,9 @@ const hermesAPI = {
   ): Promise<unknown> =>
     ipcRenderer.invoke("project-mutate", mutation, connectionId, profile),
 
+  createDirectory: (path: string, connectionId?: string): Promise<string> =>
+    ipcRenderer.invoke("create-directory", path, connectionId),
+
   getSessionModelOverride: (
     sessionId: string,
   ): Promise<SessionModelOverride | null> =>

@@ -37,6 +37,10 @@ interface ProjectDialogProps {
   state: ProjectDialogState;
   /** "local" → native picker; anything else → text input. */
   connectionMode: "local" | "remote" | "ssh";
+  /** Stable connection registry id — routes create-directory to the agent. */
+  connectionId?: string;
+  /** Active profile — picks the workspace dir the browser starts in. */
+  activeProfile?: string;
   onClose: () => void;
   /** Run a mutation; resolves on success, throws with the backend error. */
   onMutate: (mutation: ProjectMutation) => Promise<unknown>;
@@ -51,6 +55,8 @@ interface ProjectDialogProps {
 export default function ProjectDialog({
   state,
   connectionMode,
+  connectionId,
+  activeProfile,
   onClose,
   onMutate,
   onChanged,
@@ -77,12 +83,19 @@ export default function ProjectDialog({
   // Remote/ssh folder browser state (issue #27 follow-up): the agent host's
   // directories, read through the existing read-directory IPC (ssh exec or
   // local readdir; HTTP-remote returns null → falls back to manual input).
+  // The browser starts at the agent's workspace dir when it exists
+  // (~/.hermes/workspace, or ~/.hermes/profiles/<name>/workspace for a
+  // profile) — that is where the agent's projects live — else at its home.
   const [browsePath, setBrowsePath] = useState("~");
   const [browseEntries, setBrowseEntries] = useState<
     { name: string; isDirectory: boolean }[] | null
   >(null);
   const [browseLoading, setBrowseLoading] = useState(false);
   const [browseFailed, setBrowseFailed] = useState(false);
+  // "New folder" flow: name entered under the CURRENT browser path (remote)
+  // or a full path (local — the native picker cannot create dirs).
+  const [newFolderName, setNewFolderName] = useState("");
+  const [creating, setCreating] = useState(false);
 
   const loadBrowse = useCallback(async (path: string): Promise<void> => {
     setBrowseLoading(true);
@@ -104,10 +117,51 @@ export default function ProjectDialog({
     }
   }, []);
 
-  // Open the browser at the agent's home on first render in remote modes.
+  // Open the browser at the agent's workspace on first render in remote
+  // modes, falling back through profile workspace → home.
   useEffect(() => {
-    if (connectionMode !== "local") void loadBrowse("~");
+    if (connectionMode === "local") return;
+    void (async () => {
+      const base =
+        activeProfile && activeProfile !== "default"
+          ? `~/.hermes/profiles/${activeProfile}/workspace`
+          : "~/.hermes/workspace";
+      const entries = await window.hermesAPI
+        .readDirectory(base)
+        .catch(() => null);
+      void loadBrowse(entries ? base : "~");
+    })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps -- initial load only
+
+  async function handleCreateFolder(): Promise<void> {
+    const name = newFolderName.trim();
+    if (!name || creating) return;
+    setCreating(true);
+    setError("");
+    try {
+      // Remote: create under the current browser path. Local: a full path
+      // (typically ~/Documents/<name>).
+      const target =
+        connectionMode === "local"
+          ? name
+          : `${browsePath.replace(/\/$/, "")}/${name}`;
+      const created = await window.hermesAPI.createDirectory(
+        target,
+        connectionId,
+      );
+      setNewFolderName("");
+      if (connectionMode !== "local" && !browseFailed) {
+        await loadBrowse(browsePath); // show the new subdirectory immediately
+        addFolder(created);
+      } else {
+        addFolder(created);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCreating(false);
+    }
+  }
 
   useEffect(() => {
     nameRef.current?.focus();
@@ -337,15 +391,45 @@ export default function ProjectDialog({
         </div>
 
         {connectionMode === "local" ? (
-          <button
-            type="button"
-            className="btn btn-secondary sidebar-project-dialog-add"
-            disabled={submitting}
-            onClick={() => void handlePickFolder()}
-          >
-            <Plus size={13} />
-            {t("navigation.projectDialog.addFolder")}
-          </button>
+          <div className="sidebar-project-dialog-local">
+            <button
+              type="button"
+              className="btn btn-secondary sidebar-project-dialog-add"
+              disabled={submitting}
+              onClick={() => void handlePickFolder()}
+            >
+              <Plus size={13} />
+              {t("navigation.projectDialog.addFolder")}
+            </button>
+            <div className="sidebar-project-dialog-manual">
+              <input
+                className="sidebar-project-dialog-input"
+                type="text"
+                placeholder={t(
+                  "navigation.projectDialog.newFolderLocalPlaceholder",
+                )}
+                value={newFolderName}
+                disabled={submitting || creating}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void handleCreateFolder();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={submitting || creating || !newFolderName.trim()}
+                onClick={() => void handleCreateFolder()}
+              >
+                {creating
+                  ? t("navigation.projectDialog.creating")
+                  : t("navigation.projectDialog.newFolder")}
+              </button>
+            </div>
+          </div>
         ) : (
           <div className="sidebar-project-dialog-browser">
             {!browseFailed && (
@@ -434,6 +518,34 @@ export default function ProjectDialog({
               {browseFailed
                 ? t("navigation.projectDialog.browseUnavailable")
                 : t("navigation.projectDialog.remoteHint")}
+            </div>
+            <div className="sidebar-project-dialog-manual">
+              <input
+                className="sidebar-project-dialog-input"
+                type="text"
+                placeholder={t(
+                  "navigation.projectDialog.newFolderRemotePlaceholder",
+                )}
+                value={newFolderName}
+                disabled={submitting || creating}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void handleCreateFolder();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={submitting || creating || !newFolderName.trim()}
+                onClick={() => void handleCreateFolder()}
+              >
+                {creating
+                  ? t("navigation.projectDialog.creating")
+                  : t("navigation.projectDialog.newFolder")}
+              </button>
             </div>
           </div>
         )}

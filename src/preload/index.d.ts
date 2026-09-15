@@ -723,6 +723,7 @@ interface HermesAPI {
     connectionId?: string,
     profile?: string,
   ) => Promise<unknown>;
+  createDirectory: (path: string, connectionId?: string) => Promise<string>;
   getSessionModelOverride: (
     sessionId: string,
   ) => Promise<SessionModelOverride | null>;
