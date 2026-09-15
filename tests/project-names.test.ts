@@ -132,6 +132,19 @@ describe("remoteProjectFolderNames", () => {
   });
 });
 
+// @lat: [[connections#Test specifications#Connection-explicit session browsing#Move-to-project re-homes the session workspace on the agent]]
+describe("moveSessionWorkspaceOnAgent", () => {
+  it("returns false without throwing when the dashboard is unreachable", async () => {
+    // Best-effort contract: a failed probe must resolve false (the caller
+    // keeps the desktop-side grouping change), never reject.
+    const { moveSessionWorkspaceOnAgent } =
+      await import("../src/main/project-names");
+    await expect(
+      moveSessionWorkspaceOnAgent(undefined, undefined, "s1", "/x"),
+    ).resolves.toBe(false);
+  });
+});
+
 // @lat: [[connections#Test specifications#Connection-explicit session browsing#Manual Move-to-project survives a Remote sync]]
 describe("mergeDesktopBindingsIntoRemoteList", () => {
   const session = (

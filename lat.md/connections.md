@@ -161,7 +161,9 @@ Detail: an explicit binding overrides the derived folder, an empty sentinel unli
 
 #### Move-to-project re-homes the session workspace on the agent
 
-Move to project also calls the gateway RPC `session.workspace.move` over the dashboard WebSocket, rewriting the session's `cwd`/`git_branch`/`git_repo_root` in the agent's own state.db — the chat's working directory follows the move, not just the sidebar grouping. An open chat tab listens for the folder-changed event and adopts the new folder for subsequent sends.
+Move to project also calls the gateway RPC `session.workspace.move` over the dashboard WebSocket, so the chat's working directory follows the move, not just the sidebar grouping.
+
+Detail: the RPC rewrites the session's `cwd`/`git_branch`/`git_repo_root` in the agent's own state.db (local agent included). An open chat tab listens for the folder-changed event and adopts the new folder for subsequent sends.
 
 ### Non-destructive registry recovery
 
