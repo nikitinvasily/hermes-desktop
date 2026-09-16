@@ -8,7 +8,6 @@ import {
   ChevronRight,
   Copy,
   Folder,
-  FolderInput,
   Pencil,
   Pin,
   PinOff,
@@ -74,7 +73,6 @@ function SidebarSessionMenu({
   onRename,
   onCopySessionId,
   onMoveToProject,
-  onPickNewFolder,
   onArchive,
   onDelete,
 }: {
@@ -93,7 +91,6 @@ function SidebarSessionMenu({
   onRename: () => void;
   onCopySessionId: (sessionId: string) => void;
   onMoveToProject: (path: string | null) => void;
-  onPickNewFolder: () => void;
   onArchive: () => void;
   onDelete: () => void;
 }): React.JSX.Element {
@@ -245,7 +242,7 @@ function SidebarSessionMenu({
                       className="sidebar-session-menu-item"
                       onClick={goToProjects}
                     >
-                      <FolderInput size={15} />
+                      <Folder size={15} />
                       <span>{t("navigation.sessionMenu.moveToProject")}</span>
                       <ChevronRight
                         size={14}
@@ -330,20 +327,6 @@ function SidebarSessionMenu({
                       )}
                     </div>
                     <div className="sidebar-session-menu-divider" />
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="sidebar-session-menu-item"
-                      onClick={() => {
-                        onPickNewFolder();
-                        requestClose();
-                      }}
-                    >
-                      <FolderInput size={15} />
-                      <span>
-                        {t("navigation.sessionMenu.newProjectFolder")}
-                      </span>
-                    </button>
                     {currentFolder && (
                       <button
                         type="button"

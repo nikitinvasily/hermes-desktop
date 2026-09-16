@@ -35,7 +35,6 @@ export default {
     rename: "Rename",
     copySessionId: "Copy session ID",
     moveToProject: "Move to project",
-    newProjectFolder: "New folder…",
     removeFromProject: "Remove from project",
     noProjects: "No projects yet",
     archive: "Archive",

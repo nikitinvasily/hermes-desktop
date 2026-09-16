@@ -669,8 +669,11 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     [projectNames, projectNamesFromList],
   );
 
-  // Every distinct project folder currently in use, so "Move to project" lists
-  // them all — even ones whose only conversation is pinned or filtered out.
+  // Choices for "Move to project": EVERY loaded agent project (zero-session
+  // ones included — the same source as the Projects section, issue #36) plus
+  // session-derived folders that have no project record. Building this from
+  // session contextFolders alone hid projects whose sessions sat outside the
+  // loaded 50-row window (worst over SSH, where cwd-less cron rows crowd it).
   const projectChoices = useMemo<SidebarMenuProject[]>(() => {
     const byPath = new Map<string, SidebarMenuProject>();
     for (const s of sessions) {
@@ -682,8 +685,17 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         });
       }
     }
+    for (const p of projects ?? []) {
+      const add = (path: string | null | undefined): void => {
+        const key = path?.trim();
+        if (!key || byPath.has(key)) return;
+        byPath.set(key, { path: key, name: p.name || folderName(key) });
+      };
+      add(p.primaryPath);
+      for (const f of p.folders) add(f.path);
+    }
     return Array.from(byPath.values());
-  }, [sessions, projectNames]);
+  }, [sessions, projectNames, projects]);
 
   const togglePinned = (): void => {
     setPinnedOpen((prev) => {
@@ -793,18 +805,6 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
       }
     },
     [activeProfile, connectionId],
-  );
-
-  const handlePickNewFolder = useCallback(
-    async (id: string): Promise<void> => {
-      try {
-        const folder = await window.hermesAPI.selectFolder();
-        if (folder) await handleMoveToProject(id, folder);
-      } catch (err) {
-        console.error("Folder selection failed", err);
-      }
-    },
-    [handleMoveToProject],
   );
 
   const confirmDelete = useCallback(
@@ -1309,7 +1309,6 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
           onMoveToProject={(path) =>
             void handleMoveToProject(menuTarget.id, path)
           }
-          onPickNewFolder={() => void handlePickNewFolder(menuTarget.id)}
           onArchive={() => void handleArchive(menuTarget.id)}
           onDelete={() => setPendingDeleteId(menuTarget.id)}
         />
