@@ -976,7 +976,7 @@ function Chat({
     [selectModel],
   );
 
-  const handleSelectRecentFolder = useCallback((path: string) => {
+  const handleSelectFolder = useCallback((path: string) => {
     setContextFolder(path);
   }, []);
 
@@ -1164,10 +1164,12 @@ function Chat({
                 contextFolder={contextFolder}
                 show
                 worktreeVisible={worktreeVisible}
+                connectionId={connectionId}
+                profile={profile}
                 onPickFolder={handlePickFolder}
                 onClearFolder={handleClearFolder}
                 onToggleWorktree={handleToggleWorktree}
-                onSelectRecentFolder={handleSelectRecentFolder}
+                onSelectFolder={handleSelectFolder}
               />
               <button
                 type="button"

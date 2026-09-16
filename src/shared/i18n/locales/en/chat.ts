@@ -79,6 +79,7 @@ export default {
   contextFolderChip: "Choose Folder",
   contextFolderActive: "Context folder: {{path}}",
   removeContextFolder: "Remove context folder",
+  projectNoFolder: "Project has no folders",
   attach: "Attach files",
   voiceInput: "Voice input",
   voiceStop: "Stop recording",

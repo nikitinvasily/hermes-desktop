@@ -1,6 +1,7 @@
 import { memo, useState, useEffect, useRef } from "react";
 import { FolderOpen, FolderTree, X, Check } from "lucide-react";
 import { useI18n } from "../../components/useI18n";
+import type { ProjectInfo } from "../../../../shared/projects";
 
 interface ContextFolderChipProps {
   /** Working folder bound to this conversation (issue #27), or null. */
@@ -8,10 +9,13 @@ interface ContextFolderChipProps {
   /** Hidden in remote/SSH mode, where the picker browses the wrong machine. */
   show: boolean;
   worktreeVisible: boolean;
+  /** Active connection id + profile, for listProjects (issue #29). */
+  connectionId: string;
+  profile?: string;
   onPickFolder: () => void;
   onClearFolder: () => void;
   onToggleWorktree: () => void;
-  onSelectRecentFolder?: (path: string) => void;
+  onSelectFolder: (path: string) => void;
 }
 
 /** Last path segment, for the compact chip label (handles \ and /). */
@@ -20,40 +24,51 @@ function folderName(p: string): string {
   return parts[parts.length - 1] || p;
 }
 
+/** Normalize separators so a project folder matches the session cwd. */
+function samePath(a: string, b: string): boolean {
+  const norm = (p: string): string => p.replace(/\\/g, "/").replace(/\/+$/, "");
+  return norm(a) === norm(b);
+}
+
 /**
  * Context-folder control rendered as a chip in the input footer, next to the
  * model picker (both share the `.chat-meta-chip` style). When clicked, opens a
- * dropdown popup showing recent project folders and an "Open folder..." option.
+ * dropdown popup listing projects (issue #29): picking a project binds its
+ * primary folder as the session cwd. An "Open folder..." option remains for
+ * arbitrary paths.
  */
 export const ContextFolderChip = memo(function ContextFolderChip({
   contextFolder,
   show,
   worktreeVisible,
+  connectionId,
+  profile,
   onPickFolder,
   onClearFolder,
   onToggleWorktree,
-  onSelectRecentFolder,
+  onSelectFolder,
 }: ContextFolderChipProps): React.JSX.Element | null {
   const { t } = useI18n();
   const [isOpen, setIsOpen] = useState(false);
-  const [recentFolders, setRecentFolders] = useState<string[]>([]);
+  const [projects, setProjects] = useState<ProjectInfo[] | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!isOpen) return;
     let cancelled = false;
+    setProjects(null);
     void window.hermesAPI
-      .listRecentSessionContextFolders(20)
+      .listProjects(connectionId, profile)
       .then((list) => {
-        if (!cancelled && Array.isArray(list)) setRecentFolders(list);
+        if (!cancelled && Array.isArray(list)) setProjects(list);
       })
       .catch(() => {
-        /* ignore */
+        /* leave null — the section stays hidden */
       });
     return () => {
       cancelled = true;
     };
-  }, [isOpen]);
+  }, [isOpen, connectionId, profile]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -83,41 +98,59 @@ export const ContextFolderChip = memo(function ContextFolderChip({
 
   const renderDropdown = (): React.JSX.Element => (
     <div className="chat-ctxfolder-dropdown">
-      <div className="chat-ctxfolder-dropdown-header">Recent</div>
-      <div className="chat-ctxfolder-dropdown-list">
-        {recentFolders.length === 0 ? (
-          <div className="chat-ctxfolder-dropdown-empty">No recent folders</div>
-        ) : (
-          recentFolders.map((path) => {
-            const isSelected = path === contextFolder;
-            return (
-              <button
-                key={path}
-                type="button"
-                className={`chat-ctxfolder-dropdown-item${
-                  isSelected ? " chat-ctxfolder-dropdown-item--active" : ""
-                }`}
-                onClick={() => {
-                  onSelectRecentFolder?.(path);
-                  setIsOpen(false);
-                }}
-                title={path}
-              >
-                <span className="chat-ctxfolder-dropdown-item-name">
-                  {folderName(path)}
-                </span>
-                {isSelected && (
-                  <Check
-                    size={14}
-                    className="chat-ctxfolder-dropdown-item-check"
-                  />
-                )}
-              </button>
-            );
-          })
-        )}
-      </div>
-      <div className="chat-ctxfolder-dropdown-divider" />
+      {projects !== null && projects.length > 0 && (
+        <>
+          <div className="chat-ctxfolder-dropdown-header">Projects</div>
+          <div className="chat-ctxfolder-dropdown-list">
+            {projects.map((project) => {
+              const primary = project.primaryPath;
+              const isSelected = Boolean(
+                primary &&
+                contextFolder &&
+                (samePath(primary, contextFolder) ||
+                  project.folders?.some((f) =>
+                    samePath(f.path, contextFolder),
+                  )),
+              );
+              return (
+                <button
+                  key={project.id}
+                  type="button"
+                  disabled={!primary}
+                  className={`chat-ctxfolder-dropdown-item${
+                    isSelected ? " chat-ctxfolder-dropdown-item--active" : ""
+                  }`}
+                  onClick={() => {
+                    if (!primary) return;
+                    onSelectFolder(primary);
+                    setIsOpen(false);
+                  }}
+                  title={primary ?? t("chat.projectNoFolder")}
+                >
+                  <span className="chat-ctxfolder-dropdown-item-name">
+                    {project.name}
+                  </span>
+                  {primary && (
+                    <span
+                      className="chat-ctxfolder-dropdown-item-path"
+                      title={primary}
+                    >
+                      {folderName(primary)}
+                    </span>
+                  )}
+                  {isSelected && (
+                    <Check
+                      size={14}
+                      className="chat-ctxfolder-dropdown-item-check"
+                    />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          <div className="chat-ctxfolder-dropdown-divider" />
+        </>
+      )}
       <button
         type="button"
         className="chat-ctxfolder-dropdown-item chat-ctxfolder-dropdown-item--open"
