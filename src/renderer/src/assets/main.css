@@ -17998,3 +17998,51 @@ body:has(.shell-vibrant),
     0 24px 60px -16px rgba(0, 0, 0, 0.6),
     0 8px 24px -12px rgba(0, 0, 0, 0.45);
 }
+
+/* Archive modal (issue #34) — opened from the Chats header Archive button. */
+.archive-dialog {
+  width: min(520px, calc(100vw - 32px));
+}
+
+.archive-dialog-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: min(420px, 60vh);
+  overflow-y: auto;
+  margin-top: 8px;
+}
+
+.archive-dialog-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  color: var(--text-primary);
+}
+
+.archive-dialog-row:hover {
+  background: var(--bg-tertiary);
+}
+
+.archive-dialog-row-icon {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+}
+
+.archive-dialog-row-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.archive-dialog-row-date {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
