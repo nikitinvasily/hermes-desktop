@@ -30,7 +30,7 @@ export default {
   clearChat: "Sohbeti temizle",
   clearChatConfirm: "Bu konuşma temizlensin mi? Bu işlem geri alınamaz.",
   setContextFolder: "Bağlam klasörü belirle",
-  contextFolderChip: "Klasör Seç",
+  contextFolderChip: "Proje Seç",
   contextFolderActive: "Bağlam klasörü: {{path}}",
   removeContextFolder: "Bağlam klasörünü kaldır",
   attach: "Dosya ekle",
