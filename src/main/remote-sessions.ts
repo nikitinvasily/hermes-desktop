@@ -328,6 +328,40 @@ export async function remoteListSessions(
   return sessionsFromResponse(response).map(normalizeSessionSummary);
 }
 
+/**
+ * Toggle a session's `archived` flag through the dashboard REST API
+ * (issue #34). `PATCH /api/sessions/{id}` maps named flags onto SessionDB
+ * setters — `archived` is the agent's own native archive state, so CLI and
+ * dashboard see the same thing.
+ */
+export async function remoteSetSessionArchived(
+  config: RemoteSessionConfig,
+  sessionId: string,
+  archived: boolean,
+): Promise<void> {
+  await remoteRequestJson(
+    config,
+    `/api/sessions/${encodeURIComponent(sessionId)}`,
+    {
+      method: "PATCH",
+      body: { archived },
+    },
+  );
+}
+
+/** Archived-only session listing for the sidebar's Archive section (issue #34). */
+export async function remoteListArchivedSessions(
+  config: RemoteSessionConfig,
+  limit = 50,
+  offset = 0,
+): Promise<SessionSummary[]> {
+  const response = await remoteRequestJson(
+    config,
+    `/api/sessions?limit=${limit}&offset=${offset}&archived=only&order=recent`,
+  );
+  return sessionsFromResponse(response).map(normalizeSessionSummary);
+}
+
 export async function remoteListCachedSessions(
   config: RemoteSessionConfig,
   limit = 50,

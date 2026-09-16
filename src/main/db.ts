@@ -8,12 +8,19 @@ let cachedDbReadonly: boolean | null = null;
 
 /** Older Agent databases predate native archiving; keep their lists readable. */
 export function sessionVisibilityPredicate(db: Database.Database): string {
+  return hasArchivedColumn(db) ? "s.archived = 0" : "1 = 1";
+}
+
+/**
+ * True when the sessions table carries the agent's native `archived` column
+ * (state.db schema of Sep 2026+). Archive mutations and archived-only listings
+ * are no-ops on older databases rather than SQL errors.
+ */
+export function hasArchivedColumn(db: Database.Database): boolean {
   const columns = db.prepare("PRAGMA table_info(sessions)").all() as Array<{
     name: string;
   }>;
-  return columns.some((column) => column.name === "archived")
-    ? "s.archived = 0"
-    : "1 = 1";
+  return columns.some((column) => column.name === "archived");
 }
 
 /**

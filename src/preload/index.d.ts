@@ -920,6 +920,18 @@ interface HermesAPI {
     connectionId?: string,
     profile?: string,
   ) => Promise<{ requested: number; deleted: number }>;
+  setSessionArchived: (
+    sessionId: string,
+    archived: boolean,
+    connectionId?: string,
+    profile?: string,
+  ) => Promise<boolean | void>;
+  listArchivedSessions: (
+    limit?: number,
+    offset?: number,
+    connectionId?: string,
+    profile?: string,
+  ) => Promise<Array<{ id: string; title: string | null; startedAt: number }>>;
 
   // Session search
   searchSessions: (

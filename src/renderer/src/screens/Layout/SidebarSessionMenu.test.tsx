@@ -30,6 +30,7 @@ describe("SidebarSessionMenu", () => {
         onCopySessionId={onCopySessionId}
         onMoveToProject={vi.fn()}
         onPickNewFolder={vi.fn()}
+        onArchive={vi.fn()}
         onDelete={vi.fn()}
       />,
     );
@@ -37,5 +38,37 @@ describe("SidebarSessionMenu", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Copy session ID" }));
 
     expect(onCopySessionId).toHaveBeenCalledWith("session-123");
+  });
+
+  it("offers an Archive action for the selected row", () => {
+    const onArchive = vi.fn();
+
+    render(
+      <SidebarSessionMenu
+        target={{
+          id: "session-456",
+          title: "Conversation",
+          contextFolder: null,
+          x: 20,
+          y: 20,
+        }}
+        isPinned={false}
+        projects={[]}
+        onClose={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRename={vi.fn()}
+        onCopySessionId={vi.fn()}
+        onMoveToProject={vi.fn()}
+        onPickNewFolder={vi.fn()}
+        onArchive={onArchive}
+        onDelete={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "navigation.sessionMenu.archive" }),
+    );
+
+    expect(onArchive).toHaveBeenCalledTimes(1);
   });
 });

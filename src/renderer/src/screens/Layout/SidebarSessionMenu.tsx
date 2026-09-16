@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
 import { useI18n } from "../../components/useI18n";
 import {
+  ArchiveBox,
   Check,
   ChevronRight,
   Copy,
@@ -74,6 +75,7 @@ function SidebarSessionMenu({
   onCopySessionId,
   onMoveToProject,
   onPickNewFolder,
+  onArchive,
   onDelete,
 }: {
   target: SidebarMenuTarget;
@@ -92,6 +94,7 @@ function SidebarSessionMenu({
   onCopySessionId: (sessionId: string) => void;
   onMoveToProject: (path: string | null) => void;
   onPickNewFolder: () => void;
+  onArchive: () => void;
   onDelete: () => void;
 }): React.JSX.Element {
   const { t } = useI18n();
@@ -248,6 +251,18 @@ function SidebarSessionMenu({
                         size={14}
                         className="sidebar-session-menu-chevron"
                       />
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="sidebar-session-menu-item"
+                      onClick={() => {
+                        onArchive();
+                        requestClose();
+                      }}
+                    >
+                      <ArchiveBox size={15} />
+                      <span>{t("navigation.sessionMenu.archive")}</span>
                     </button>
                     <div className="sidebar-session-menu-divider" />
                     <button

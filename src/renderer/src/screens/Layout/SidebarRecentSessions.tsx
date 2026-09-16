@@ -10,6 +10,8 @@ import {
 import { createPortal } from "react-dom";
 import { useI18n } from "../../components/useI18n";
 import {
+  ArchiveBox,
+  ArchiveRestore,
   ChevronDown,
   ChevronRight,
   Circle,
@@ -52,6 +54,7 @@ const PROJECTS_OPEN_KEY = "hermes.sidebar.projectsOpen";
 const CHATS_OPEN_KEY = "hermes.sidebar.chatsOpen";
 const FOLDERS_CLOSED_KEY = "hermes.sidebar.closedProjectFolders";
 const PINNED_OPEN_KEY = "hermes.sidebar.pinnedOpen";
+const ARCHIVE_OPEN_KEY = "hermes.sidebar.archiveOpen";
 // Pinned session ids live in localStorage like the disclosure state — pinning
 // is a desktop-only UI affordance, not part of the agent session schema.
 const PINNED_IDS_KEY = "hermes.sidebar.pinnedSessions";
@@ -214,6 +217,16 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   const [pinnedOpen, setPinnedOpen] = useState(() =>
     readStoredOpen(PINNED_OPEN_KEY),
   );
+  // Archived sessions (issue #34): the agent's own `archived` flag, listed in
+  // a collapsible bottom section. Loaded only while that section is open and
+  // the sidebar is expanded — same lazy discipline as the session list.
+  const [archivedSessions, setArchivedSessions] = useState<
+    Array<{ id: string; title: string | null; startedAt: number }>
+  >([]);
+  const [archiveOpen, setArchiveOpen] = useState(() =>
+    readStoredOpen(ARCHIVE_OPEN_KEY),
+  );
+  const [archivedLoading, setArchivedLoading] = useState(false);
   // Folder path → human project name from the agent's projects.db / the
   // dashboard projects tree (issue #23). Empty until loaded; the folder-slug
   // fallback covers the gap.
@@ -557,6 +570,31 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     return () => clearInterval(timer);
   }, [open, refreshProjects]);
 
+  // Archived list (issue #34): loaded while the Archive section is expanded.
+  // Deliberately NOT on the background cadence — the archive changes only
+  // through this UI (and the dashboard, whose changes surface on reopen).
+  const refreshArchive = useCallback(async (): Promise<void> => {
+    setArchivedLoading(true);
+    try {
+      const list = await window.hermesAPI.listArchivedSessions(
+        100,
+        0,
+        connectionId,
+        activeProfile,
+      );
+      setArchivedSessions(Array.isArray(list) ? list : []);
+    } catch {
+      /* keep whatever we had — best-effort section */
+    } finally {
+      setArchivedLoading(false);
+    }
+  }, [connectionId, activeProfile]);
+
+  useEffect(() => {
+    if (!open || !archiveOpen) return;
+    void refreshArchive();
+  }, [open, archiveOpen, connectionId, activeProfile, refreshArchive]);
+
   const handleProjectMutate = useCallback(
     async (
       mutation: import("../../../../shared/projects").ProjectMutation,
@@ -823,6 +861,73 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     [activeProfile, connectionId, onSessionDeleted, refresh],
   );
 
+  // Archive / restore (issue #34). Optimistic on archive: the row disappears
+  // from the list immediately; on failure it comes back via refresh. Restore
+  // reloads both lists. The active chat is intentionally left open when
+  // archived — archiving only removes it from the sidebar list.
+  const handleArchive = useCallback(
+    async (id: string): Promise<void> => {
+      setSessions((prev) => prev.filter((s) => s.id !== id));
+      setPinnedIds((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      try {
+        await window.hermesAPI.setSessionArchived(
+          id,
+          true,
+          connectionId,
+          activeProfile,
+        );
+        if (archiveOpen) void refreshArchive();
+      } catch (err) {
+        console.error("Failed to archive session", id, err);
+        void refresh(true);
+      }
+    },
+    [activeProfile, archiveOpen, connectionId, refresh, refreshArchive],
+  );
+
+  const handleRestore = useCallback(
+    async (id: string): Promise<void> => {
+      setArchivedSessions((prev) => prev.filter((s) => s.id !== id));
+      try {
+        await window.hermesAPI.setSessionArchived(
+          id,
+          false,
+          connectionId,
+          activeProfile,
+        );
+        void refresh(true);
+      } catch (err) {
+        console.error("Failed to restore session", id, err);
+        void refreshArchive();
+      }
+    },
+    [activeProfile, connectionId, refresh, refreshArchive],
+  );
+
+  // Delete straight from the archive: reuse the confirmation dialog, then
+  // reload the archive list (the main list never contained the row).
+  const handleDeleteArchived = useCallback(
+    async (id: string): Promise<void> => {
+      setDeleting(true);
+      setArchivedSessions((prev) => prev.filter((s) => s.id !== id));
+      try {
+        await window.hermesAPI.deleteSession(id, connectionId, activeProfile);
+      } catch (err) {
+        console.error("Failed to delete archived session", id, err);
+      } finally {
+        setDeleting(false);
+        setPendingDeleteId(null);
+        void refreshArchive();
+      }
+    },
+    [activeProfile, connectionId, refreshArchive],
+  );
+
   const openMenuForSession = useCallback(
     (s: RecentSession, x: number, y: number): void => {
       setMenuTarget({
@@ -853,6 +958,18 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
       const next = !prev;
       try {
         localStorage.setItem(CHATS_OPEN_KEY, String(next));
+      } catch {
+        /* ignore persistence failures */
+      }
+      return next;
+    });
+  };
+
+  const toggleArchive = (): void => {
+    setArchiveOpen((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(ARCHIVE_OPEN_KEY, String(next));
       } catch {
         /* ignore persistence failures */
       }
@@ -1230,6 +1347,95 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
             </div>
           </div>
         </div>
+        <div className="sidebar-recent-section">
+          <div className="sidebar-recent-section-row">
+            <button
+              type="button"
+              className="sidebar-recent-section-toggle"
+              onClick={toggleArchive}
+              aria-expanded={archiveOpen}
+              tabIndex={expanded ? 0 : -1}
+            >
+              <span>{t("navigation.archiveSection")}</span>
+              {archiveOpen ? (
+                <ChevronDown
+                  className="sidebar-recent-disclosure-icon"
+                  size={13}
+                />
+              ) : (
+                <ChevronRight
+                  className="sidebar-recent-disclosure-icon"
+                  size={13}
+                />
+              )}
+            </button>
+          </div>
+          <div
+            className={`sidebar-recent-collapse ${archiveOpen ? "expanded" : ""}`}
+          >
+            <div className="sidebar-recent-collapse-inner">
+              {archivedLoading && archivedSessions.length === 0 ? (
+                <div className="sidebar-recent-loading" aria-live="polite">
+                  <Loader
+                    className="sidebar-recent-session-dot sidebar-recent-session-dot--loading"
+                    size={11}
+                  />
+                  <span>{t("common.loadingShort")}</span>
+                </div>
+              ) : archivedSessions.length === 0 ? (
+                <div className="sidebar-recent-empty">
+                  {t("navigation.archiveEmpty")}
+                </div>
+              ) : (
+                archivedSessions.map((s) => (
+                  <div
+                    key={s.id}
+                    role="button"
+                    tabIndex={expanded && archiveOpen ? 0 : -1}
+                    className="sidebar-recent-session sidebar-archived-session"
+                    title={s.title || t("sessions.newConversation")}
+                  >
+                    <ArchiveBox
+                      className="sidebar-recent-session-dot"
+                      size={11}
+                    />
+                    <span className="sidebar-recent-session-title">
+                      {s.title || t("sessions.newConversation")}
+                    </span>
+                    <button
+                      type="button"
+                      className="sidebar-recent-session-options"
+                      tabIndex={expanded && archiveOpen ? 0 : -1}
+                      aria-label={t("navigation.archiveRestore")}
+                      title={t("navigation.archiveRestore")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleRestore(s.id);
+                      }}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
+                      <ArchiveRestore size={15} />
+                    </button>
+                    <button
+                      type="button"
+                      className="sidebar-recent-session-options"
+                      tabIndex={expanded && archiveOpen ? 0 : -1}
+                      aria-label={t("navigation.sessionMenu.delete")}
+                      title={t("navigation.sessionMenu.delete")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPendingDeleteId(s.id);
+                      }}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
+                      <Trash size={15} />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
         {loadingMore && (
           <div className="sidebar-recent-loading" aria-live="polite">
             <Loader
@@ -1261,6 +1467,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
             void handleMoveToProject(menuTarget.id, path)
           }
           onPickNewFolder={() => void handlePickNewFolder(menuTarget.id)}
+          onArchive={() => void handleArchive(menuTarget.id)}
           onDelete={() => setPendingDeleteId(menuTarget.id)}
         />
       )}
@@ -1309,7 +1516,16 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
                 <button
                   type="button"
                   className="btn btn-danger"
-                  onClick={() => void confirmDelete(pendingDeleteId)}
+                  onClick={() => {
+                    // The shared confirm dialog serves both lists: an id that
+                    // lives in the archive deletes through the archive path
+                    // (which refreshes the archive list, not the main one).
+                    const inArchive = archivedSessions.some(
+                      (s) => s.id === pendingDeleteId,
+                    );
+                    if (inArchive) void handleDeleteArchived(pendingDeleteId);
+                    else void confirmDelete(pendingDeleteId);
+                  }}
                   disabled={deleting}
                 >
                   {deleting

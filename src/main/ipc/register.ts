@@ -231,6 +231,8 @@ import {
 import {
   applySessionLocalOverlays,
   listSessions,
+  setSessionArchived,
+  listArchivedSessions,
   getSessionMessages,
   searchSessions,
   deleteSession,
@@ -244,6 +246,8 @@ import {
 } from "../session-cache";
 import {
   remoteDeleteSession,
+  remoteSetSessionArchived,
+  remoteListArchivedSessions,
   remoteDeleteSessions,
   remoteGetSessionMessages,
   remoteListCachedSessions,
@@ -414,6 +418,8 @@ import {
   sshGetModelConfig,
   sshSetModelConfig,
   sshListSessions,
+  sshSetSessionArchived,
+  sshListArchivedSessions,
   sshGetSessionMessages,
   sshSearchSessions,
   sshListProfiles,
@@ -2651,6 +2657,72 @@ export function registerIpcHandlers(context: IpcContext): void {
           scopedProfile,
         );
       return deleteSessions(ids, scopedProfile);
+    },
+  );
+
+  // Session archiving (issue #34): flips the agent's own `archived` flag, so
+  // CLI and dashboard see the same state. Routed per connection mode exactly
+  // like delete-session above.
+  ipcMain.handle(
+    "set-session-archived",
+    (
+      _event,
+      sessionId: string,
+      archived: boolean,
+      connectionId?: string,
+      profile?: string,
+    ) => {
+      const conn = sessionConnection(connectionId);
+      const scopedProfile = activeSshProfile(profile);
+      if (conn.mode === "remote")
+        return remoteSetSessionArchived(
+          scopedRemoteSessionConfig(conn, scopedProfile),
+          sessionId,
+          archived,
+        );
+      if (conn.mode === "ssh" && conn.ssh)
+        return withSshDashboardSessions(
+          conn,
+          (config) => remoteSetSessionArchived(config, sessionId, archived),
+          () =>
+            sshSetSessionArchived(
+              conn.ssh!,
+              sessionId,
+              archived,
+              scopedProfile,
+            ),
+          scopedProfile,
+        );
+      return setSessionArchived(sessionId, archived, scopedProfile);
+    },
+  );
+
+  ipcMain.handle(
+    "list-archived-sessions",
+    (
+      _event,
+      limit?: number,
+      offset?: number,
+      connectionId?: string,
+      profile?: string,
+    ) => {
+      const conn = sessionConnection(connectionId);
+      const scopedProfile = activeSshProfile(profile);
+      if (conn.mode === "remote")
+        return remoteListArchivedSessions(
+          scopedRemoteSessionConfig(conn, scopedProfile),
+          limit,
+          offset,
+        );
+      if (conn.mode === "ssh" && conn.ssh)
+        return withSshDashboardSessions(
+          conn,
+          (config) => remoteListArchivedSessions(config, limit, offset),
+          () =>
+            sshListArchivedSessions(conn.ssh!, limit, offset, scopedProfile),
+          scopedProfile,
+        );
+      return listArchivedSessions(limit, offset, scopedProfile);
     },
   );
 
