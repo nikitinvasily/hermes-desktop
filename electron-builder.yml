@@ -88,6 +88,8 @@ rpm:
   afterInstall: build/linux-after-install.sh
 npmRebuild: false
 publish:
+  # Fork update channel: releases in nikitinvasily/hermes-desktop (upstream
+  # fathah releases would otherwise overwrite fork features on auto-update).
   provider: github
-  owner: fathah
+  owner: nikitinvasily
   repo: hermes-desktop
