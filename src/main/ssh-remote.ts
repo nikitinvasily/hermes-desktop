@@ -1427,6 +1427,100 @@ conn.close()
   }
 }
 
+/**
+ * Set a session's `archived` flag on the remote host's state.db (issue #34).
+ * SSH fallback for connections without a dashboard transport; mirrors the
+ * dashboard's `set_session_archived` semantics (0/1 integer flag). Older
+ * databases without the column are detected and reported as unsupported
+ * rather than failing the UPDATE silently.
+ */
+export async function sshSetSessionArchived(
+  config: SshConfig,
+  sessionId: string,
+  archived: boolean,
+  profile?: string,
+): Promise<void> {
+  const script = `
+import sqlite3, json, os, sys
+payload = json.load(sys.stdin)
+profile = payload.get("profile")
+session_id = payload.get("sessionId") or ""
+flag = 1 if payload.get("archived") else 0
+db = os.path.expanduser(f"~/.hermes/profiles/{profile}/state.db" if profile and profile != "default" else "~/.hermes/state.db")
+if not os.path.exists(db):
+    print(json.dumps({"ok": False, "error": "state db not found"})); sys.exit(0)
+conn = sqlite3.connect(db)
+cols = [row[1] for row in conn.execute("PRAGMA table_info(sessions)")]
+if "archived" not in cols:
+    print(json.dumps({"ok": False, "error": "archived column missing"})); sys.exit(0)
+cur = conn.execute("UPDATE sessions SET archived = ? WHERE id = ?", (flag, session_id))
+conn.commit()
+print(json.dumps({"ok": cur.rowcount > 0}))
+conn.close()
+`;
+  const out = await sshPython(
+    config,
+    script,
+    pythonJsonInput({ profile, sessionId, archived }),
+  );
+  const parsed = JSON.parse(out.trim() || "{}") as {
+    ok?: boolean;
+    error?: string;
+  };
+  if (!parsed.ok) {
+    throw new Error(parsed.error || "Failed to update archived flag");
+  }
+}
+
+/** Archived-only session listing over SSH (issue #34), newest first. */
+export async function sshListArchivedSessions(
+  config: SshConfig,
+  limit = 50,
+  offset = 0,
+  profile?: string,
+): Promise<SessionSummary[]> {
+  const script = `
+import sqlite3, json, os, sys
+payload = json.load(sys.stdin)
+profile = payload.get("profile")
+limit = max(1, min(200, int(payload.get("limit") or 50)))
+offset = max(0, int(payload.get("offset") or 0))
+db = os.path.expanduser(f"~/.hermes/profiles/{profile}/state.db" if profile and profile != "default" else "~/.hermes/state.db")
+if not os.path.exists(db):
+    print("[]"); sys.exit(0)
+conn = sqlite3.connect(db)
+conn.row_factory = sqlite3.Row
+cols = [row[1] for row in conn.execute("PRAGMA table_info(sessions)")]
+if "archived" not in cols:
+    print("[]"); sys.exit(0)
+rows = conn.execute(
+    "SELECT id, source, started_at, ended_at, message_count, model, title "
+    "FROM sessions WHERE archived = 1 ORDER BY started_at DESC LIMIT ? OFFSET ?",
+    (limit, offset)
+).fetchall()
+result = []
+for r in rows:
+    result.append({
+        "id": r["id"], "source": r["source"] or "cli",
+        "startedAt": r["started_at"], "endedAt": r["ended_at"],
+        "messageCount": r["message_count"] or 0, "model": r["model"] or "",
+        "title": r["title"], "preview": ""
+    })
+print(json.dumps(result))
+conn.close()
+`;
+  try {
+    const out = await sshPython(
+      config,
+      script,
+      pythonJsonInput({ profile, limit, offset }),
+    );
+    return JSON.parse(out.trim() || "[]");
+  } catch {
+    return [];
+  }
+}
+
 export async function sshGetSessionMessages(
   config: SshConfig,
   sessionId: string,

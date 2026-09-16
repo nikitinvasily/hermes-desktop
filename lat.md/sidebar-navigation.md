@@ -34,6 +34,16 @@ Local lists follow the Agent's native archive flag. Archiving hides a conversati
 
 [[tests/session-archive.test.ts]] executes real SQLite queries for cold and warm caches, archive/restore without timestamp changes, pagination, equal IDs across profiles, legacy schema upgrades, read failure and recovery, and retained history/project folders. [[src/renderer/src/screens/Sessions/Sessions.test.tsx]] covers the last local row disappearing and returning, failed refresh recovery, and stale responses after profile switches.
 
+## Sidebar archive UI
+
+The sidebar offers archiving as a first-class action, and browsing the archive as a separate modal (issue #34).
+
+[[src/renderer/src/screens/Layout/SidebarSessionMenu.tsx]] adds an Archive item between Move-to-project and Delete; [[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx]] removes the row optimistically (archiving the ACTIVE chat leaves it open — only the list entry disappears), drops the row from the pinned set, and rolls back through a forced refresh on failure.
+
+Browsing/restoring lives in [[src/renderer/src/screens/Layout/ArchiveDialog.tsx]], a modal opened by the Archive-box button in the Chats section header. It loads the archived list on open through the `list-archived-sessions` IPC and keeps it in its own state. Restore and open are DELIBERATELY separate actions: the hover Restore button returns the chat to the sidebar list without switching the view; clicking the row restores AND opens it (the explicit "I want this chat" intent). Delete surfaces the shared confirmation dialog via the parent, which routes the confirm through the `pendingDeleteIsArchived` flag instead of list membership.
+
+The IPC surface routes per connection mode exactly like `delete-session`: local flips the flag in state.db ([[src/main/sessions.ts#setSessionArchived]], no-op `false` on legacy schemas without the `archived` column — detected by [[src/main/db.ts#hasArchivedColumn]]); remote/ssh go through the dashboard REST API (`PATCH /api/sessions/{id}` with `{archived}` — the agent's own native state, so CLI and dashboard stay in sync), with an inline-python SSH fallback ([[src/main/ssh-remote.ts#sshSetSessionArchived]]) that errors visibly on legacy schemas instead of failing silently. Archived listing mirrors the same routing (`list-archived-sessions`): local `WHERE archived = 1`, remote `GET /api/sessions?archived=only`, SSH python fallback. [[src/main/sessions-archive.test.ts]] covers flag flips, unknown ids, legacy-schema no-ops, and newest-first listing on real SQLite; [[src/renderer/src/screens/Layout/SidebarSessionMenu.test.tsx]] covers the menu action.
+
 ## Project grouping
 
 Workspace-linked conversations are grouped under project rows so repository chats stay together without hiding ordinary chats.

@@ -3,7 +3,11 @@ import type { Attachment } from "../shared/attachments";
 import { isImageMime } from "../shared/attachments";
 import { clearStagedAttachments } from "./attachment-staging";
 import { removeSessionFromCache } from "./session-cache";
-import { getDbConnection, sessionVisibilityPredicate } from "./db";
+import {
+  getDbConnection,
+  hasArchivedColumn,
+  sessionVisibilityPredicate,
+} from "./db";
 import {
   attachmentFromLocalVisionImagePath,
   deletePromptImageAttachmentsForSession,
@@ -298,6 +302,73 @@ export function listSessions(
     title: string | null;
   }>;
 
+  return rows.map((r) => ({
+    id: r.id,
+    source: r.source,
+    startedAt: r.started_at,
+    endedAt: r.ended_at,
+    messageCount: r.message_count,
+    model: r.model || "",
+    title: r.title,
+    preview: "",
+  }));
+}
+
+/**
+ * Set a session's native `archived` flag in the agent's state.db (issue #34).
+ * Returns false when the DB (or its schema) can't serve the request — older
+ * databases without the column are left untouched instead of erroring.
+ */
+export function setSessionArchived(
+  sessionId: string,
+  archived: boolean,
+  profile?: unknown,
+): boolean {
+  const db = getDb(false, profile);
+  if (!db) return false;
+  if (!hasArchivedColumn(db)) return false;
+  const result = db
+    .prepare("UPDATE sessions SET archived = ? WHERE id = ?")
+    .run(archived ? 1 : 0, sessionId);
+  return result.changes > 0;
+}
+
+/**
+ * Sessions with `archived = 1`, newest first — the sidebar's Archive section
+ * (issue #34). Same row shape as `listSessions`, minus the preview.
+ */
+export function listArchivedSessions(
+  limit = 50,
+  offset = 0,
+  profile?: unknown,
+): SessionSummary[] {
+  const db = getDb(true, profile);
+  if (!db) return [];
+  if (!hasArchivedColumn(db)) return [];
+  const rows = db
+    .prepare(
+      `SELECT
+        s.id,
+        s.source,
+        s.started_at,
+        s.ended_at,
+        s.message_count,
+        s.model,
+        s.title
+      FROM sessions s
+      WHERE s.archived = 1
+      ORDER BY s.started_at DESC
+      LIMIT ? OFFSET ?`,
+    )
+    .all(limit, offset) as Array<{
+    id: string;
+    source: string;
+    started_at: number;
+    ended_at: number | null;
+    message_count: number;
+    model: string;
+    title: string | null;
+  }>;
   return rows.map((r) => ({
     id: r.id,
     source: r.source,

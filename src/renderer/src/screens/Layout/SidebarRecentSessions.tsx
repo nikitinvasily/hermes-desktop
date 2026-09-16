@@ -10,6 +10,7 @@ import {
 import { createPortal } from "react-dom";
 import { useI18n } from "../../components/useI18n";
 import {
+  ArchiveBox,
   ChevronDown,
   ChevronRight,
   Circle,
@@ -27,6 +28,7 @@ import SidebarSessionMenu, {
   type SidebarMenuProject,
   type SidebarMenuTarget,
 } from "./SidebarSessionMenu";
+import ArchiveDialog from "./ArchiveDialog";
 import ProjectDialog, { type ProjectDialogState } from "./ProjectDialog";
 import type { ProjectInfo } from "../../../../shared/projects";
 
@@ -214,6 +216,12 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   const [pinnedOpen, setPinnedOpen] = useState(() =>
     readStoredOpen(PINNED_OPEN_KEY),
   );
+  // Archive modal (issue #34): opened from the Chats header Archive button;
+  // the modal owns the archived list, the parent only supplies routing.
+  const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
+  // True when the shared delete-confirmation dialog was opened FROM the
+  // archive modal — routes the confirm to the archive delete path.
+  const [pendingDeleteIsArchived, setPendingDeleteIsArchived] = useState(false);
   // Folder path → human project name from the agent's projects.db / the
   // dashboard projects tree (issue #23). Empty until loaded; the folder-slug
   // fallback covers the gap.
@@ -823,6 +831,34 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     [activeProfile, connectionId, onSessionDeleted, refresh],
   );
 
+  // Archive (issue #34). Optimistic: the row disappears from the list
+  // immediately; on failure it comes back via refresh. The active chat is
+  // intentionally left open when archived — archiving only removes it from
+  // the sidebar list.
+  const handleArchive = useCallback(
+    async (id: string): Promise<void> => {
+      setSessions((prev) => prev.filter((s) => s.id !== id));
+      setPinnedIds((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      try {
+        await window.hermesAPI.setSessionArchived(
+          id,
+          true,
+          connectionId,
+          activeProfile,
+        );
+      } catch (err) {
+        console.error("Failed to archive session", id, err);
+        void refresh(true);
+      }
+    },
+    [activeProfile, connectionId, refresh],
+  );
+
   const openMenuForSession = useCallback(
     (s: RecentSession, x: number, y: number): void => {
       setMenuTarget({
@@ -1213,6 +1249,19 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
                 <Plus size={13} />
               </button>
             )}
+            <button
+              type="button"
+              className="sidebar-recent-new-chat"
+              title={t("navigation.archiveSection")}
+              aria-label={t("navigation.archiveSection")}
+              onClick={(e) => {
+                e.stopPropagation();
+                setArchiveDialogOpen(true);
+              }}
+              tabIndex={expanded ? 0 : -1}
+            >
+              <ArchiveBox size={13} />
+            </button>
           </div>
           <div
             className={`sidebar-recent-collapse ${chatsOpen ? "expanded" : ""}`}
@@ -1261,6 +1310,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
             void handleMoveToProject(menuTarget.id, path)
           }
           onPickNewFolder={() => void handlePickNewFolder(menuTarget.id)}
+          onArchive={() => void handleArchive(menuTarget.id)}
           onDelete={() => setPendingDeleteId(menuTarget.id)}
         />
       )}
@@ -1270,7 +1320,10 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
             className="sidebar-session-delete-overlay"
             role="presentation"
             onClick={() => {
-              if (!deleting) setPendingDeleteId(null);
+              if (!deleting) {
+                setPendingDeleteId(null);
+                setPendingDeleteIsArchived(false);
+              }
             }}
           >
             <div
@@ -1287,7 +1340,10 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
                 <button
                   type="button"
                   className="btn-ghost sidebar-session-delete-close"
-                  onClick={() => setPendingDeleteId(null)}
+                  onClick={() => {
+                    setPendingDeleteId(null);
+                    setPendingDeleteIsArchived(false);
+                  }}
                   disabled={deleting}
                   aria-label={t("navigation.sessionMenu.deleteCancel")}
                 >
@@ -1301,7 +1357,10 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  onClick={() => setPendingDeleteId(null)}
+                  onClick={() => {
+                    setPendingDeleteId(null);
+                    setPendingDeleteIsArchived(false);
+                  }}
                   disabled={deleting}
                 >
                   {t("navigation.sessionMenu.deleteCancel")}
@@ -1309,7 +1368,35 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
                 <button
                   type="button"
                   className="btn btn-danger"
-                  onClick={() => void confirmDelete(pendingDeleteId)}
+                  onClick={() => {
+                    // The shared confirm dialog serves both surfaces; the flag
+                    // says it was opened FROM the archive modal (whose list is
+                    // refreshed by the modal itself, not by the main refresh).
+                    if (pendingDeleteIsArchived) {
+                      void (async () => {
+                        setDeleting(true);
+                        try {
+                          await window.hermesAPI.deleteSession(
+                            pendingDeleteId,
+                            connectionId,
+                            activeProfile,
+                          );
+                        } catch (err) {
+                          console.error(
+                            "Failed to delete archived session",
+                            pendingDeleteId,
+                            err,
+                          );
+                        } finally {
+                          setDeleting(false);
+                          setPendingDeleteId(null);
+                          setPendingDeleteIsArchived(false);
+                        }
+                      })();
+                    } else {
+                      void confirmDelete(pendingDeleteId);
+                    }
+                  }}
                   disabled={deleting}
                 >
                   {deleting
@@ -1319,6 +1406,21 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
               </div>
             </div>
           </div>,
+          document.body,
+        )}
+      {archiveDialogOpen &&
+        createPortal(
+          <ArchiveDialog
+            connectionId={connectionId}
+            activeProfile={activeProfile}
+            onRestored={() => void refresh(true)}
+            onOpen={(sessionId) => onSelect(sessionId)}
+            onDeleteRequest={(sessionId) => {
+              setPendingDeleteIsArchived(true);
+              setPendingDeleteId(sessionId);
+            }}
+            onClose={() => setArchiveDialogOpen(false)}
+          />,
           document.body,
         )}
       {projectDialog &&
