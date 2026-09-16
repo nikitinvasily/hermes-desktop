@@ -68,6 +68,12 @@ export default {
     confirmAlways: "Confirm always allow",
     error: "Couldn't send the approval response. Try again.",
   },
+  approvalToggle: {
+    label: "Toggle command approvals for this chat",
+    on: "Require approval for dangerous commands in this chat. Click to skip all approvals.",
+    off: "Approvals are skipped in this chat. Click to require approval again.",
+    activeLabel: "No approvals",
+  },
   thinking: "Thinking…",
   showEarlierMessages: "Show {{count}} earlier messages",
   thought: "Thought",
