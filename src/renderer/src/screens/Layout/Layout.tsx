@@ -84,6 +84,12 @@ const FOOTER_NAV_ITEMS: { view: View; icon: LucideIcon; labelKey: string }[] = [
 ];
 
 const SIDEBAR_COLLAPSED_KEY = "hermes.sidebar.collapsed";
+// Saved sidebar width in px (only meaningful when not collapsed). Invalid or
+// out-of-bounds values fall back to the default.
+const SIDEBAR_WIDTH_KEY = "hermes.sidebar.width";
+const SIDEBAR_WIDTH_DEFAULT = 250;
+const SIDEBAR_WIDTH_MIN = 200;
+const SIDEBAR_WIDTH_MAX = 420;
 const SIDEBAR_SCROLLBAR_HIDE_MS = 700;
 
 interface LayoutProps {
@@ -290,6 +296,31 @@ function Layout({
       return false;
     }
   });
+  // User-resizable sidebar width (px), persisted in localStorage. Applied via
+  // inline style on <aside class="sidebar"> while expanded; the collapsed width
+  // (64px, CSS class) takes precedence when the sidebar is folded.
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    try {
+      // NB: getItem returns null when unset, and Number(null) === 0 (finite!) —
+      // guard the string explicitly or a fresh install clamps to MIN, not DEFAULT.
+      const rawStr = localStorage.getItem(SIDEBAR_WIDTH_KEY);
+      if (rawStr !== null) {
+        const raw = Number(rawStr);
+        if (Number.isFinite(raw)) {
+          return Math.min(
+            SIDEBAR_WIDTH_MAX,
+            Math.max(SIDEBAR_WIDTH_MIN, Math.round(raw)),
+          );
+        }
+      }
+    } catch {
+      /* ignore persistence failures */
+    }
+    return SIDEBAR_WIDTH_DEFAULT;
+  });
+  // True while the user is dragging the resize handle — disables the width
+  // CSS transition so the panel tracks the cursor 1:1.
+  const [sidebarResizing, setSidebarResizing] = useState(false);
   // Full-list sessions modal (opened from the sidebar "Show more" affordance or
   // the Cmd/Ctrl+K menu action). Reuses the Sessions screen inside a modal —
   // there is no longer a top-level Sessions view.
@@ -724,6 +755,50 @@ function Layout({
     });
   }, []);
 
+  const persistSidebarWidth = useCallback((width: number): void => {
+    try {
+      localStorage.setItem(SIDEBAR_WIDTH_KEY, String(width));
+    } catch {
+      /* ignore persistence failures */
+    }
+  }, []);
+
+  const handleSidebarResizeStart = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0 || sidebarCollapsed) return;
+      e.preventDefault();
+      const startX = e.clientX;
+      const startWidth = sidebarWidth;
+      setSidebarResizing(true);
+      const onMove = (ev: PointerEvent): void => {
+        const next = Math.min(
+          SIDEBAR_WIDTH_MAX,
+          Math.max(SIDEBAR_WIDTH_MIN, startWidth + (ev.clientX - startX)),
+        );
+        setSidebarWidth(next);
+      };
+      const onUp = (ev: PointerEvent): void => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        setSidebarResizing(false);
+        // Persist the final clamped width.
+        const next = Math.min(
+          SIDEBAR_WIDTH_MAX,
+          Math.max(SIDEBAR_WIDTH_MIN, startWidth + (ev.clientX - startX)),
+        );
+        persistSidebarWidth(next);
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    },
+    [sidebarCollapsed, sidebarWidth, persistSidebarWidth],
+  );
+
+  const handleSidebarResizeReset = useCallback((): void => {
+    setSidebarWidth(SIDEBAR_WIDTH_DEFAULT);
+    persistSidebarWidth(SIDEBAR_WIDTH_DEFAULT);
+  }, [persistSidebarWidth]);
+
   const sidebarToggleLabel = sidebarCollapsed
     ? t("navigation.expandSidebar")
     : t("navigation.collapseSidebar");
@@ -731,7 +806,10 @@ function Layout({
   return (
     <div className="layout-shell">
       <div className={`layout ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
-        <aside className="sidebar">
+        <aside
+          className={`sidebar ${sidebarResizing ? "resizing" : ""}`}
+          style={{ width: sidebarCollapsed ? undefined : sidebarWidth }}
+        >
           <div className="sidebar-brand">
             <button
               className="sidebar-collapse-toggle"
@@ -894,6 +972,19 @@ function Layout({
               compact={sidebarCollapsed}
             />
           </div>
+          {/* Right-edge drag handle: widen/narrow the sidebar; double-click
+            resets to the default width. Hidden while collapsed. */}
+          {!sidebarCollapsed && (
+            <div
+              className="sidebar-resize-handle"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label={t("navigation.resizeSidebar")}
+              title={t("navigation.resizeSidebar")}
+              onPointerDown={handleSidebarResizeStart}
+              onDoubleClick={handleSidebarResizeReset}
+            />
+          )}
         </aside>
 
         <main className="content">
