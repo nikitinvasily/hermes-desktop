@@ -8,7 +8,6 @@ import { ModelPicker } from "./ModelPicker";
 import { ReasoningEffortPicker } from "./ReasoningEffortPicker";
 import { ContextFolderChip } from "./ContextFolderChip";
 import { WorktreePanel } from "./WorktreePanel";
-import { RemoteFolderPicker } from "./RemoteFolderPicker";
 import { WebPreviewPanel } from "./WebPreviewPanel";
 import { useChatScroll } from "./hooks/useChatScroll";
 import { useTranscriptState } from "./hooks/useTranscriptState";
@@ -309,7 +308,6 @@ function Chat({
   // Whether the worktree panel is visible (only applies when contextFolder is set)
   // Default false so the panel doesn't open automatically and interfere with scrolling
   const [worktreeVisible, setWorktreeVisible] = useState<boolean>(false);
-  const [folderPickerOpen, setFolderPickerOpen] = useState<boolean>(false);
   const [webPreviewVisible, setWebPreviewVisible] = useState<boolean>(false);
   const [webPreviewUrl, setWebPreviewUrl] =
     useState<string>("https://google.com");
@@ -940,15 +938,6 @@ function Chat({
     chatInputRef.current?.setText(text);
   }, []);
 
-  const handlePickFolder = useCallback(async () => {
-    if (remoteMode) {
-      setFolderPickerOpen(true);
-      return;
-    }
-    const path = await window.hermesAPI.selectFolder();
-    if (path) setContextFolder(path);
-  }, [remoteMode]);
-
   const handleClearFolder = useCallback(() => {
     setContextFolder(null);
   }, []);
@@ -1166,7 +1155,6 @@ function Chat({
                 worktreeVisible={worktreeVisible}
                 connectionId={connectionId}
                 profile={profile}
-                onPickFolder={handlePickFolder}
                 onClearFolder={handleClearFolder}
                 onToggleWorktree={handleToggleWorktree}
                 onSelectFolder={handleSelectFolder}
@@ -1207,15 +1195,6 @@ function Chat({
           </div>
         </div>
       )}
-      <RemoteFolderPicker
-        initialPath={contextFolder}
-        open={folderPickerOpen}
-        onCancel={() => setFolderPickerOpen(false)}
-        onSelect={(path) => {
-          setContextFolder(path);
-          setFolderPickerOpen(false);
-        }}
-      />
       {/* Show follow-us modal only after setup is complete */}
       {active && connectionModeLoaded && readiness.ok && <FollowUsModal />}
     </div>

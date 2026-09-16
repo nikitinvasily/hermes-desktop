@@ -37,7 +37,6 @@ function renderChip(
       show
       worktreeVisible={false}
       connectionId="connection-main"
-      onPickFolder={vi.fn()}
       onClearFolder={vi.fn()}
       onToggleWorktree={vi.fn()}
       onSelectFolder={vi.fn()}
@@ -120,42 +119,21 @@ describe("ContextFolderChip project dropdown (issue #29)", () => {
     expect(onSelectFolder).not.toHaveBeenCalled();
   });
 
-  it("hides the projects section when the list is empty", async () => {
+  it("renders an empty dropdown when the list is empty", async () => {
     renderChip();
 
     openDropdown();
-    await waitFor(() =>
-      expect(screen.getByText("Open folder...")).toBeTruthy(),
-    );
+    // Give the listProjects promise a chance to resolve before asserting.
+    await waitFor(() => expect(listProjects).toHaveBeenCalled());
     expect(screen.queryByText("Projects")).toBeNull();
   });
 
-  it("hides the projects section on load failure and keeps Open folder", async () => {
+  it("renders an empty dropdown on load failure", async () => {
     listProjects.mockRejectedValue(new Error("ipc down"));
     renderChip();
 
     openDropdown();
-    await waitFor(() =>
-      expect(screen.getByText("Open folder...")).toBeTruthy(),
-    );
+    await waitFor(() => expect(listProjects).toHaveBeenCalled());
     expect(screen.queryByText("Projects")).toBeNull();
-  });
-
-  it("still offers Open folder when projects exist", async () => {
-    const onPickFolder = vi.fn();
-    listProjects.mockResolvedValue([
-      {
-        id: "p1",
-        slug: "alpha",
-        name: "Alpha",
-        primaryPath: "/home/user/alpha",
-        folders: [{ path: "/home/user/alpha", isPrimary: true }],
-      },
-    ]);
-    renderChip({ onPickFolder });
-
-    openDropdown();
-    fireEvent.click(await screen.findByText("Open folder..."));
-    expect(onPickFolder).toHaveBeenCalled();
   });
 });

@@ -12,7 +12,6 @@ interface ContextFolderChipProps {
   /** Active connection id + profile, for listProjects (issue #29). */
   connectionId: string;
   profile?: string;
-  onPickFolder: () => void;
   onClearFolder: () => void;
   onToggleWorktree: () => void;
   onSelectFolder: (path: string) => void;
@@ -34,8 +33,7 @@ function samePath(a: string, b: string): boolean {
  * Context-folder control rendered as a chip in the input footer, next to the
  * model picker (both share the `.chat-meta-chip` style). When clicked, opens a
  * dropdown popup listing projects (issue #29): picking a project binds its
- * primary folder as the session cwd. An "Open folder..." option remains for
- * arbitrary paths.
+ * primary folder as the session cwd. Only existing projects are offered.
  */
 export const ContextFolderChip = memo(function ContextFolderChip({
   contextFolder,
@@ -43,7 +41,6 @@ export const ContextFolderChip = memo(function ContextFolderChip({
   worktreeVisible,
   connectionId,
   profile,
-  onPickFolder,
   onClearFolder,
   onToggleWorktree,
   onSelectFolder,
@@ -151,16 +148,6 @@ export const ContextFolderChip = memo(function ContextFolderChip({
           <div className="chat-ctxfolder-dropdown-divider" />
         </>
       )}
-      <button
-        type="button"
-        className="chat-ctxfolder-dropdown-item chat-ctxfolder-dropdown-item--open"
-        onClick={() => {
-          setIsOpen(false);
-          onPickFolder();
-        }}
-      >
-        <span>Open folder...</span>
-      </button>
     </div>
   );
 

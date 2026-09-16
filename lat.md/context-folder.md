@@ -18,7 +18,7 @@ In [[src/renderer/src/screens/Chat/Chat.tsx#Chat]] a load effect fetches the fol
 
 The context folder picker offers projects (issue #29): picking a project binds its primary folder as the session cwd, so users choose a project rather than a raw path.
 
-[[src/renderer/src/screens/Chat/ContextFolderChip.tsx#ContextFolderChip]] lists projects from the `list-projects` IPC channel ([[src/main/projects.ts#localListProjects]] locally, the dashboard tree remotely) with name plus primary-folder hint; the current session marks the project owning its cwd as active. Projects without a primary folder render disabled; an empty or failed list hides the section. An "Open folder..." entry still opens the OS dialog locally or the [[src/renderer/src/screens/Chat/RemoteFolderPicker.tsx#RemoteFolderPicker]] over SSH/remote.
+[[src/renderer/src/screens/Chat/ContextFolderChip.tsx#ContextFolderChip]] lists projects from the `list-projects` IPC channel ([[src/main/projects.ts#localListProjects]] locally, the dashboard tree remotely) with name plus primary-folder hint; the current session marks the project owning its cwd as active. Projects without a primary folder render disabled; an empty or failed list hides the section. Only existing projects are offered — there is no raw folder-browsing entry anymore in the chip.
 
 ## Resizable tree panel
 
@@ -26,11 +26,11 @@ The context-folder tree panel uses a compact header and can be resized from its 
 
 [[src/renderer/src/screens/Chat/WorktreePanel.tsx#WorktreePanel]] stores its width in `localStorage` under `hermes:worktreePanelWidth`, clamps it between a usable minimum and the available chat width, and updates it through a pointer-drag handle styled by `.worktree-resize-handle`.
 
-## Remote folder picker
+## Remote directory listing
 
-Remote and SSH chats use an in-app picker so users do not accidentally select a local macOS folder for a remote session.
+Remote and SSH folder pickers (e.g. the project dialogs' SSH browser) list directories through an IPC channel rather than local filesystem calls.
 
-[[src/renderer/src/screens/Chat/RemoteFolderPicker.tsx#RemoteFolderPicker]] provides a scrollable folder list, horizontally scrollable breadcrumbs, manual path entry, Escape-to-close, and arrow/Enter keyboard navigation. [[src/main/ipc/register.ts#registerIpcHandlers]] routes `read-directory` to [[src/main/ssh-remote.ts#sshReadDirectory]] for SSH connections and returns no listing for pure Remote Gateway mode until the backend exposes a directory-list endpoint, so the picker still allows typed remote paths.
+`read-directory` is routed by [[src/main/ipc/register.ts#registerIpcHandlers]] to [[src/main/ssh-remote.ts#sshReadDirectory]] for SSH connections and returns no listing for pure Remote Gateway mode until the backend exposes a directory-list endpoint, so pickers still allow typed remote paths.
 
 ## Muted tree icons
 
