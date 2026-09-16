@@ -35,6 +35,7 @@ import type { SessionModelOverride } from "../../../../shared/model-override";
 import type {
   ActiveTurn,
   ApprovalMessage,
+  ClarifyMessage,
   ChatMessage,
   UsageState,
 } from "./types";
@@ -723,6 +724,15 @@ function Chat({
     onDashboardUnavailable: handleDashboardUnavailable,
   });
 
+  const respondDashboardClarify = dashboardTransport.respondClarify;
+  const handleClarifyRespond = useCallback(
+    (msg: ClarifyMessage, answer: string): Promise<boolean> =>
+      msg.responsePath === "dashboard"
+        ? respondDashboardClarify(msg.requestId, answer)
+        : window.hermesAPI.respondClarify(msg.requestId, answer),
+    [respondDashboardClarify],
+  );
+
   const respondDashboardApproval = dashboardTransport.respondApproval;
   const handleApprovalRespond = useCallback(
     (msg: ApprovalMessage, choice: ApprovalChoice): Promise<boolean> =>
@@ -1068,6 +1078,7 @@ function Chat({
               onApprove={actions.handleApprove}
               onDeny={actions.handleDeny}
               onClarifyResolved={handleClarifyResolved}
+              onClarifyRespond={handleClarifyRespond}
               onApprovalRespond={handleApprovalRespond}
               onApprovalResolved={handleApprovalResolved}
               agentAvatar={agentAvatar}
