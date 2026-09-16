@@ -187,7 +187,8 @@ describe("applyDashboardStreamEvent", () => {
       "clarify",
     ]);
     expect(messages[1]).toMatchObject({
-      id: "clarify-ask-1",
+      // Single-question requests carry no qid; the card id suffix defaults to "q".
+      id: "clarify-ask-1-q",
       requestId: "ask-1",
       kind: "clarify",
       question: "Which provider should I use?",

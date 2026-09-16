@@ -75,6 +75,10 @@ export interface ClarifyMessage {
   kind: "clarify";
   role: "agent";
   requestId: string;
+  /** Batch wire id (`qid`) when the gateway sent a multi-question request.
+   *  Answers to a batch carry this id so the backend accumulator can lock the
+   *  right question; single-question cards leave it undefined. */
+  qid?: string;
   responsePath?: "dashboard" | "ipc";
   unavailable?: boolean;
   question: string;

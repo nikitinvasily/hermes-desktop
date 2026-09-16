@@ -638,10 +638,10 @@ function Chat({
   // has answered or skipped. The gateway resumes the turn from here, so loading
   // stays active until the next onChatDone.
   const handleClarifyResolved = useCallback(
-    (requestId: string, answer: string) => {
+    (requestId: string, answer: string, qid?: string) => {
       setMessages((prev) =>
         prev.map((m) =>
-          m.kind === "clarify" && m.requestId === requestId
+          m.kind === "clarify" && m.requestId === requestId && m.qid === qid
             ? { ...m, answer, resolved: true }
             : m,
         ),
@@ -728,7 +728,7 @@ function Chat({
   const handleClarifyRespond = useCallback(
     (msg: ClarifyMessage, answer: string): Promise<boolean> =>
       msg.responsePath === "dashboard"
-        ? respondDashboardClarify(msg.requestId, answer)
+        ? respondDashboardClarify(msg.requestId, answer, msg.qid)
         : window.hermesAPI.respondClarify(msg.requestId, answer),
     [respondDashboardClarify],
   );

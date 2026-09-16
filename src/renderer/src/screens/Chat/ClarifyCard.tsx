@@ -13,7 +13,7 @@ interface ClarifyCardProps {
   msg: ClarifyMessage;
   /** Mark the card resolved in parent state once the user answers/skips. */
   onRespond?: (msg: ClarifyMessage, answer: string) => Promise<boolean>;
-  onResolved: (requestId: string, answer: string) => void;
+  onResolved: (requestId: string, answer: string, qid?: string) => void;
 }
 
 /**
@@ -54,7 +54,7 @@ export const ClarifyCard = memo(function ClarifyCard({
         setError(true);
         return;
       }
-      onResolved(msg.requestId, answer);
+      onResolved(msg.requestId, answer, msg.qid);
     } catch {
       setError(true);
     } finally {

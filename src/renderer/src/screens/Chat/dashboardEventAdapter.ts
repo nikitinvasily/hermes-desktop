@@ -190,41 +190,83 @@ function appendClarifyRequest(
 ): ChatMessage[] {
   if (!isRecord(payload)) return [...messages];
   const requestId = textFromPayload(payload, "request_id", "id");
-  const question = textFromPayload(payload, "question", "message", "text");
-  if (!question.trim()) return [...messages];
 
-  const choices = Array.isArray(payload.choices)
-    ? payload.choices
-        .map((choice) => stringValue(choice))
-        .filter((choice) => choice.trim())
+  // The gateway emits one of two shapes: a single question
+  // (`{question, choices, multi_select?}`) or a batch (`{questions: [{qid,
+  // question, choices, multi_select}, ...]}` — used even for a one-element
+  // `questions` array). Both must render; a batch renders one card per
+  // question, keyed by qid so answers route back per question.
+  const single =
+    textFromPayload(payload, "question", "message", "text").trim() || undefined;
+  const batch: Array<Record<string, unknown>> = Array.isArray(payload.questions)
+    ? payload.questions.filter(isRecord)
     : [];
-  const id = `clarify-${requestId || `${now}-${messages.length}`}`;
-  const existingIndex = messages.findIndex((message) => message.id === id);
-  const existing = messages[existingIndex];
-  // Gateway replays must not re-open an already answered or expired card.
-  if (
-    existing?.kind === "clarify" &&
-    (existing.resolved || existing.unavailable)
-  )
-    return [...messages];
-  const bubble: ClarifyMessage = {
-    id,
-    kind: "clarify",
-    role: "agent",
-    requestId,
-    question,
-    choices,
-    responsePath: "dashboard",
-    unavailable: !requestId,
-  };
-  if (existingIndex >= 0) {
-    return [
-      ...messages.slice(0, existingIndex),
-      bubble,
-      ...messages.slice(existingIndex + 1),
-    ];
+
+  const draftQuestions: Array<{
+    qid?: string;
+    question: string;
+    choices: string[];
+  }> = [];
+  if (single) {
+    draftQuestions.push({
+      question: single,
+      choices: cleanClarifyChoices(payload.choices),
+    });
   }
-  return [...messages, bubble];
+  for (const entry of batch) {
+    const question = textFromPayload(entry, "question", "message", "text");
+    if (!question.trim()) continue;
+    const rawQid = textFromPayload(entry, "qid", "id", "question_id").trim();
+    draftQuestions.push({
+      ...(rawQid ? { qid: rawQid } : {}),
+      question,
+      choices: cleanClarifyChoices(entry.choices),
+    });
+  }
+  if (draftQuestions.length === 0) return [...messages];
+
+  let next = [...messages];
+  for (const draft of draftQuestions) {
+    const id = `clarify-${requestId || `${now}-${messages.length}`}-${
+      draft.qid ?? "q"
+    }`;
+    const existingIndex = next.findIndex((message) => message.id === id);
+    const existing = next[existingIndex];
+    // Gateway replays must not re-open an already answered or expired card.
+    if (
+      existing?.kind === "clarify" &&
+      (existing.resolved || existing.unavailable)
+    )
+      continue;
+    const bubble: ClarifyMessage = {
+      id,
+      kind: "clarify",
+      role: "agent",
+      requestId,
+      ...(draft.qid ? { qid: draft.qid } : {}),
+      question: draft.question,
+      choices: draft.choices,
+      responsePath: "dashboard",
+      unavailable: !requestId,
+    };
+    if (existingIndex >= 0) {
+      next = [
+        ...next.slice(0, existingIndex),
+        bubble,
+        ...next.slice(existingIndex + 1),
+      ];
+    } else {
+      next = [...next, bubble];
+    }
+  }
+  return next;
+}
+
+function cleanClarifyChoices(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((choice) => stringValue(choice))
+    .filter((choice) => choice.trim());
 }
 
 function toolEventFromGatewayEvent(event: DashboardStreamEvent): ChatToolEvent {
