@@ -25,6 +25,8 @@ export default {
   settings: "Settings",
   collapseSidebar: "Collapse sidebar",
   expandSidebar: "Expand sidebar",
+  resizeSidebar: "Drag to resize sidebar (double-click to reset)",
+  resetSidebarWidth: "Reset sidebar width",
   showRecentSessions: "Show recent sessions",
   hideRecentSessions: "Hide recent sessions",
   showMore: "Show more",

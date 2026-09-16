@@ -2387,6 +2387,8 @@ body:has(.shell-vibrant),
 
 .sidebar {
   width: 250px;
+  /* Anchor for the resize handle (abs-positioned at the right edge). */
+  position: relative;
   background: var(--bg-secondary);
   border-right: none;
   display: flex;
@@ -2406,6 +2408,42 @@ body:has(.shell-vibrant),
 
 .sidebar-collapsed .sidebar {
   width: 64px;
+}
+
+/* Right-edge resize handle (drag to resize, double-click resets). Abs-positioned
+   against the .layout container, straddling the sidebar's right edge. */
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 100%;
+  transform: translateX(-50%);
+  width: 8px;
+  cursor: col-resize;
+  z-index: 40;
+  touch-action: none;
+}
+
+.sidebar-resize-handle::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 50%;
+  width: 3px;
+  transform: translateX(-50%);
+  border-radius: 2px;
+  background: transparent;
+  transition: background var(--transition);
+}
+
+.sidebar-resize-handle:hover::after,
+.sidebar-resize-handle:focus-visible::after,
+.sidebar.resizing .sidebar-resize-handle::after {
+  background: color-mix(in srgb, var(--text-primary) 18%, transparent);
+}
+
+/* While dragging, the width tracks the cursor 1:1 — no transition. */
+.sidebar.resizing {
+  transition: none;
 }
 
 .sidebar-brand {
