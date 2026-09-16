@@ -116,7 +116,11 @@ interface UseDashboardChatTransportArgs {
 interface UseDashboardChatTransportResult {
   abort: () => void;
   enabled: boolean;
-  respondClarify: (requestId: string, answer: string) => Promise<boolean>;
+  respondClarify: (
+    requestId: string,
+    answer: string,
+    qid?: string,
+  ) => Promise<boolean>;
   respondApproval: (
     requestId: string,
     choice: ApprovalChoice,
@@ -963,6 +967,10 @@ export function useDashboardChatTransport({
   const lastRuntimeSessionWasCreatedRef = useRef(false);
   const pendingClarifyRef = useRef<{
     requestId: string;
+    /** qids of a batch request still unanswered; empty/undefined for a
+     *  single-question request. The pending slot is released when the backend
+     *  reports no remaining questions. */
+    remainingQids: Set<string>;
     sessionId: string | null;
     responding: boolean;
     activeTurn: ActiveTurn | null;
@@ -1351,8 +1359,25 @@ export function useDashboardChatTransport({
         if (card?.kind !== "clarify" || card.resolved || card.unavailable)
           return;
         expirePendingClarifyRef.current();
+        // Batch requests share one request_id; collect every unresolved qid of
+        // this request so per-question answers can retire the pending slot only
+        // when the backend confirms nothing remains.
+        const remainingQids = new Set<string>();
+        for (const message of messagesRef.current) {
+          if (
+            message.kind === "clarify" &&
+            message.responsePath === "dashboard" &&
+            message.requestId === requestId &&
+            !message.resolved &&
+            !message.unavailable &&
+            message.qid
+          ) {
+            remainingQids.add(message.qid);
+          }
+        }
         pendingClarifyRef.current = {
           requestId,
+          remainingQids,
           sessionId: runtimeSessionId,
           responding: false,
           activeTurn: activeTurnRef.current,
@@ -1719,7 +1744,11 @@ export function useDashboardChatTransport({
   );
 
   const respondClarify = useCallback(
-    async (requestId: string, answer: string): Promise<boolean> => {
+    async (
+      requestId: string,
+      answer: string,
+      qid?: string,
+    ): Promise<boolean> => {
       const pending = pendingClarifyRef.current;
       const client = clientRef.current;
       if (
@@ -1735,10 +1764,16 @@ export function useDashboardChatTransport({
       activeTurnRef.current = pending.activeTurn;
       setIsLoading(true);
       try {
-        const result = await client.request<{ status?: string }>(
-          "clarify.respond",
-          { request_id: requestId, answer },
-        );
+        // Batch answers carry the question's wire id so the backend locks one
+        // question at a time; a single-question answer omits it.
+        const result = await client.request<{
+          status?: string;
+          remaining?: string[];
+        }>("clarify.respond", {
+          request_id: requestId,
+          answer,
+          ...(qid ? { question_id: qid } : {}),
+        });
         if (
           !pendingClarifyRef.current ||
           pending.sessionId !== runtimeSessionIdRef.current ||
@@ -1753,6 +1788,27 @@ export function useDashboardChatTransport({
           }
           return false;
         }
+        // Batch: the backend reports the still-open qids. Resolve only the
+        // answered card and keep the pending slot (and the turn) alive while
+        // questions remain; an empty/absent list retires the whole request.
+        const remaining = Array.isArray(result.remaining)
+          ? result.remaining.filter((item): item is string => !!item)
+          : [];
+        if (qid && remaining.length > 0) {
+          if (pendingClarifyRef.current === pending)
+            pending.remainingQids = new Set(remaining);
+          setMessages((current) =>
+            current.map((message) =>
+              message.kind === "clarify" &&
+              message.responsePath === "dashboard" &&
+              message.requestId === requestId &&
+              message.qid === qid
+                ? { ...message, answer, resolved: true, unavailable: false }
+                : message,
+            ),
+          );
+          return true;
+        }
         if (pendingClarifyRef.current === pending)
           pendingClarifyRef.current = null;
         setMessages((current) =>
@@ -1760,7 +1816,12 @@ export function useDashboardChatTransport({
             message.kind === "clarify" &&
             message.responsePath === "dashboard" &&
             message.requestId === requestId
-              ? { ...message, answer, resolved: true, unavailable: false }
+              ? {
+                  ...message,
+                  answer: message.qid === qid ? answer : message.answer,
+                  resolved: true,
+                  unavailable: false,
+                }
               : message,
           ),
         );

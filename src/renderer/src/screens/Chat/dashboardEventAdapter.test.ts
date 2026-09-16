@@ -352,3 +352,115 @@ it("preserves gateway clarification choices as an interactive message", () => {
     responsePath: "dashboard",
   });
 });
+
+it("renders one card per question for a batch clarify request (issue #43)", () => {
+  const state = applyDashboardStreamEvent(
+    { messages: [], reasoningSegmentClosed: false },
+    {
+      type: "clarify.request",
+      session_id: "live",
+      payload: {
+        request_id: "batch-1",
+        questions: [
+          {
+            qid: "q0",
+            question: "Which environment?",
+            choices: ["staging", "production"],
+            multi_select: false,
+          },
+          {
+            qid: "q1",
+            question: "Roll out now?",
+            choices: ["yes", "no"],
+            multi_select: false,
+          },
+        ],
+      },
+    },
+  );
+  expect(state.messages).toHaveLength(2);
+  expect(state.messages[0]).toMatchObject({
+    kind: "clarify",
+    requestId: "batch-1",
+    qid: "q0",
+    question: "Which environment?",
+    choices: ["staging", "production"],
+    responsePath: "dashboard",
+  });
+  expect(state.messages[1]).toMatchObject({
+    kind: "clarify",
+    requestId: "batch-1",
+    qid: "q1",
+    question: "Roll out now?",
+    choices: ["yes", "no"],
+    responsePath: "dashboard",
+  });
+  expect(
+    state.messages.every(
+      (message) => !("unavailable" in message && message.unavailable),
+    ),
+  ).toBe(true);
+});
+
+it("renders a single-element batch clarify request (questions[0] only)", () => {
+  const state = applyDashboardStreamEvent(
+    { messages: [], reasoningSegmentClosed: false },
+    {
+      type: "clarify.request",
+      session_id: "live",
+      payload: {
+        request_id: "solo-batch",
+        questions: [
+          { qid: "q0", question: "Proceed?", choices: [], multi_select: false },
+        ],
+      },
+    },
+  );
+  expect(state.messages).toHaveLength(1);
+  expect(state.messages[0]).toMatchObject({
+    kind: "clarify",
+    requestId: "solo-batch",
+    qid: "q0",
+    question: "Proceed?",
+    choices: [],
+    responsePath: "dashboard",
+  });
+});
+
+it("keeps a replayed batch from reopening answered cards", () => {
+  const base = applyDashboardStreamEvent(
+    { messages: [], reasoningSegmentClosed: false },
+    {
+      type: "clarify.request",
+      session_id: "live",
+      payload: {
+        request_id: "batch-2",
+        questions: [
+          { qid: "q0", question: "First?", choices: ["a"], multi_select: false },
+        ],
+      },
+    },
+  );
+  const answered = {
+    ...base,
+    messages: base.messages.map((message) =>
+      message.kind === "clarify" ? { ...message, resolved: true } : message,
+    ),
+  };
+  const replayed = applyDashboardStreamEvent(answered, {
+    type: "clarify.request",
+    session_id: "live",
+    payload: {
+      request_id: "batch-2",
+      questions: [
+        { qid: "q0", question: "First?", choices: ["a"], multi_select: false },
+      ],
+    },
+  });
+  expect(replayed.messages).toHaveLength(1);
+  expect(
+    replayed.messages.every(
+      (message) => !("resolved" in message && !message.resolved),
+    ),
+  ).toBe(true);
+});

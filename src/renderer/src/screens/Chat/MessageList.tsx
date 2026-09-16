@@ -47,7 +47,7 @@ interface MessageListProps {
   onDeny: () => void;
   /** Mark an inline clarify card resolved once the user answers/skips. */
   onClarifyRespond?: (msg: ClarifyMessage, answer: string) => Promise<boolean>;
-  onClarifyResolved: (requestId: string, answer: string) => void;
+  onClarifyResolved: (requestId: string, answer: string, qid?: string) => void;
   onApprovalRespond: (
     msg: ApprovalMessage,
     choice: ApprovalChoice,

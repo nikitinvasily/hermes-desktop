@@ -49,7 +49,7 @@ describe("ClarifyCard", () => {
     expect(respondClarify).toHaveBeenCalledWith("r1", "production");
     // onResolved runs in the submit's finally, after the awaited respondClarify.
     await vi.waitFor(() =>
-      expect(onResolved).toHaveBeenCalledWith("r1", "production"),
+      expect(onResolved).toHaveBeenCalledWith("r1", "production", undefined),
     );
   });
 
@@ -66,7 +66,7 @@ describe("ClarifyCard", () => {
 
     expect(respondClarify).toHaveBeenCalledWith("r1", "use staging");
     await vi.waitFor(() =>
-      expect(onResolved).toHaveBeenCalledWith("r1", "use staging"),
+      expect(onResolved).toHaveBeenCalledWith("r1", "use staging", undefined),
     );
   });
 
@@ -78,7 +78,7 @@ describe("ClarifyCard", () => {
     fireEvent.click(screen.getByText("chat.clarify.skip"));
 
     expect(respondClarify).toHaveBeenCalledWith("r1", "");
-    await vi.waitFor(() => expect(onResolved).toHaveBeenCalledWith("r1", ""));
+    await vi.waitFor(() => expect(onResolved).toHaveBeenCalledWith("r1", "", undefined));
   });
 
   it("does not send for an empty open-ended answer (Send disabled)", () => {
@@ -181,7 +181,7 @@ it("renders gateway choices and submits through the supplied transport instead o
   render(<ClarifyCard msg={msg} onRespond={respond} onResolved={resolved} />);
   fireEvent.click(screen.getByRole("button", { name: "production" }));
   await vi.waitFor(() =>
-    expect(resolved).toHaveBeenCalledWith("ws-1", "production"),
+    expect(resolved).toHaveBeenCalledWith("ws-1", "production", undefined),
   );
   expect(respond).toHaveBeenCalledWith(msg, "production");
   expect(ipc).not.toHaveBeenCalled();
