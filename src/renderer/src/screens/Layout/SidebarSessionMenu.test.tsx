@@ -29,7 +29,6 @@ describe("SidebarSessionMenu", () => {
         onRename={vi.fn()}
         onCopySessionId={onCopySessionId}
         onMoveToProject={vi.fn()}
-        onPickNewFolder={vi.fn()}
         onArchive={vi.fn()}
         onDelete={vi.fn()}
       />,
@@ -59,7 +58,6 @@ describe("SidebarSessionMenu", () => {
         onRename={vi.fn()}
         onCopySessionId={vi.fn()}
         onMoveToProject={vi.fn()}
-        onPickNewFolder={vi.fn()}
         onArchive={onArchive}
         onDelete={vi.fn()}
       />,
@@ -94,7 +92,6 @@ describe("SidebarSessionMenu", () => {
         onRename={vi.fn()}
         onCopySessionId={vi.fn()}
         onMoveToProject={onMoveToProject}
-        onPickNewFolder={vi.fn()}
         onArchive={vi.fn()}
         onDelete={vi.fn()}
       />,
@@ -114,8 +111,6 @@ describe("SidebarSessionMenu", () => {
     expect(onMoveToProject).toHaveBeenCalledWith(
       "/home/hermes/.hermes/workspace/diy",
     );
-    expect(
-      screen.getByRole("menuitem", { name: "Setup" }),
-    ).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Setup" })).toBeTruthy();
   });
 });

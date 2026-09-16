@@ -31,7 +31,6 @@ export default {
     unpin: "إلغاء التثبيت",
     rename: "إعادة تسمية",
     moveToProject: "نقل إلى مشروع",
-    newProjectFolder: "مجلد جديد...",
     removeFromProject: "إزالة من المشروع",
     noProjects: "لا توجد مشاريع بعد",
     delete: "حذف",

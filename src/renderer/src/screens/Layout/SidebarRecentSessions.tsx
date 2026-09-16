@@ -28,7 +28,6 @@ import SidebarSessionMenu, {
   type SidebarMenuProject,
   type SidebarMenuTarget,
 } from "./SidebarSessionMenu";
-import FolderPickerDialog from "./FolderPickerDialog";
 import ArchiveDialog from "./ArchiveDialog";
 import ProjectDialog, { type ProjectDialogState } from "./ProjectDialog";
 import type { ProjectInfo } from "../../../../shared/projects";
@@ -246,10 +245,6 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   >("local");
   // Row whose context menu is open, anchored to viewport coordinates.
   const [menuTarget, setMenuTarget] = useState<SidebarMenuTarget | null>(null);
-  // Session awaiting an agent-side folder choice (issue #37): "New folder…"
-  // in remote/ssh modes opens the agent directory browser instead of the
-  // native macOS picker, whose result is a local path meaningless remotely.
-  const [folderPickerFor, setFolderPickerFor] = useState<string | null>(null);
   // Inline rename: the row id being edited and its working title.
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
@@ -812,24 +807,6 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     [activeProfile, connectionId],
   );
 
-  const handlePickNewFolder = useCallback(
-    async (id: string): Promise<void> => {
-      // Remote/ssh: the native picker returns a LOCAL path — open the
-      // agent-side browser instead (issue #37).
-      if (connectionMode !== "local") {
-        setFolderPickerFor(id);
-        return;
-      }
-      try {
-        const folder = await window.hermesAPI.selectFolder();
-        if (folder) await handleMoveToProject(id, folder);
-      } catch (err) {
-        console.error("Folder selection failed", err);
-      }
-    },
-    [connectionMode, handleMoveToProject],
-  );
-
   const confirmDelete = useCallback(
     async (id: string): Promise<void> => {
       setDeleting(true);
@@ -1332,7 +1309,6 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
           onMoveToProject={(path) =>
             void handleMoveToProject(menuTarget.id, path)
           }
-          onPickNewFolder={() => void handlePickNewFolder(menuTarget.id)}
           onArchive={() => void handleArchive(menuTarget.id)}
           onDelete={() => setPendingDeleteId(menuTarget.id)}
         />
@@ -1457,20 +1433,6 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
             onMutate={handleProjectMutate}
             onChanged={handleProjectChanged}
             existingProjects={projects ?? undefined}
-          />,
-          document.body,
-        )}
-      {folderPickerFor &&
-        createPortal(
-          <FolderPickerDialog
-            connectionId={connectionId}
-            activeProfile={activeProfile}
-            onClose={() => setFolderPickerFor(null)}
-            onPick={(path) => {
-              const id = folderPickerFor;
-              setFolderPickerFor(null);
-              if (path) void handleMoveToProject(id, path);
-            }}
           />,
           document.body,
         )}
