@@ -20,6 +20,7 @@ function ArchiveDialog({
   connectionId,
   activeProfile,
   onRestored,
+  onOpen,
   onDeleteRequest,
   onClose,
 }: {
@@ -29,6 +30,8 @@ function ArchiveDialog({
   activeProfile: string;
   /** Notify the parent after a successful restore so it refreshes the list. */
   onRestored: () => void;
+  /** Open the session in the chat view (row click = restore AND open). */
+  onOpen: (sessionId: string) => void;
   /** Surface deletion through the parent's shared confirmation dialog. */
   onDeleteRequest: (sessionId: string) => void;
   onClose: () => void;
@@ -95,6 +98,7 @@ function ArchiveDialog({
         activeProfile,
       );
       onRestored();
+      onOpen(id);
       onClose();
     });
   };

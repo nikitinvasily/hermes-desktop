@@ -1414,6 +1414,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
             connectionId={connectionId}
             activeProfile={activeProfile}
             onRestored={() => void refresh(true)}
+            onOpen={(sessionId) => onSelect(sessionId)}
             onDeleteRequest={(sessionId) => {
               setPendingDeleteIsArchived(true);
               setPendingDeleteId(sessionId);
