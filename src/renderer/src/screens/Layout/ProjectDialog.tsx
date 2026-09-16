@@ -19,7 +19,8 @@ import type {
  *
  * Folder selection depends on the connection mode: a local agent gets the
  * native directory picker (defaultPath ~/Documents); remote/ssh agents need a
- * path on THEIR filesystem, so the picker would lie — a text input instead.
+ * path on THEIR filesystem, so the picker would lie — a directory browser
+ * over read-directory IPC instead (manual text fallback was removed).
  */
 
 export interface ProjectDialogFolder {
@@ -75,14 +76,13 @@ export default function ProjectDialog({
         }))
       : [],
   );
-  const [manualPath, setManualPath] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
 
   // Remote/ssh folder browser state (issue #27 follow-up): the agent host's
   // directories, read through the existing read-directory IPC (ssh exec or
-  // local readdir; HTTP-remote returns null → falls back to manual input).
+  // local readdir; HTTP-remote returns null → browser hidden, hint shown).
   // The browser starts at the agent's workspace dir when it exists
   // (~/.hermes/workspace, or ~/.hermes/profiles/<name>/workspace for a
   // profile) — that is where the agent's projects live — else at its home.
@@ -173,7 +173,6 @@ export default function ProjectDialog({
       ...prev,
       { path: resolved, isPrimary: prev.length === 0 },
     ]);
-    setManualPath("");
   }
 
   async function handlePickFolder(): Promise<void> {
@@ -435,35 +434,11 @@ export default function ProjectDialog({
                 </div>
               </>
             )}
-            <div className="sidebar-project-dialog-manual">
-              <input
-                className="sidebar-project-dialog-input"
-                type="text"
-                placeholder={t("navigation.projectDialog.pathPlaceholder")}
-                value={manualPath}
-                disabled={submitting}
-                onChange={(e) => setManualPath(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    void addFolder(manualPath);
-                  }
-                }}
-              />
-              <button
-                type="button"
-                className="btn btn-secondary"
-                disabled={submitting || !manualPath.trim()}
-                onClick={() => void addFolder(manualPath)}
-              >
-                {t("navigation.projectDialog.addFolder")}
-              </button>
-            </div>
-            <div className="sidebar-project-dialog-hint">
-              {browseFailed
-                ? t("navigation.projectDialog.browseUnavailable")
-                : t("navigation.projectDialog.remoteHint")}
-            </div>
+            {browseFailed && (
+              <div className="sidebar-project-dialog-hint">
+                {t("navigation.projectDialog.browseUnavailable")}
+              </div>
+            )}
           </div>
         )}
 

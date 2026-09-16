@@ -3334,15 +3334,6 @@ body:has(.shell-vibrant),
   gap: 6px;
 }
 
-.sidebar-project-dialog-manual {
-  display: flex;
-  gap: 8px;
-}
-
-.sidebar-project-dialog-manual .sidebar-project-dialog-input {
-  flex: 1;
-}
-
 .sidebar-project-dialog-hint {
   margin-top: 6px;
   font-size: 11px;

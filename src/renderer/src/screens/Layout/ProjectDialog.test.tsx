@@ -205,13 +205,19 @@ describe("ProjectDialog folder input by connection mode", () => {
     expect(entry).toBeTruthy();
     // Non-directories are filtered out of the browser list.
     expect(screen.queryByText("notes.txt")).toBeNull();
-    // Manual input stays as the fallback path.
+    // The manual text fallback is gone — browser only.
     expect(
-      screen.getByPlaceholderText("navigation.projectDialog.pathPlaceholder"),
-    ).toBeTruthy();
+      screen.queryByPlaceholderText("navigation.projectDialog.pathPlaceholder"),
+    ).toBeNull();
     expect(
       screen.queryByRole("button", {
         name: "navigation.projectDialog.addFolder",
+      }),
+    ).toBeNull();
+    // The browser's own add button is the folder entry point.
+    expect(
+      screen.getByRole("button", {
+        name: "navigation.projectDialog.addCurrent",
       }),
     ).toBeTruthy();
   });
