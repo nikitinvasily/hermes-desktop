@@ -28,6 +28,7 @@ import SidebarSessionMenu, {
   type SidebarMenuProject,
   type SidebarMenuTarget,
 } from "./SidebarSessionMenu";
+import FolderPickerDialog from "./FolderPickerDialog";
 import ArchiveDialog from "./ArchiveDialog";
 import ProjectDialog, { type ProjectDialogState } from "./ProjectDialog";
 import type { ProjectInfo } from "../../../../shared/projects";
@@ -245,6 +246,10 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   >("local");
   // Row whose context menu is open, anchored to viewport coordinates.
   const [menuTarget, setMenuTarget] = useState<SidebarMenuTarget | null>(null);
+  // Session awaiting an agent-side folder choice (issue #37): "New folder…"
+  // in remote/ssh modes opens the agent directory browser instead of the
+  // native macOS picker, whose result is a local path meaningless remotely.
+  const [folderPickerFor, setFolderPickerFor] = useState<string | null>(null);
   // Inline rename: the row id being edited and its working title.
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
@@ -669,8 +674,11 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     [projectNames, projectNamesFromList],
   );
 
-  // Every distinct project folder currently in use, so "Move to project" lists
-  // them all — even ones whose only conversation is pinned or filtered out.
+  // Choices for "Move to project": EVERY loaded agent project (zero-session
+  // ones included — the same source as the Projects section, issue #36) plus
+  // session-derived folders that have no project record. Building this from
+  // session contextFolders alone hid projects whose sessions sat outside the
+  // loaded 50-row window (worst over SSH, where cwd-less cron rows crowd it).
   const projectChoices = useMemo<SidebarMenuProject[]>(() => {
     const byPath = new Map<string, SidebarMenuProject>();
     for (const s of sessions) {
@@ -682,8 +690,17 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         });
       }
     }
+    for (const p of projects ?? []) {
+      const add = (path: string | null | undefined): void => {
+        const key = path?.trim();
+        if (!key || byPath.has(key)) return;
+        byPath.set(key, { path: key, name: p.name || folderName(key) });
+      };
+      add(p.primaryPath);
+      for (const f of p.folders) add(f.path);
+    }
     return Array.from(byPath.values());
-  }, [sessions, projectNames]);
+  }, [sessions, projectNames, projects]);
 
   const togglePinned = (): void => {
     setPinnedOpen((prev) => {
@@ -797,6 +814,12 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
 
   const handlePickNewFolder = useCallback(
     async (id: string): Promise<void> => {
+      // Remote/ssh: the native picker returns a LOCAL path — open the
+      // agent-side browser instead (issue #37).
+      if (connectionMode !== "local") {
+        setFolderPickerFor(id);
+        return;
+      }
       try {
         const folder = await window.hermesAPI.selectFolder();
         if (folder) await handleMoveToProject(id, folder);
@@ -804,7 +827,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         console.error("Folder selection failed", err);
       }
     },
-    [handleMoveToProject],
+    [connectionMode, handleMoveToProject],
   );
 
   const confirmDelete = useCallback(
@@ -1434,6 +1457,20 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
             onMutate={handleProjectMutate}
             onChanged={handleProjectChanged}
             existingProjects={projects ?? undefined}
+          />,
+          document.body,
+        )}
+      {folderPickerFor &&
+        createPortal(
+          <FolderPickerDialog
+            connectionId={connectionId}
+            activeProfile={activeProfile}
+            onClose={() => setFolderPickerFor(null)}
+            onPick={(path) => {
+              const id = folderPickerFor;
+              setFolderPickerFor(null);
+              if (path) void handleMoveToProject(id, path);
+            }}
           />,
           document.body,
         )}
