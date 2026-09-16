@@ -3334,12 +3334,6 @@ body:has(.shell-vibrant),
   gap: 6px;
 }
 
-.sidebar-project-dialog-local {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
 .sidebar-project-dialog-manual {
   display: flex;
   gap: 8px;

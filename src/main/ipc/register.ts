@@ -9,10 +9,10 @@ import {
   dialog,
   clipboard,
 } from "electron";
-import { extname, join, resolve, sep } from "path";
+import { extname, join, resolve } from "path";
 import { homedir } from "os";
 import { randomUUID } from "crypto";
-import { readdir, readFile, stat, mkdir } from "fs/promises";
+import { readdir, readFile, stat } from "fs/promises";
 import { getActiveProfileNameSync } from "../utils";
 import type { Attachment } from "../../shared/attachments";
 import type { SessionModelOverride } from "../../shared/model-override";
@@ -52,7 +52,6 @@ import {
   remoteListProjects,
   sshListProjects,
   projectRpc,
-  sshCreateDirectory,
   sshResolvePath,
   type ProjectInfo,
   type ProjectMutation,
@@ -2579,33 +2578,6 @@ export function registerIpcHandlers(context: IpcContext): void {
       if (trimmed.startsWith("~/"))
         return resolve(join(homedir(), trimmed.slice(2)));
       return resolve(trimmed);
-    },
-  );
-
-  // Create a directory for a new project folder (issue #27 follow-up).
-  // Local: mkdir -p under the user's home only. SSH: the agent host's home
-  // only (sshCreateDirectory refuses paths outside it). HTTP-remote has no
-  // filesystem channel — throws, the dialog falls back to manual entry.
-  ipcMain.handle(
-    "create-directory",
-    async (_event, path: string, connectionId?: string) => {
-      const trimmed = path.trim();
-      if (!trimmed) throw new Error("Directory path is empty.");
-      const conn = sessionConnection(connectionId);
-      if (conn.mode === "ssh" && conn.ssh)
-        return sshCreateDirectory(conn.ssh, trimmed);
-      if (conn.mode === "remote")
-        throw new Error(
-          "Directory creation is unavailable over an HTTP remote connection — create the folder on the agent host and enter its path.",
-        );
-      const home = homedir();
-      const expanded = trimmed.startsWith("~/")
-        ? join(home, trimmed.slice(2))
-        : resolve(trimmed);
-      if (expanded !== home && !expanded.startsWith(home + sep))
-        throw new Error("Refusing to create a directory outside your home.");
-      await mkdir(expanded, { recursive: true });
-      return expanded;
     },
   );
 

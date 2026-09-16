@@ -38,12 +38,6 @@ beforeEach(() => {
     writable: true,
     value: {
       selectFolder: vi.fn(async () => "/tmp/picked"),
-      createDirectory: vi.fn(
-        async (path: string): Promise<string> =>
-          path.startsWith("~/")
-            ? `/Users/test${path.slice(1)}`
-            : `/remote${path.startsWith("/") ? "" : "/"}${path}`,
-      ),
       resolvePath: vi.fn(
         async (path: string): Promise<string> =>
           path.startsWith("~/") ? `/home/hermes${path.slice(1)}` : path,
@@ -265,34 +259,6 @@ describe("ProjectDialog folder input by connection mode", () => {
         folders: ["/home/hermes/.hermes/workspace"],
         primaryPath: "/home/hermes/.hermes/workspace",
       });
-    });
-  });
-
-  it("creates a folder under the current browser path and adds it", async () => {
-    renderDialog("create", "ssh");
-    await screen.findByRole("button", { name: /proj-a/ });
-    fireEvent.change(
-      screen.getByPlaceholderText(
-        "navigation.projectDialog.newFolderRemotePlaceholder",
-      ),
-      { target: { value: "brand-new" } },
-    );
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "navigation.projectDialog.newFolder",
-      }),
-    );
-    await waitFor(() => {
-      expect(window.hermesAPI.createDirectory).toHaveBeenCalledWith(
-        "~/.hermes/workspace/brand-new",
-        undefined,
-      );
-    });
-    await waitFor(() => {
-      expect(
-        document.querySelector(".sidebar-project-dialog-folder-path")
-          ?.textContent,
-      ).toBe("/Users/test/.hermes/workspace/brand-new");
     });
   });
 

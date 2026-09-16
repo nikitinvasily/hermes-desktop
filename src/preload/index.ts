@@ -1001,9 +1001,6 @@ const hermesAPI = {
   ): Promise<unknown> =>
     ipcRenderer.invoke("project-mutate", mutation, connectionId, profile),
 
-  createDirectory: (path: string, connectionId?: string): Promise<string> =>
-    ipcRenderer.invoke("create-directory", path, connectionId),
-
   resolvePath: (path: string, connectionId?: string): Promise<string> =>
     ipcRenderer.invoke("resolve-path", path, connectionId),
 

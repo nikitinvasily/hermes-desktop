@@ -62,10 +62,6 @@ export default {
     addCurrent: "Add this folder",
     browseUnavailable:
       "Directory browsing is unavailable for this connection — type the path by hand.",
-    newFolder: "New folder",
-    creating: "Creating…",
-    newFolderLocalPlaceholder: "~/Documents/my-project",
-    newFolderRemotePlaceholder: "Folder name in the current directory",
     folderDuplicate: "This folder is already in the list.",
     folderConflict:
       'A folder in this list already belongs to project "{{project}}". Sharing a folder between projects is allowed, but sessions in it will group under one project.',

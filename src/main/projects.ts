@@ -209,39 +209,6 @@ conn.close()
   }
 }
 
-/**
- * Create a directory on the SSH agent host (issue #27 follow-up). Refuses
- * paths outside the remote user's home — the desktop should not be able to
- * mint arbitrary directories on a server it merely chats with. `~` and
- * `$HOME` prefixes expand on the remote. Returns the absolute created path.
- */
-export async function sshCreateDirectory(
-  config: SshConfig,
-  path: string,
-): Promise<string> {
-  const script = `
-import json, os, sys
-payload = json.loads(sys.stdin.read() or "{}")
-raw = str(payload.get("path") or "")
-if raw.startswith("~/"):
-    raw = os.path.join(os.path.expanduser("~"), raw[2:])
-elif raw.startswith("$HOME/"):
-    raw = os.path.join(os.path.expanduser("~"), raw[6:])
-path = os.path.abspath(os.path.expanduser(raw))
-home = os.path.expanduser("~")
-if path != home and not path.startswith(home + os.sep):
-    print(json.dumps({"error": "refusing to create a directory outside the remote home"}))
-    sys.exit(1)
-os.makedirs(path, exist_ok=True)
-print(json.dumps({"path": path}))
-`;
-  const out = await sshPython(config, script, JSON.stringify({ path }));
-  const parsed = JSON.parse(out.trim()) as { path?: string; error?: string };
-  if (parsed.error) throw new Error(parsed.error);
-  if (!parsed.path) throw new Error("Directory creation returned no path.");
-  return parsed.path;
-}
-
 function rpcParamsForMutation(m: ProjectMutation): {
   method: string;
   params: Record<string, unknown>;
