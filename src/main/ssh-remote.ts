@@ -1351,27 +1351,14 @@ export async function sshSetModelConfig(
   baseUrl: string,
   profile?: string,
 ): Promise<void> {
+  // A model switch writes ONLY the model block. The historical side effects
+  // here (force `streaming: true`, disable `smart_model_routing`) silently
+  // rewrote unrelated user settings on every SSH model pick (issue #39).
   await sshSetConfigValue(config, "model.provider", provider, profile);
   await sshSetConfigValue(config, "model.default", model, profile);
   if (baseUrl) {
     await sshSetConfigValue(config, "model.base_url", baseUrl, profile);
   }
-  const configPath = remoteConfigPath(profile);
-  const content = await sshReadFile(config, configPath);
-  if (!content) return;
-  let updated = content.replace(/^(\s*streaming:\s*)(\S+)/m, "$1true");
-  const lines = updated.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    if (
-      /^\s*enabled:\s*(true|false)/.test(lines[i]) &&
-      i > 0 &&
-      /smart_model_routing/.test(lines[i - 1])
-    ) {
-      lines[i] = lines[i].replace(/(enabled:\s*)(true|false)/, "$1false");
-    }
-  }
-  updated = lines.join("\n");
-  if (updated !== content) await sshWriteFile(config, configPath, updated);
 }
 
 // ── Sessions ─────────────────────────────────────────────────────────────────

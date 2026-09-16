@@ -648,14 +648,21 @@ async function withSshDashboardModelLibrary<T>(
   } catch (err) {
     // Auto transport degrades to the legacy CLI/file path when the dashboard
     // can't be reached — e.g. a gateway-only remote that can't run the
-    // dashboard (no Node / no web dist). A forced "dashboard" transport
-    // rethrows so the failure is visible.
+    // dashboard (no Node / no web dist), or an unpatched agent dashboard
+    // without the /api/model/library compat endpoint (404/405 — expected on
+    // stock agents; the compat patch ships with the desktop's LOCAL dashboard
+    // only). A forced "dashboard" transport rethrows so the failure is visible.
     if (conn.sshChatTransport === "auto") {
-      console.warn(
-        "[ssh-model-library] Dashboard unavailable; " +
-          "falling back to legacy SSH transport",
-        err,
-      );
+      const status =
+        err instanceof Error ? Number(err.message.split(":", 1)[0]) : NaN;
+      const endpointMissing = status === 404 || status === 405;
+      if (!endpointMissing) {
+        console.warn(
+          "[ssh-model-library] Dashboard unavailable; " +
+            "falling back to legacy SSH transport",
+          err,
+        );
+      }
       return legacyOperation();
     }
     throw err;
