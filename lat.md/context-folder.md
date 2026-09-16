@@ -14,11 +14,11 @@ The chat loads the stored folder when resuming a session and saves it whenever i
 
 In [[src/renderer/src/screens/Chat/Chat.tsx#Chat]] a load effect fetches the folder for `initialSessionId` on mount; a save effect writes `contextFolder` via `setSessionContextFolder` on every change. The save is gated on a "loaded" ref so the initial null can't overwrite a resumed session's stored folder before the load resolves. A brand-new chat saves once its session id resolves after the first message, binding the pre-selected folder to the new session.
 
-## Recent folders dropdown
+## Projects dropdown
 
-The context folder picker displays recently used project folders first, allowing quick selection across sessions without opening the OS folder dialog.
+The context folder picker offers projects (issue #29): picking a project binds its primary folder as the session cwd, so users choose a project rather than a raw path.
 
-[[src/renderer/src/screens/Chat/ContextFolderChip.tsx#ContextFolderChip]] presents a dropdown menu populated by [[src/main/session-context-folder-store.ts#getRecentSessionContextFolders]] via the `list-recent-session-context-folders` IPC channel, combining distinct database folder bindings with cached session paths.
+[[src/renderer/src/screens/Chat/ContextFolderChip.tsx#ContextFolderChip]] lists projects from the `list-projects` IPC channel ([[src/main/projects.ts#localListProjects]] locally, the dashboard tree remotely) with name plus primary-folder hint; the current session marks the project owning its cwd as active. Projects without a primary folder render disabled; an empty or failed list hides the section. Only existing projects are offered — there is no raw folder-browsing entry anymore in the chip.
 
 ## Resizable tree panel
 
@@ -26,11 +26,11 @@ The context-folder tree panel uses a compact header and can be resized from its 
 
 [[src/renderer/src/screens/Chat/WorktreePanel.tsx#WorktreePanel]] stores its width in `localStorage` under `hermes:worktreePanelWidth`, clamps it between a usable minimum and the available chat width, and updates it through a pointer-drag handle styled by `.worktree-resize-handle`.
 
-## Remote folder picker
+## Remote directory listing
 
-Remote and SSH chats use an in-app picker so users do not accidentally select a local macOS folder for a remote session.
+Remote and SSH folder pickers (e.g. the project dialogs' SSH browser) list directories through an IPC channel rather than local filesystem calls.
 
-[[src/renderer/src/screens/Chat/RemoteFolderPicker.tsx#RemoteFolderPicker]] provides a scrollable folder list, horizontally scrollable breadcrumbs, manual path entry, Escape-to-close, and arrow/Enter keyboard navigation. [[src/main/ipc/register.ts#registerIpcHandlers]] routes `read-directory` to [[src/main/ssh-remote.ts#sshReadDirectory]] for SSH connections and returns no listing for pure Remote Gateway mode until the backend exposes a directory-list endpoint, so the picker still allows typed remote paths.
+`read-directory` is routed by [[src/main/ipc/register.ts#registerIpcHandlers]] to [[src/main/ssh-remote.ts#sshReadDirectory]] for SSH connections and returns no listing for pure Remote Gateway mode until the backend exposes a directory-list endpoint, so pickers still allow typed remote paths.
 
 ## Muted tree icons
 

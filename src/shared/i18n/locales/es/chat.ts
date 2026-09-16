@@ -32,7 +32,7 @@ export default {
   clearChatConfirm:
     "¿Borrar esta conversación? Esta acción no se puede deshacer.",
   setContextFolder: "Establecer carpeta de contexto",
-  contextFolderChip: "Elegir carpeta",
+  contextFolderChip: "Elegir proyecto",
   contextFolderActive: "Carpeta de contexto: {{path}}",
   removeContextFolder: "Quitar carpeta de contexto",
   attach: "Adjuntar archivos",

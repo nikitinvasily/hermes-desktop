@@ -54,7 +54,7 @@ export default {
   clearChat: "مسح المحادثة",
   clearChatConfirm: "مسح هذه المحادثة؟ لا يمكن التراجع عن هذا.",
   setContextFolder: "تعيين مجلد السياق",
-  contextFolderChip: "اختيار مجلد",
+  contextFolderChip: "اختيار مشروع",
   contextFolderActive: "مجلد السياق: {{path}}",
   removeContextFolder: "إزالة مجلد السياق",
   attach: "إرفاق ملفات",

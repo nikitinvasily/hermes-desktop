@@ -7649,6 +7649,26 @@ body:has(.shell-vibrant),
   white-space: nowrap;
 }
 
+.chat-ctxfolder-dropdown-item-path {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  margin-left: 8px;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.chat-ctxfolder-dropdown-item:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.chat-ctxfolder-dropdown-item:disabled:hover {
+  background: none;
+}
+
 .chat-ctxfolder-dropdown-item-check {
   color: var(--text-secondary);
   flex-shrink: 0;

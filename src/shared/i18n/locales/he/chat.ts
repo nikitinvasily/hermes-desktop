@@ -46,7 +46,7 @@ export default {
   clearChat: "נקה צ'אט",
   clearChatConfirm: "לנקות את השיחה הזו? לא ניתן לבטל פעולה זו.",
   setContextFolder: "הגדרת תיקיית הקשר",
-  contextFolderChip: "בחירת תיקייה",
+  contextFolderChip: "בחירת פרויקט",
   contextFolderActive: "תיקיית הקשר: {{path}}",
   removeContextFolder: "הסרת תיקיית ההקשר",
   attach: "צירוף קבצים",
