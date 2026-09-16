@@ -62,6 +62,8 @@ interface HarnessApi {
     typeof useDashboardChatTransport
   >["respondApproval"];
   send?: (text: string) => Promise<boolean>;
+  sessionYolo?: boolean | null;
+  toggleSessionYolo?: (enabled: boolean) => Promise<boolean>;
   setConnectionMode?: Dispatch<SetStateAction<"local" | "remote" | "ssh">>;
   setMessages?: Dispatch<SetStateAction<ChatMessage[]>>;
   setModel?: Dispatch<SetStateAction<string>>;
@@ -149,6 +151,8 @@ function Harness({
       respondApproval: transport.respondApproval,
       respondClarify: transport.respondClarify,
       send: transport.sendMessage,
+      sessionYolo: transport.sessionYolo,
+      toggleSessionYolo: transport.toggleSessionYolo,
       setConnectionMode,
       setMessages,
       setModel,
@@ -164,6 +168,8 @@ function Harness({
     transport.sendMessage,
     transport.respondApproval,
     transport.respondClarify,
+    transport.sessionYolo,
+    transport.toggleSessionYolo,
     transport.abort,
   ]);
 
@@ -1608,5 +1614,102 @@ describe("useDashboardChatTransport delta coalescing", () => {
     expect(
       (afterFlush[afterFlush.length - 2] as { content?: string }).content,
     ).toBe("alphabeta");
+  });
+});
+
+describe("useDashboardChatTransport session approval toggle", () => {
+  beforeEach(() => {
+    dashboardMock.close.mockClear();
+    dashboardMock.connect.mockClear();
+    dashboardMock.request.mockReset();
+    dashboardMock.onEvent = null;
+    dashboardMock.onClose = null;
+    dashboardMock.instances.length = 0;
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  async function yoloHarness(): Promise<HarnessApi> {
+    dashboardMock.request.mockImplementation(async (method: string) => {
+      if (method === "session.create")
+        return { session_id: "live", stored_session_id: "stored" };
+      if (method === "model.options")
+        return { model: "bad-model", provider: "bad-provider", providers: [] };
+      if (method === "config.set") return { value: "1" };
+      return {};
+    });
+    const api: HarnessApi = {};
+    render(<Harness api={api} />);
+    // Establish the runtime session (same as a first prompt would).
+    await act(async () => {
+      await api.send?.("hello");
+    });
+    return api;
+  }
+
+  it("reflects the yolo flag from session.info events", async () => {
+    const api = await yoloHarness();
+    expect(api.sessionYolo).toBeNull();
+    await act(async () => {
+      dashboardMock.onEvent?.({
+        type: "session.info",
+        session_id: "live",
+        payload: { yolo: false, model: "bad-model" },
+      });
+    });
+    expect(api.sessionYolo).toBe(false);
+    await act(async () => {
+      dashboardMock.onEvent?.({
+        type: "session.info",
+        session_id: "live",
+        payload: { yolo: true, model: "bad-model" },
+      });
+    });
+    expect(api.sessionYolo).toBe(true);
+  });
+
+  it("ignores session.info from a different session", async () => {
+    const api = await yoloHarness();
+    await act(async () => {
+      dashboardMock.onEvent?.({
+        type: "session.info",
+        session_id: "other-session",
+        payload: { yolo: true },
+      });
+    });
+    expect(api.sessionYolo).toBeNull();
+  });
+
+  it("toggles the per-session bypass through config.set", async () => {
+    const api = await yoloHarness();
+    let result = false;
+    await act(async () => {
+      result = await api.toggleSessionYolo!(true);
+    });
+    expect(result).toBe(true);
+    expect(dashboardMock.request).toHaveBeenCalledWith("config.set", {
+      key: "yolo",
+      value: "1",
+      scope: "session",
+      session_id: "live",
+    });
+    // Optimistic state until the backend's session.info lands.
+    expect(api.sessionYolo).toBe(true);
+  });
+
+  it("reports failure when the RPC rejects", async () => {
+    const api = await yoloHarness();
+    dashboardMock.request.mockImplementation(async (method: string) => {
+      if (method === "config.set") throw new Error("boom");
+      return {};
+    });
+    let result = true;
+    await act(async () => {
+      result = await api.toggleSessionYolo!(true);
+    });
+    expect(result).toBe(false);
+    expect(api.sessionYolo).toBeNull();
   });
 });

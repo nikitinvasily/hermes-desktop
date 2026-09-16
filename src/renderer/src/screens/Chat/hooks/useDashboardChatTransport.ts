@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { LOCAL_PRESETS } from "../../../constants";
 import {
   isBubbleMessage,
@@ -116,6 +116,13 @@ interface UseDashboardChatTransportArgs {
 interface UseDashboardChatTransportResult {
   abort: () => void;
   enabled: boolean;
+  /** Whether the live session's approval guard is bypassed (session.info
+   *  `yolo`: OR of the per-session flag, process env, approvals.mode=off).
+   *  null = not known yet (no session.info seen for this session). */
+  sessionYolo: boolean | null;
+  /** Toggle the per-session approval bypass (config.set key=yolo,
+   *  scope=session). Only affects the current chat; never persists. */
+  toggleSessionYolo: (enabled: boolean) => Promise<boolean>;
   respondClarify: (
     requestId: string,
     answer: string,
@@ -965,6 +972,11 @@ export function useDashboardChatTransport({
   const appliedModelRef = useRef<string | null>(null);
   const recreateRuntimeSessionRef = useRef(false);
   const lastRuntimeSessionWasCreatedRef = useRef(false);
+  // Approval-bypass indicator from the live session.info events. null until the
+  // first session.info for the current runtime session arrives; reset on
+  // session/connection change so a stale flag never leaks across chats.
+  const [sessionYolo, setSessionYolo] = useState<boolean | null>(null);
+  const sessionYoloSessionRef = useRef<string | null>(null);
   const pendingClarifyRef = useRef<{
     requestId: string;
     /** qids of a batch request still unanswered; empty/undefined for a
@@ -1112,6 +1124,10 @@ export function useDashboardChatTransport({
     lastRuntimeSessionWasCreatedRef.current = false;
     expirePendingClarifyRef.current();
     lastSyncedCwdRef.current = null;
+    // A different chat never inherits the previous chat's approval flag; the
+    // next session.info for the new runtime session will repopulate it.
+    sessionYoloSessionRef.current = null;
+    setSessionYolo(null);
   }, [hermesSessionId]);
 
   useEffect(() => {
@@ -1126,6 +1142,8 @@ export function useDashboardChatTransport({
     clientRef.current = null;
     connectingRef.current = null;
     runtimeSessionIdRef.current = null;
+    sessionYoloSessionRef.current = null;
+    setSessionYolo(null);
     reasoningSegmentClosedRef.current = false;
     appliedModelRef.current = null;
     recreateRuntimeSessionRef.current = false;
@@ -1154,6 +1172,19 @@ export function useDashboardChatTransport({
           void recordRuntimeInfo(event.payload, profile, connectionId).catch(
             () => undefined,
           );
+        }
+        // Reflect the live approval-bypass flag (OR of session flag, process
+        // env, approvals.mode=off) emitted after every toggle and on resume.
+        if (
+          !event.session_id ||
+          event.session_id === runtimeSessionIdRef.current ||
+          event.session_id === storedSessionIdRef.current
+        ) {
+          const payloadYolo = asRecord(event.payload)?.yolo;
+          if (typeof payloadYolo === "boolean") {
+            sessionYoloSessionRef.current = runtimeSessionIdRef.current;
+            setSessionYolo(payloadYolo);
+          }
         }
         return;
       }
@@ -2161,6 +2192,44 @@ export function useDashboardChatTransport({
     [enabled, ensureClient, ensureRuntimeSession, ensureSelectedModel, profile],
   );
 
+  const toggleSessionYolo = useCallback(
+    async (next: boolean): Promise<boolean> => {
+      if (!enabled) return false;
+      const client = clientRef.current;
+      if (!client?.connected) return false;
+      let sessionId = runtimeSessionIdRef.current;
+      if (!sessionId) {
+        // No runtime session yet (chat idle since open) — create/resume one so
+        // the flag attaches to the session the next prompt will run in.
+        try {
+          sessionId = await ensureRuntimeSession(client);
+        } catch {
+          return false;
+        }
+      }
+      if (!sessionId || clientRef.current !== client) return false;
+      try {
+        const result = await client.request<{ value?: string }>("config.set", {
+          key: "yolo",
+          value: next ? "1" : "0",
+          scope: "session",
+          session_id: sessionId,
+        });
+        // Optimistically mirror the requested state; the authoritative
+        // session.info emitted by the backend lands a beat later and corrects
+        // any drift (e.g. approvals.mode=off keeps yolo true after "off").
+        if (clientRef.current === client) {
+          sessionYoloSessionRef.current = sessionId;
+          setSessionYolo(next);
+        }
+        return result?.value !== undefined ? result.value === "1" : next;
+      } catch {
+        return false;
+      }
+    },
+    [enabled, ensureRuntimeSession],
+  );
+
   const abort = useCallback(() => {
     expirePendingClarifyRef.current();
     expirePendingApprovalsRef.current();
@@ -2187,6 +2256,8 @@ export function useDashboardChatTransport({
   return {
     abort,
     enabled,
+    sessionYolo,
+    toggleSessionYolo,
     respondApproval,
     respondClarify,
     sendMessage,

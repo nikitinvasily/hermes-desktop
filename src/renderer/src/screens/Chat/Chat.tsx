@@ -3,6 +3,7 @@ import toast from "react-hot-toast";
 import { Zap, Globe } from "lucide-react";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { ChatEmptyState } from "./ChatEmptyState";
+import { ApprovalToggle } from "./ApprovalToggle";
 import { MessageList } from "./MessageList";
 import { ModelPicker } from "./ModelPicker";
 import { ReasoningEffortPicker } from "./ReasoningEffortPicker";
@@ -725,6 +726,8 @@ function Chat({
   });
 
   const respondDashboardClarify = dashboardTransport.respondClarify;
+  const sessionYolo = dashboardTransport.sessionYolo;
+  const toggleSessionYolo = dashboardTransport.toggleSessionYolo;
   const handleClarifyRespond = useCallback(
     (msg: ClarifyMessage, answer: string): Promise<boolean> =>
       msg.responsePath === "dashboard"
@@ -1170,6 +1173,12 @@ function Chat({
                 onToggleWorktree={handleToggleWorktree}
                 onSelectFolder={handleSelectFolder}
               />
+              {commandCatalogEnabled && (
+                <ApprovalToggle
+                  yolo={sessionYolo}
+                  onToggle={toggleSessionYolo}
+                />
+              )}
               <button
                 type="button"
                 className={`btn-ghost chat-tool-btn ${webPreviewVisible ? "chat-tool-btn-active" : ""}`}
