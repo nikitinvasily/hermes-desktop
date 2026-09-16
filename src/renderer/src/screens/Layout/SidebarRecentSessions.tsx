@@ -909,6 +909,18 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     [activeProfile, connectionId, refresh, refreshArchive],
   );
 
+  // Restore AND open in one action — the natural intent when clicking an
+  // archived chat. Reuses the restore path, then selects the session once
+  // the flag is back (the resume flow reads history over the same
+  // connection, so ordering only needs the flag cleared first).
+  const handleRestoreAndOpen = useCallback(
+    async (id: string): Promise<void> => {
+      await handleRestore(id);
+      onSelect(id);
+    },
+    [handleRestore, onSelect],
+  );
+
   // Delete straight from the archive: reuse the confirmation dialog, then
   // reload the archive list (the main list never contained the row).
   const handleDeleteArchived = useCallback(
@@ -1394,6 +1406,13 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
                     tabIndex={expanded && archiveOpen ? 0 : -1}
                     className="sidebar-recent-session sidebar-archived-session"
                     title={s.title || t("sessions.newConversation")}
+                    onClick={() => void handleRestoreAndOpen(s.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        void handleRestoreAndOpen(s.id);
+                      }
+                    }}
                   >
                     <ArchiveBox
                       className="sidebar-recent-session-dot"
