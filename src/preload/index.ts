@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { AppLocale } from "../shared/i18n/types";
 import type { Attachment } from "../shared/attachments";
 import type { SessionModelOverride } from "../shared/model-override";
+import type { ProjectInfo, ProjectMutation } from "../shared/projects";
 import type { DesktopSessionContinuationItem } from "../shared/session-continuation";
 import type { DesktopSessionLocalError } from "../shared/session-continuation";
 import type {
@@ -987,6 +988,22 @@ const hermesAPI = {
   ): Promise<Record<string, string>> =>
     ipcRenderer.invoke("list-project-folder-names", connectionId, profile),
 
+  listProjects: (
+    connectionId?: string,
+    profile?: string,
+  ): Promise<ProjectInfo[]> =>
+    ipcRenderer.invoke("list-projects", connectionId, profile),
+
+  projectMutate: (
+    mutation: ProjectMutation,
+    connectionId?: string,
+    profile?: string,
+  ): Promise<unknown> =>
+    ipcRenderer.invoke("project-mutate", mutation, connectionId, profile),
+
+  resolvePath: (path: string, connectionId?: string): Promise<string> =>
+    ipcRenderer.invoke("resolve-path", path, connectionId),
+
   getSessionModelOverride: (
     sessionId: string,
   ): Promise<SessionModelOverride | null> =>
@@ -1644,8 +1661,8 @@ const hermesAPI = {
     },
     profile?: string,
   ) => ipcRenderer.invoke("kanban-create-task", input, profile),
-  selectFolder: (): Promise<string | null> =>
-    ipcRenderer.invoke("select-folder"),
+  selectFolder: (defaultPath?: string): Promise<string | null> =>
+    ipcRenderer.invoke("select-folder", defaultPath),
   readDirectory: (
     dirPath: string,
   ): Promise<{ name: string; isDirectory: boolean }[] | null> =>

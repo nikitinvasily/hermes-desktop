@@ -9,7 +9,8 @@ import {
   dialog,
   clipboard,
 } from "electron";
-import { extname } from "path";
+import { extname, join, resolve } from "path";
+import { homedir } from "os";
 import { randomUUID } from "crypto";
 import { readdir, readFile, stat } from "fs/promises";
 import { getActiveProfileNameSync } from "../utils";
@@ -46,6 +47,15 @@ import {
   moveSessionWorkspaceOnAgent,
   type ProjectFolderNames,
 } from "../project-names";
+import {
+  localListProjects,
+  remoteListProjects,
+  sshListProjects,
+  projectRpc,
+  sshResolvePath,
+  type ProjectInfo,
+  type ProjectMutation,
+} from "../projects";
 import {
   getSessionModelOverride,
   setSessionModelOverride,
@@ -2507,6 +2517,70 @@ export function registerIpcHandlers(context: IpcContext): void {
     },
   );
 
+  // Project management (issue #27): list projects with their folders, and
+  // run create/rename/delete/folder mutations over the agent's projects.* RPC.
+  ipcMain.handle(
+    "list-projects",
+    async (
+      _event,
+      connectionId?: string,
+      profile?: string,
+    ): Promise<ProjectInfo[]> => {
+      const conn = sessionConnection(connectionId);
+      const scopedProfile = activeSshProfile(profile);
+      if (conn.mode === "remote")
+        return remoteListProjects(
+          scopedRemoteSessionConfig(conn, scopedProfile),
+        );
+      if (conn.mode === "ssh" && conn.ssh)
+        return withSshDashboardSessions(
+          conn,
+          (config) => remoteListProjects(config),
+          () => sshListProjects(conn.ssh!, scopedProfile),
+          scopedProfile,
+        );
+      return localListProjects(scopedProfile);
+    },
+  );
+
+  ipcMain.handle(
+    "project-mutate",
+    async (
+      _event,
+      mutation: ProjectMutation,
+      connectionId?: string,
+      profile?: string,
+    ) => {
+      const scopedProfile = activeSshProfile(profile);
+      return projectRpc(scopedProfile, connectionId, mutation);
+    },
+  );
+
+  // Resolve a `~`-prefixed path to its absolute form ON THE AGENT HOST, so
+  // SSH-browsed folders are stored (and displayed) as the agent sees them
+  // (`~/.hermes/workspace/misc` → `/home/hermes/.hermes/workspace/misc`).
+  // Local expands ~ against the local home; HTTP-remote echoes the input back
+  // (no filesystem channel — the manual entry keeps the user's spelling).
+  ipcMain.handle(
+    "resolve-path",
+    async (_event, path: string, connectionId?: string) => {
+      const trimmed = path.trim();
+      if (!trimmed) return trimmed;
+      const conn = sessionConnection(connectionId);
+      if (conn.mode === "ssh" && conn.ssh) {
+        try {
+          return await sshResolvePath(conn.ssh, trimmed);
+        } catch {
+          return trimmed; // keep the user's spelling when the host is quiet
+        }
+      }
+      if (conn.mode === "remote") return trimmed;
+      if (trimmed.startsWith("~/"))
+        return resolve(join(homedir(), trimmed.slice(2)));
+      return resolve(trimmed);
+    },
+  );
+
   ipcMain.handle(
     "list-recent-session-context-folders",
     (_event, limit?: number) => {
@@ -3343,11 +3417,20 @@ export function registerIpcHandlers(context: IpcContext): void {
     (_event, input: CreateTaskInput, profile?: string) =>
       kanbanCreateTask(input, profile),
   );
-  ipcMain.handle("select-folder", async (event) => {
+  ipcMain.handle("select-folder", async (event, defaultPath?: string) => {
     const win = BrowserWindow.fromWebContents(event.sender);
+    // Default to ~/Documents: project folders almost always live there,
+    // and starting the picker at / makes users walk the whole tree.
+    const start = defaultPath?.trim() || join(homedir(), "Documents");
     const result = win
-      ? await dialog.showOpenDialog(win, { properties: ["openDirectory"] })
-      : await dialog.showOpenDialog({ properties: ["openDirectory"] });
+      ? await dialog.showOpenDialog(win, {
+          defaultPath: start,
+          properties: ["openDirectory"],
+        })
+      : await dialog.showOpenDialog({
+          defaultPath: start,
+          properties: ["openDirectory"],
+        });
     if (result.canceled || result.filePaths.length === 0) return null;
     return result.filePaths[0];
   });

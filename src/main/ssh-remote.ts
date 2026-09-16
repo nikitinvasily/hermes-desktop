@@ -112,7 +112,7 @@ export function sshExec(
   });
 }
 
-function sshPython(
+export function sshPython(
   config: SshConfig,
   script: string,
   stdin?: string,
