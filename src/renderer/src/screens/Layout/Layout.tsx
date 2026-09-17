@@ -15,6 +15,7 @@ import {
   cycleRunId,
   runIdAtOrdinal,
   loadingSessionIds as deriveLoadingSessionIds,
+  pendingSidebarRows,
 } from "./chatRuns";
 import { ActiveSessionsBar } from "./ActiveSessionsBar";
 import { StatusBar } from "./StatusBar";
@@ -22,7 +23,10 @@ import Sessions from "../Sessions/Sessions";
 import Agents from "../Agents/Agents";
 import Discover from "../Discover/Discover";
 import ProfileSwitcher from "./ProfileSwitcher";
-import SidebarRecentSessions from "./SidebarRecentSessions";
+import SidebarRecentSessions, {
+  SIDEBAR_SYNCED_IDS_EVENT,
+  type SidebarSyncedIdsDetail,
+} from "./SidebarRecentSessions";
 import Skills from "../Skills/Skills";
 import Memory from "../Memory/Memory";
 import Tools from "../Tools/Tools";
@@ -173,6 +177,36 @@ function Layout({
   const loadingSessionIds = useMemo(
     () => deriveLoadingSessionIds(runs),
     [runs],
+  );
+
+  // Ephemeral sidebar rows for chats that have no session yet (issue #55):
+  // a brand-new chat appears in the sidebar immediately with a default (or
+  // first-message) title. A run that already reported its session id KEEPS
+  // its pending row until the sidebar's synced list actually contains that
+  // session — the sync lags the announcement, and dropping the row earlier
+  // made the chat vanish from the sidebar mid-send until the next refresh.
+  const [syncedIds, setSyncedIds] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    const onSyncedIds = (e: Event): void => {
+      setSyncedIds(
+        new Set((e as CustomEvent<SidebarSyncedIdsDetail>).detail?.ids ?? []),
+      );
+    };
+    window.addEventListener(SIDEBAR_SYNCED_IDS_EVENT, onSyncedIds);
+    return () => {
+      window.removeEventListener(SIDEBAR_SYNCED_IDS_EVENT, onSyncedIds);
+    };
+  }, []);
+  const pendingRows = useMemo(
+    () =>
+      pendingSidebarRows(
+        runs,
+        connectionId,
+        activeProfile,
+        t("sessions.newChatPending"),
+        syncedIds,
+      ),
+    [runs, connectionId, activeProfile, t, syncedIds],
   );
 
   const updateSidebarScrollbar = useCallback((visible: boolean) => {
@@ -874,9 +908,14 @@ function Layout({
                   connectionId={connectionId}
                   activeProfile={activeProfile}
                   currentSessionId={currentSessionId}
+                  activePendingRunId={
+                    currentSessionId === null ? (activeRunId ?? null) : null
+                  }
                   loadingSessionIds={loadingSessionIds}
                   resumingSessionId={resumingSessionId}
+                  pendingRows={pendingRows}
                   onSelect={handleResumeSession}
+                  onOpenPendingRun={handleActivateRun}
                   onNewChatInProject={handleNewChatInProject}
                   onSessionDeleted={(id) => {
                     // If the open chat was the one deleted, drop to a fresh chat
