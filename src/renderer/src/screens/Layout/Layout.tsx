@@ -1082,15 +1082,12 @@ function Layout({
 
           {visitedViews.has("agents") && (
             <div style={paneStyle("agents")}>
-              {remoteMode ? (
-                <RemoteNotice feature="Profiles" />
-              ) : (
-                <Agents
-                  activeProfile={activeProfile}
-                  onSelectProfile={handleSelectProfile}
-                  onChatWith={handleChatWithProfile}
-                />
-              )}
+              <Agents
+                activeProfile={activeProfile}
+                onSelectProfile={handleSelectProfile}
+                onChatWith={handleChatWithProfile}
+                remoteMode={remoteMode}
+              />
             </div>
           )}
 
@@ -1125,11 +1122,7 @@ function Layout({
 
           {visitedViews.has("memory") && (
             <div style={paneStyle("memory")}>
-              {remoteMode ? (
-                <RemoteNotice feature="Memory" />
-              ) : (
-                <Memory profile={activeProfile} />
-              )}
+              <Memory profile={activeProfile} />
             </div>
           )}
 

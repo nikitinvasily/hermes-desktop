@@ -145,11 +145,9 @@ export async function remoteReadMemory(
       remoteMemoryFilePath(home, profile),
       profile,
     ).catch(() => ""),
-    remoteReadTextFile(
-      conn,
-      remoteUserFilePath(home, profile),
-      profile,
-    ).catch(() => ""),
+    remoteReadTextFile(conn, remoteUserFilePath(home, profile), profile).catch(
+      () => "",
+    ),
     remoteReadTextFile(
       conn,
       remoteConfigFilePath(home, profile),
@@ -687,6 +685,39 @@ export async function remoteRunDump(conn: ConnectionConfig): Promise<string> {
       .join("\n");
   }
   return "Dump is still running on the remote dashboard.";
+}
+
+// ── profile lifecycle ───────────────────────────────────────────────────────
+
+export async function remoteCreateProfile(
+  conn: ConnectionConfig,
+  name: string,
+  cloneFrom: string | null,
+): Promise<{ success: boolean; error?: string }> {
+  const safe = name.replace(/[^a-zA-Z0-9_-]/g, "");
+  if (!safe) return { success: false, error: "Invalid profile name" };
+  try {
+    await remoteDashboardRequestJson(conn, "/api/profiles", {
+      method: "POST",
+      body: cloneFrom ? { name: safe, clone_from: cloneFrom } : { name: safe },
+    });
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function remoteSetActiveProfile(
+  conn: ConnectionConfig,
+  name: string,
+): Promise<void> {
+  // The desktop keeps its OWN active-profile selection locally (same rule as
+  // the SSH branch of set-active-profile); this only ensures the target
+  // profile's gateway is up on the server, mirroring the SSH behavior.
+  const status = await remoteGatewayStatus(conn, name).catch(() => false);
+  if (!status) {
+    await remoteStartGateway(conn, name).catch(() => undefined);
+  }
 }
 
 // ── memory providers ───────────────────────────────────────────────────────

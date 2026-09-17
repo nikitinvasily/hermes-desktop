@@ -278,6 +278,8 @@ import {
   remoteStartGateway,
   remoteStopGateway,
   remoteListProfiles,
+  remoteCreateProfile,
+  remoteSetActiveProfile,
   remoteGetConfigValue,
   remoteSetConfigValue,
   remoteReadEnv,
@@ -2818,6 +2820,8 @@ export function registerIpcHandlers(context: IpcContext): void {
     "create-profile",
     (_event, name: string, cloneFrom: string | null) => {
       const conn = getConnectionConfig();
+      if (conn.mode === "remote")
+        return remoteCreateProfile(conn, name, cloneFrom);
       if (conn.mode === "ssh" && conn.ssh)
         return sshCreateProfile(conn.ssh, name, cloneFrom);
       return createProfile(name, cloneFrom);
@@ -2847,7 +2851,13 @@ export function registerIpcHandlers(context: IpcContext): void {
     // Bring the activated profile's own gateway up if it isn't already —
     // without stopping any other profile's gateway (their bots stay online).
     const conn = getConnectionConfig();
-    if (conn.mode === "ssh" && conn.ssh) {
+    if (conn.mode === "remote") {
+      // Same contract as SSH: the local selection is persisted above; just
+      // bring the profile's gateway up on the server if it isn't already.
+      if (!(await remoteGatewayStatus(conn, name).catch(() => false))) {
+        await remoteStartGateway(conn, name).catch(() => undefined);
+      }
+    } else if (conn.mode === "ssh" && conn.ssh) {
       // Per-profile gateway lives on the remote; start it over SSH. (Previously
       // SSH was skipped entirely, so selecting/Chatting a profile in the Agents
       // page never started its gateway and the status spun on "Starting…".)
