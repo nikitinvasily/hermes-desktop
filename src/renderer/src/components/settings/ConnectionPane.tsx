@@ -1,3 +1,4 @@
+import { SSH_UI_ENABLED } from "../../utils/ssh-ui-flag";
 import { Laptop, Server, Terminal, Wifi } from "lucide-react";
 import { Toggle } from "../common/Toggle";
 import { useI18n } from "../useI18n";
@@ -216,15 +217,19 @@ export default function ConnectionPane(): React.JSX.Element {
               {t("settings.modeRemote")}
             </span>
           </button>
-          <button
-            className={`settings-theme-option ${connMode === "ssh" ? "active" : ""}`}
-            onClick={() => void handleSwitchToSsh()}
-          >
-            <span className="settings-mode-option">
-              <Terminal size={15} />
-              {t("settings.modeSsh")}
-            </span>
-          </button>
+          {/* Existing SSH connections stay editable; only NEW SSH setup is
+              hidden during the remote-parity transition (issue #51). */}
+          {(SSH_UI_ENABLED || connMode === "ssh") && (
+            <button
+              className={`settings-theme-option ${connMode === "ssh" ? "active" : ""}`}
+              onClick={() => void handleSwitchToSsh()}
+            >
+              <span className="settings-mode-option">
+                <Terminal size={15} />
+                {t("settings.modeSsh")}
+              </span>
+            </button>
+          )}
         </div>
         <div className="settings-field-hint">
           {connMode === "local"
