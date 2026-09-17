@@ -795,6 +795,42 @@ describe("syncSessionCache", () => {
     expect(byId.get("s-home")?.contextFolder).toBeNull();
   });
 
+  // @lat: [[connections#Test specifications#Connection-explicit session browsing#Agent-home cwd stays in flat Chats]]
+  it("nulls the derived folder when it is the agent home or HERMES_HOME — no pseudo-project (issue #47)", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const os = require("os") as typeof import("os");
+    seedDb([
+      {
+        id: "s-agent-home",
+        started_at: now,
+        firstUserMessage: "telegram session started in the agent user's home",
+        cwd: os.homedir(),
+      },
+      {
+        id: "s-hermes-home",
+        started_at: now + 1,
+        firstUserMessage: "session whose cwd is HERMES_HOME itself",
+        cwd: TEST_HOME,
+      },
+      {
+        id: "s-workspace",
+        started_at: now + 2,
+        firstUserMessage: "session in a HERMES_HOME descendant workspace",
+        cwd: join(TEST_HOME, "workspace", "trading"),
+      },
+    ]);
+
+    const byId = new Map(syncSessionCache().map((r) => [r.id, r] as const));
+    // The agent home must not clump sessions into a pseudo-project.
+    expect(byId.get("s-agent-home")?.contextFolder).toBeNull();
+    // HERMES_HOME itself is junk too…
+    expect(byId.get("s-hermes-home")?.contextFolder).toBeNull();
+    // …but its descendants stay groupable workspaces.
+    expect(byId.get("s-workspace")?.contextFolder).toBe(
+      join(TEST_HOME, "workspace", "trading"),
+    );
+  });
+
   // @lat: [[connections#Test specifications#Connection-explicit session browsing#Explicit unlink sentinel beats derived folder]]
   it("keeps a deliberate unlink (sentinel row) even when the session has a cwd (issue #15)", () => {
     const future = Math.floor(Date.now() / 1000) + 600;

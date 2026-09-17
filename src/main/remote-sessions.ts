@@ -4,6 +4,11 @@ import type { ConnectionConfig } from "./config";
 import { requestRemoteOAuthJson } from "./remote-oauth";
 import type { CachedSession } from "./session-cache";
 import {
+  filterDerivedWorkspaceFolders,
+  inferAgentHomes,
+  type WorkspaceHomes,
+} from "./workspace-folder";
+import {
   extractLeadingVisionImageFallback,
   stripTrailingImagePlaceholders,
 } from "./session-attachment-store";
@@ -299,6 +304,78 @@ function sessionsFromResponse(response: unknown): RemoteRecord[] {
   return asArray(record.sessions);
 }
 
+// Resolved agent homes for a remote dashboard, cached per base URL for a
+// short window so listing sessions does not add a /api/profiles round trip
+// to every call (issue #47). Best-effort: any failure falls back to inferring
+// from the session payload's own paths.
+const remoteHomesCache = new Map<
+  string,
+  { homes: WorkspaceHomes; at: number }
+>();
+const REMOTE_HOMES_TTL_MS = 5 * 60 * 1000;
+
+function dirnameOf(p: string): string {
+  const i = p.lastIndexOf("/");
+  if (i <= 0) return "/";
+  return p.slice(0, i);
+}
+
+async function remoteWorkspaceHomes(
+  config: RemoteSessionConfig,
+  rows: RemoteRecord[],
+): Promise<WorkspaceHomes> {
+  const cacheKey = normalizeRemoteDashboardBaseUrl(config.remoteUrl);
+  const cached = remoteHomesCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < REMOTE_HOMES_TTL_MS)
+    return cached.homes;
+  let homes: WorkspaceHomes = { agentHome: null, hermesHome: null };
+  try {
+    const data = (await remoteRequestJson(config, "/api/profiles")) as {
+      profiles?: unknown;
+    };
+    const profiles = Array.isArray(data?.profiles) ? data.profiles : [];
+    const entries = profiles
+      .map((p) =>
+        p && typeof p === "object" ? (p as Record<string, unknown>) : undefined,
+      )
+      .filter((v): v is Record<string, unknown> => !!v);
+    const strPath = (row: Record<string, unknown>): string =>
+      typeof row.path === "string" ? row.path.trim() : "";
+    // Prefer the default profile: its dir IS HERMES_HOME (…/<user>/.hermes),
+    // so the agent home is its parent. Otherwise strip a trailing
+    // /profiles/<name> segment (non-default profiles live under
+    // HERMES_HOME/profiles) before taking the parent.
+    const def = entries.find((row) => row.is_default === true);
+    let hermesHome: string | null = def ? strPath(def) : null;
+    if (!hermesHome) {
+      for (const row of entries) {
+        const p = strPath(row);
+        const cut = p.indexOf("/profiles/");
+        if (cut > 0) {
+          hermesHome = p.slice(0, cut);
+          break;
+        }
+        if (p) hermesHome = p;
+      }
+    }
+    if (hermesHome) {
+      homes = {
+        agentHome: dirnameOf(hermesHome),
+        hermesHome,
+      };
+    }
+  } catch {
+    // Dashboard unreachable / route missing — fall through to inference.
+  }
+  if (!homes.agentHome) {
+    homes = inferAgentHomes(
+      rows.flatMap((row) => [row.cwd, row.git_repo_root]),
+    );
+  }
+  remoteHomesCache.set(cacheKey, { homes, at: Date.now() });
+  return homes;
+}
+
 async function remoteSessionListPage(
   config: RemoteSessionConfig,
   limit: number,
@@ -368,7 +445,18 @@ export async function remoteListCachedSessions(
   offset = 0,
 ): Promise<CachedSession[]> {
   const response = await remoteSessionListPage(config, limit, offset);
-  return sessionsFromResponse(response).map(normalizeCachedSession);
+  const rows = sessionsFromResponse(response);
+  const sessions = rows.map(normalizeCachedSession);
+  // Sessions whose derived folder is a never-a-workspace dir (commonly the
+  // agent user's home — Telegram/gateway sessions start there) must land in
+  // the flat Chats list, not a pseudo-project (issue #47). The agent home is
+  // not known a priori over HTTP, so resolve it: the dashboard's
+  // /api/profiles carries each profile's exact `path` (= HERMES_HOME);
+  // cwd/git_repo_root strings with a `/.hermes` segment are the fallback.
+  // Desktop bindings are merged by the caller AFTER this, so a manual
+  // Move-to-project still wins.
+  const homes = await remoteWorkspaceHomes(config, rows);
+  return filterDerivedWorkspaceFolders(sessions, homes);
 }
 
 export async function remoteSearchSessions(

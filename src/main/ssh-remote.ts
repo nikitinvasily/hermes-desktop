@@ -1393,6 +1393,21 @@ for r in rows:
     repo_root = (r["git_repo_root"] or "").strip()
     cwd = (r["cwd"] or "").strip()
     folder = repo_root or cwd or None
+    # Never-a-workspace dirs (agent home, its parent, /, /home, /Users,
+    # HERMES_HOME) must NOT group sessions into a pseudo-project — such
+    # sessions stay in the flat Chats list (issue #47, mirrors the agent
+    # core's _is_session_cwd_junk). Equality only: descendants of
+    # HERMES_HOME may be intentional workspaces.
+    if folder:
+        def _norm(p):
+            real = os.path.realpath(os.path.expanduser(p))
+            return os.path.normcase(real)
+        hermes_home = _norm(db[: -len("/state.db")] if db.endswith("/state.db") else db)
+        folder_n = _norm(folder)
+        home = _norm("~")
+        junk = {os.path.normcase(os.sep), os.path.normcase("/home"), os.path.normcase("/Users"), home, os.path.dirname(home)}
+        if folder_n in junk or folder_n == hermes_home:
+            folder = None
     result.append({
         "id": r["id"], "source": r["source"] or "cli",
         "startedAt": r["started_at"], "endedAt": r["ended_at"],
