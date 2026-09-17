@@ -12,6 +12,11 @@ import {
 import { getAppLocale } from "./locale";
 import { getDbConnection, sessionVisibilityPredicate } from "./db";
 import { getSessionContextFolders } from "./session-context-folder-store";
+import {
+  filterDerivedWorkspaceFolders,
+  localKnownProjectFolders,
+  localWorkspaceHomes,
+} from "./workspace-folder";
 
 // Re-export for callers/docs that historically imported the cap from here.
 export { MAX_SESSION_TITLE_LENGTH } from "../shared/session-title";
@@ -234,10 +239,15 @@ export function syncSessionCache(profile?: unknown): CachedSession[] {
     const derived = new Map<string, string | null>(
       rows.map((row) => [row.id, workspaceFolderFromRow(row)]),
     );
-    const allSessions = attachContextFolders(
-      visibleSessions,
-      bindings,
-      derived,
+    let allSessions = attachContextFolders(visibleSessions, bindings, derived);
+    // Derived folders pointing at never-a-workspace dirs (agent home, `/`,
+    // `/home`, HERMES_HOME) must not clump sessions into a pseudo-project:
+    // they fall back to the flat Chats list. Explicit bindings already won
+    // above; folders owned by a real project are spared (issue #47).
+    allSessions = filterDerivedWorkspaceFolders(
+      allSessions,
+      localWorkspaceHomes(profile),
+      localKnownProjectFolders(profile),
     );
     allSessions.sort((a, b) => b.startedAt - a.startedAt);
 

@@ -479,6 +479,76 @@ describe("remote session REST bridge", () => {
     expect(sessions[0]?.contextFolder).toBe("/home/hermes/projects/andrei");
   });
 
+  // @lat: [[connections#Test specifications#Connection-explicit session browsing#Remote agent-home cwd falls to Chats]]
+  it("nulls a remote session's derived folder when it is the agent home (issue #47)", async () => {
+    // The dashboard's /api/profiles carries each profile's exact path, which
+    // pins the agent home even when no session row mentions a /.hermes path
+    // (the live case: Telegram sessions start with cwd = /home/hermes).
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    server = http.createServer((req, res) => {
+      res.setHeader("Content-Type", "application/json");
+      if (req.url === "/api/profiles") {
+        res.end(
+          JSON.stringify({
+            profiles: [
+              {
+                name: "default",
+                path: "/home/hermes/.hermes",
+                is_default: true,
+              },
+            ],
+          }),
+        );
+        return;
+      }
+      if (
+        req.url ===
+        "/api/profiles/sessions?limit=50&offset=0&min_messages=0&archived=exclude&order=recent&profile=all"
+      ) {
+        res.end(
+          JSON.stringify({
+            sessions: [
+              {
+                id: "sess-tg-home",
+                source: "telegram",
+                started_at: 1700000006,
+                message_count: 5,
+                model: "custom/deepseek-v4-pro",
+                title: "Telegram session in the agent home",
+                cwd: "/home/hermes",
+              },
+              {
+                id: "sess-tg-proj",
+                source: "telegram",
+                started_at: 1700000007,
+                message_count: 2,
+                model: "custom/deepseek-v4-pro",
+                title: "Telegram session in a project workspace",
+                cwd: "/home/hermes/.hermes/workspace/trading",
+              },
+            ],
+          }),
+        );
+        return;
+      }
+      res.statusCode = 404;
+      res.end(JSON.stringify({ detail: "not found" }));
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", () => resolve()),
+    );
+    const address = server.address() as { port: number };
+    baseUrl = `http://127.0.0.1:${address.port}`;
+
+    const sessions = await remoteListCachedSessions(config());
+
+    const byId = new Map(sessions.map((s) => [s.id, s] as const));
+    expect(byId.get("sess-tg-home")?.contextFolder).toBeNull();
+    expect(byId.get("sess-tg-proj")?.contextFolder).toBe(
+      "/home/hermes/.hermes/workspace/trading",
+    );
+  });
+
   // @lat: [[connections#Test specifications#Connection-explicit session browsing#Scopes Remote list requests]]
   it("uses the persistent OAuth session and selected profile for direct Remote session lists", async () => {
     const connection = {

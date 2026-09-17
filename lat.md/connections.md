@@ -147,6 +147,18 @@ The dashboard `/api/profiles/sessions` rows include `cwd` and `git_repo_root`; t
 
 Detail: repo root is preferred over a deeper cwd (a checkout must not split), mirroring the Local derivation.
 
+#### Agent-home cwd stays in flat Chats
+
+A session whose derived folder is a never-a-workspace dir (the agent user's home, its parent, `/`, `/home`, `/Users`, or HERMES_HOME itself) must not clump into a pseudo-project group.
+
+Detail: the derived folder is nulled instead, so the session falls back to the flat Chats list — mirroring the agent core's `_is_session_cwd_junk` policy for its own tree. Equality only: descendants of HERMES_HOME (`~/.hermes/workspace/...`) remain groupable, and folders owned by a real project always win.
+
+#### Remote agent-home cwd falls to Chats
+
+Over Remote/SSH-dashboard connections the agent home is not known a priori; it is resolved from the dashboard's `/api/profiles` (each profile's `path` pins HERMES_HOME), with a `/.hermes`-path-shape fallback inferred from the session rows themselves.
+
+Detail: the resolution is cached per base URL for five minutes; any failure leaves the filter inert rather than dropping sessions.
+
 #### Remote project names map folder paths to labels
 
 Project groups show the user-defined project name, not the folder slug.
