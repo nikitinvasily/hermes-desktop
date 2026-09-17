@@ -73,7 +73,7 @@ function readFileSafe(filePath: string): {
   }
 }
 
-function parseMemoryEntries(content: string): MemoryEntry[] {
+export function parseMemoryEntries(content: string): MemoryEntry[] {
   if (!content.trim()) return [];
   return content
     .split(ENTRY_DELIMITER)
@@ -81,7 +81,7 @@ function parseMemoryEntries(content: string): MemoryEntry[] {
     .filter((e) => e.content.length > 0);
 }
 
-function serializeEntries(entries: MemoryEntry[]): string {
+export function serializeEntries(entries: MemoryEntry[]): string {
   return entries.map((e) => e.content).join(ENTRY_DELIMITER);
 }
 

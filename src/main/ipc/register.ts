@@ -263,6 +263,39 @@ import {
   remoteGetHermesVersion,
 } from "../remote-metadata";
 import {
+  remoteReadMemory,
+  remoteAddMemoryEntry,
+  remoteUpdateMemoryEntry,
+  remoteRemoveMemoryEntry,
+  remoteWriteUserProfile,
+  remoteReadSoul,
+  remoteWriteSoul,
+  remoteResetSoul,
+  remoteGetToolsets,
+  remoteSetToolsetEnabled,
+  remoteReadLogs,
+  remoteGatewayStatus,
+  remoteStartGateway,
+  remoteStopGateway,
+  remoteListProfiles,
+  remoteCreateProfile,
+  remoteSetActiveProfile,
+  remoteGetApiServerKeyStatus,
+  remoteGenerateApiServerKey,
+  remoteGetCredentialPool,
+  remoteAddCredentialPoolEntry,
+  remoteRemoveCredentialPoolEntry,
+  remoteListCustomProviders,
+  remoteGetConfigValue,
+  remoteSetConfigValue,
+  remoteReadEnv,
+  remoteSetEnvValue,
+  remoteRunDoctor,
+  remoteRunDump,
+  remoteDiscoverMemoryProviders,
+  remoteInvalidateSettingsCaches,
+} from "../remote-settings";
+import {
   remoteGetSkillContent,
   remoteInstallSkill,
   remoteListInstalledSkills,
@@ -849,6 +882,7 @@ export function registerIpcHandlers(context: IpcContext): void {
   );
   ipcMain.handle("run-hermes-doctor", () => {
     const conn = getConnectionConfig();
+    if (conn.mode === "remote") return remoteRunDoctor(conn);
     if (conn.mode === "ssh" && conn.ssh) return sshRunDoctor(conn.ssh);
     return runHermesDoctor();
   });
@@ -1074,6 +1108,7 @@ export function registerIpcHandlers(context: IpcContext): void {
 
   ipcMain.handle("get-env", (_event, profile?: string) => {
     const conn = getConnectionConfig();
+    if (conn.mode === "remote") return remoteReadEnv(conn, profile);
     if (conn.mode === "ssh" && conn.ssh) return sshReadEnv(conn.ssh, profile);
     return readEnv(profile);
   });
@@ -1129,6 +1164,10 @@ export function registerIpcHandlers(context: IpcContext): void {
     "set-env",
     async (_event, key: string, value: string, profile?: string) => {
       const conn = getConnectionConfig();
+      if (conn.mode === "remote") {
+        await remoteSetEnvValue(conn, key, value, profile);
+        return true;
+      }
       if (conn.mode === "ssh" && conn.ssh) {
         await sshSetEnvValue(conn.ssh, key, value, profile);
         return true;
@@ -1155,6 +1194,7 @@ export function registerIpcHandlers(context: IpcContext): void {
 
   ipcMain.handle("get-config", (_event, key: string, profile?: string) => {
     const conn = getConnectionConfig();
+    if (conn.mode === "remote") return remoteGetConfigValue(conn, key, profile);
     if (conn.mode === "ssh" && conn.ssh)
       return sshGetConfigValue(conn.ssh, key, profile);
     return getConfigValue(key, profile);
@@ -1164,6 +1204,10 @@ export function registerIpcHandlers(context: IpcContext): void {
     "set-config",
     async (_event, key: string, value: string, profile?: string) => {
       const conn = getConnectionConfig();
+      if (conn.mode === "remote") {
+        await remoteSetConfigValue(conn, key, value, profile);
+        return true;
+      }
       if (conn.mode === "ssh" && conn.ssh) {
         await sshSetConfigValue(conn.ssh, key, value, profile);
         return true;
@@ -1363,9 +1407,12 @@ export function registerIpcHandlers(context: IpcContext): void {
   // generate one with a button click (local mode) or show instructions (remote/SSH).
   // Additive shape: `hasKey` stays the required primary field; `providerId` /
   // `checkedAt` are optional extras for a follow-up Settings/Gateway UI.
-  ipcMain.handle("get-api-server-key-status", (_event, profile?: string) =>
-    getApiServerKeyStatus(profile),
-  );
+  ipcMain.handle("get-api-server-key-status", (_event, profile?: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "remote")
+      return remoteGetApiServerKeyStatus(conn, profile);
+    return getApiServerKeyStatus(profile);
+  });
 
   // Drops the cached secrets-provider values so the next status check re-reads
   // the vault — lets the renderer's "Refresh from vault" button take effect
@@ -1377,6 +1424,11 @@ export function registerIpcHandlers(context: IpcContext): void {
   ipcMain.handle(
     "generate-api-server-key",
     async (_event, profile?: string) => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "remote") {
+        const key = await remoteGenerateApiServerKey(conn, profile);
+        return { key };
+      }
       const { randomUUID } = await import("crypto");
       const key = `desk-${randomUUID()}`;
       // Write to both the active profile .env and the default .env so the
@@ -1424,6 +1476,9 @@ export function registerIpcHandlers(context: IpcContext): void {
     const changed = getActiveConnection().connectionId !== connectionId;
     selectConnection(connectionId);
     if (changed) stopSshTunnel();
+    // The settings remotes cache the server's HERMES_HOME; a different
+    // connection (or a different remote) means a different home.
+    remoteInvalidateSettingsCaches();
     resetSshDashboardAvailability();
     notifyConnectionConfigChanged();
     return true;
@@ -2128,31 +2183,36 @@ export function registerIpcHandlers(context: IpcContext): void {
   // Gateway
   ipcMain.handle("start-gateway", async () => {
     const conn = getConnectionConfig();
+    if (conn.mode === "remote") {
+      // Start (or verify) the SERVER's gateway through the dashboard API —
+      // parity with the SSH branch. A failure propagates as an error result
+      // instead of silently reporting success.
+      try {
+        await remoteStartGateway(conn);
+        return { success: true, running: true };
+      } catch (error) {
+        return {
+          success: false,
+          running: false,
+          error: `Failed to start the remote gateway: ${String(error)}`,
+        };
+      }
+    }
     if (conn.mode === "ssh" && conn.ssh) {
       await sshStartGateway(conn.ssh);
       return { success: true, running: true };
-    }
-    if (conn.mode === "remote") {
-      // The remote server runs its own gateway; nothing to start locally.
-      // Without this guard we'd fall through to `startGateway()` and
-      // spawn a non-existent local hermes-agent (issue #266).
-      return {
-        success: false,
-        running: false,
-        error:
-          "Remote mode points at an already-running Hermes server. Start or restart the gateway on that remote host.",
-      };
     }
     return startGatewayDetailed();
   });
   ipcMain.handle("stop-gateway", async () => {
     const conn = getConnectionConfig();
-    if (conn.mode === "ssh" && conn.ssh) {
-      await sshStopGateway(conn.ssh);
+    if (conn.mode === "remote") {
+      // Stop the SERVER's gateway via the dashboard API (parity with SSH).
+      await remoteStopGateway(conn).catch(() => undefined);
       return true;
     }
-    if (conn.mode === "remote") {
-      // No local gateway to stop in pure remote mode.
+    if (conn.mode === "ssh" && conn.ssh) {
+      await sshStopGateway(conn.ssh);
       return true;
     }
     // No profile argument → stops the active profile's gateway, leaving any
@@ -2162,18 +2222,23 @@ export function registerIpcHandlers(context: IpcContext): void {
   });
   ipcMain.handle("restart-gateway", async (_event, profile?: string) => {
     const conn = getConnectionConfig();
+    if (conn.mode === "remote") {
+      // Restart the SERVER's gateway via the dashboard API (parity with SSH).
+      await remoteStopGateway(conn).catch(() => undefined);
+      await remoteStartGateway(conn);
+      return remoteGatewayStatus(conn).catch(() => false);
+    }
     if (conn.mode === "ssh" && conn.ssh) {
       await sshStopGateway(conn.ssh);
       await sshStartGateway(conn.ssh);
       return sshGatewayStatus(conn.ssh);
     }
-    if (conn.mode === "remote") {
-      return false;
-    }
     return restartGateway(profile);
   });
   ipcMain.handle("gateway-status", () => {
     const conn = getConnectionConfig();
+    if (conn.mode === "remote")
+      return remoteGatewayStatus(conn).catch(() => false);
     if (conn.mode === "ssh" && conn.ssh) return sshGatewayStatus(conn.ssh);
     return isGatewayRunning();
   });
@@ -2743,6 +2808,13 @@ export function registerIpcHandlers(context: IpcContext): void {
   // Profiles
   ipcMain.handle("list-profiles", async () => {
     const conn = getConnectionConfig();
+    if (conn.mode === "remote") {
+      // Same rule as SSH: the desktop's active profile is the LOCAL
+      // selection, not whatever the server CLI last marked active.
+      const active = getActiveProfileNameSync();
+      const list = await remoteListProfiles(conn);
+      return list.map((p) => ({ ...p, isActive: p.name === active }));
+    }
     if (conn.mode === "ssh" && conn.ssh) {
       // The desktop's active profile is the LOCAL selection (persisted in
       // ~/.hermes/active_profile by set-active-profile), not whatever the remote
@@ -2762,6 +2834,8 @@ export function registerIpcHandlers(context: IpcContext): void {
     "create-profile",
     (_event, name: string, cloneFrom: string | null) => {
       const conn = getConnectionConfig();
+      if (conn.mode === "remote")
+        return remoteCreateProfile(conn, name, cloneFrom);
       if (conn.mode === "ssh" && conn.ssh)
         return sshCreateProfile(conn.ssh, name, cloneFrom);
       return createProfile(name, cloneFrom);
@@ -2791,7 +2865,13 @@ export function registerIpcHandlers(context: IpcContext): void {
     // Bring the activated profile's own gateway up if it isn't already —
     // without stopping any other profile's gateway (their bots stay online).
     const conn = getConnectionConfig();
-    if (conn.mode === "ssh" && conn.ssh) {
+    if (conn.mode === "remote") {
+      // Same contract as SSH: the local selection is persisted above; just
+      // bring the profile's gateway up on the server if it isn't already.
+      if (!(await remoteGatewayStatus(conn, name).catch(() => false))) {
+        await remoteStartGateway(conn, name).catch(() => undefined);
+      }
+    } else if (conn.mode === "ssh" && conn.ssh) {
       // Per-profile gateway lives on the remote; start it over SSH. (Previously
       // SSH was skipped entirely, so selecting/Chatting a profile in the Agents
       // page never started its gateway and the status spun on "Starting…".)
@@ -2854,9 +2934,11 @@ export function registerIpcHandlers(context: IpcContext): void {
   // This store owns provider identity (name + base URL) so a configured
   // provider renders as a card independent of whether a model is added yet; the
   // key still lives in the profile `.env` and models in `models.json`.
-  ipcMain.handle("list-custom-providers", (_event, profile?: string) =>
-    listCustomProviders(profile),
-  );
+  ipcMain.handle("list-custom-providers", (_event, profile?: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "remote") return remoteListCustomProviders(conn, profile);
+    return listCustomProviders(profile);
+  });
   ipcMain.handle(
     "upsert-custom-provider",
     (
@@ -2898,6 +2980,7 @@ export function registerIpcHandlers(context: IpcContext): void {
   // Memory
   ipcMain.handle("read-memory", (_event, profile?: string) => {
     const conn = getConnectionConfig();
+    if (conn.mode === "remote") return remoteReadMemory(conn, profile);
     if (conn.mode === "ssh" && conn.ssh)
       return sshReadMemory(conn.ssh, profile);
     return readMemory(profile);
@@ -2906,6 +2989,8 @@ export function registerIpcHandlers(context: IpcContext): void {
     "add-memory-entry",
     (_event, content: string, profile?: string) => {
       const conn = getConnectionConfig();
+      if (conn.mode === "remote")
+        return remoteAddMemoryEntry(conn, content, profile);
       if (conn.mode === "ssh" && conn.ssh)
         return sshAddMemoryEntry(conn.ssh, content, profile);
       return addMemoryEntry(content, profile);
@@ -2915,6 +3000,8 @@ export function registerIpcHandlers(context: IpcContext): void {
     "update-memory-entry",
     (_event, index: number, content: string, profile?: string) => {
       const conn = getConnectionConfig();
+      if (conn.mode === "remote")
+        return remoteUpdateMemoryEntry(conn, index, content, profile);
       if (conn.mode === "ssh" && conn.ssh)
         return sshUpdateMemoryEntry(conn.ssh, index, content, profile);
       return updateMemoryEntry(index, content, profile);
@@ -2924,6 +3011,8 @@ export function registerIpcHandlers(context: IpcContext): void {
     "remove-memory-entry",
     (_event, index: number, profile?: string) => {
       const conn = getConnectionConfig();
+      if (conn.mode === "remote")
+        return remoteRemoveMemoryEntry(conn, index, profile);
       if (conn.mode === "ssh" && conn.ssh)
         return sshRemoveMemoryEntry(conn.ssh, index, profile);
       return removeMemoryEntry(index, profile);
@@ -2933,6 +3022,8 @@ export function registerIpcHandlers(context: IpcContext): void {
     "write-user-profile",
     (_event, content: string, profile?: string) => {
       const conn = getConnectionConfig();
+      if (conn.mode === "remote")
+        return remoteWriteUserProfile(conn, content, profile);
       if (conn.mode === "ssh" && conn.ssh)
         return sshWriteUserProfile(conn.ssh, content, profile);
       return writeUserProfile(content, profile);
@@ -2942,17 +3033,20 @@ export function registerIpcHandlers(context: IpcContext): void {
   // Soul
   ipcMain.handle("read-soul", (_event, profile?: string) => {
     const conn = getConnectionConfig();
+    if (conn.mode === "remote") return remoteReadSoul(conn, profile);
     if (conn.mode === "ssh" && conn.ssh) return sshReadSoul(conn.ssh, profile);
     return readSoul(profile);
   });
   ipcMain.handle("write-soul", (_event, content: string, profile?: string) => {
     const conn = getConnectionConfig();
+    if (conn.mode === "remote") return remoteWriteSoul(conn, content, profile);
     if (conn.mode === "ssh" && conn.ssh)
       return sshWriteSoul(conn.ssh, content, profile);
     return writeSoul(content, profile);
   });
   ipcMain.handle("reset-soul", (_event, profile?: string) => {
     const conn = getConnectionConfig();
+    if (conn.mode === "remote") return remoteResetSoul(conn, profile);
     if (conn.mode === "ssh" && conn.ssh) return sshResetSoul(conn.ssh, profile);
     return resetSoul(profile);
   });
@@ -2960,6 +3054,7 @@ export function registerIpcHandlers(context: IpcContext): void {
   // Tools
   ipcMain.handle("get-toolsets", (_event, profile?: string) => {
     const conn = getConnectionConfig();
+    if (conn.mode === "remote") return remoteGetToolsets(conn, profile);
     if (conn.mode === "ssh" && conn.ssh)
       return sshGetToolsets(conn.ssh, profile);
     return getToolsets(profile);
@@ -2968,6 +3063,8 @@ export function registerIpcHandlers(context: IpcContext): void {
     "set-toolset-enabled",
     (_event, key: string, enabled: boolean, profile?: string) => {
       const conn = getConnectionConfig();
+      if (conn.mode === "remote")
+        return remoteSetToolsetEnabled(conn, key, enabled, profile);
       if (conn.mode === "ssh" && conn.ssh)
         return sshSetToolsetEnabled(conn.ssh, key, enabled, profile);
       return setToolsetEnabled(key, enabled, profile);
@@ -3159,17 +3256,55 @@ export function registerIpcHandlers(context: IpcContext): void {
   // credential pool helpers default to the currently active profile's
   // auth.json (see config.ts:authFilePath), so the renderer can pass an
   // explicit profile or rely on the active-profile fallback.
-  ipcMain.handle("get-credential-pool", (_event, profile?: string) =>
-    getCredentialPool(profile),
-  );
+  ipcMain.handle("get-credential-pool", (_event, _profile?: string) => {
+    const conn = getConnectionConfig();
+    // The pool lives in the server's auth.json; the REST response is a
+    // redacted per-provider view (token previews only).
+    if (conn.mode === "remote")
+      return remoteGetCredentialPool(conn).then((providers) =>
+        Object.fromEntries(
+          providers.map((p) => [
+            p.provider,
+            p.entries.map((e) => ({
+              id: e.id,
+              label: e.label,
+              auth_type: e.authType,
+              priority: e.priority,
+              source: e.source,
+              request_count: e.requestCount,
+              base_url: undefined,
+            })),
+          ]),
+        ),
+      );
+    return getCredentialPool(_profile);
+  });
   ipcMain.handle(
     "set-credential-pool",
-    (
+    async (
       _event,
       provider: string,
       entries: Array<Record<string, unknown>>,
       profile?: string,
     ) => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "remote") {
+        // The REST pool is a redacted view; a full replace cannot round-trip
+        // secrets. Support the removal flow: drop entries missing from the
+        // new list by index (1-based, same order the UI edits).
+        const current =
+          (await remoteGetCredentialPool(conn)).find(
+            (p) => p.provider === provider,
+          )?.entries ?? [];
+        const keep = new Set(entries.map((e) => String(e.id)));
+        for (let i = current.length; i >= 1; i--) {
+          const entry = current[i - 1];
+          if (!keep.has(String(entry.id))) {
+            await remoteRemoveCredentialPoolEntry(conn, provider, i);
+          }
+        }
+        return true;
+      }
       setCredentialPool(provider, entries, profile);
       return true;
     },
@@ -3188,6 +3323,19 @@ export function registerIpcHandlers(context: IpcContext): void {
       label: string,
       profile?: string,
     ) => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "remote")
+        return remoteAddCredentialPoolEntry(conn, provider, apiKey, label).then(
+          (entries) =>
+            entries.map((e) => ({
+              id: e.id,
+              label: e.label,
+              auth_type: e.authType,
+              priority: e.priority,
+              source: e.source,
+              request_count: e.requestCount,
+            })),
+        );
       return addCredentialPoolEntry(provider, apiKey, label, profile);
     },
   );
@@ -3716,6 +3864,7 @@ export function registerIpcHandlers(context: IpcContext): void {
   // Debug dump
   ipcMain.handle("run-hermes-dump", () => {
     const conn = getConnectionConfig();
+    if (conn.mode === "remote") return remoteRunDump(conn);
     if (conn.mode === "ssh" && conn.ssh) return sshRunDump(conn.ssh);
     return runHermesDump();
   });
@@ -3779,6 +3928,8 @@ export function registerIpcHandlers(context: IpcContext): void {
   // Memory providers
   ipcMain.handle("discover-memory-providers", (_event, profile?: string) => {
     const conn = getConnectionConfig();
+    if (conn.mode === "remote")
+      return remoteDiscoverMemoryProviders(conn, profile);
     if (conn.mode === "ssh" && conn.ssh)
       return sshDiscoverMemoryProviders(conn.ssh, profile);
     return discoverMemoryProviders(profile);
@@ -3787,6 +3938,7 @@ export function registerIpcHandlers(context: IpcContext): void {
   // Log viewer
   ipcMain.handle("read-logs", (_event, logFile?: string, lines?: number) => {
     const conn = getConnectionConfig();
+    if (conn.mode === "remote") return remoteReadLogs(conn, logFile, lines);
     if (conn.mode === "ssh" && conn.ssh)
       return sshReadLogs(conn.ssh, logFile, lines);
     return readLogs(logFile, lines);

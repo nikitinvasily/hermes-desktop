@@ -10,6 +10,7 @@ import {
   Spinner,
 } from "../../assets/icons";
 import { getInstallCmd } from "../../constants";
+import { SSH_UI_ENABLED } from "../../utils/ssh-ui-flag";
 import { useI18n } from "../../components/useI18n";
 import SshDockerTargetSection from "../../components/settings/SshDockerTargetSection";
 
@@ -383,13 +384,15 @@ function Welcome({
           <div className="welcome-divider">
             <span>{t("welcome.dividerOr")}</span>
           </div>
-          <button
-            className="btn btn-secondary welcome-recheck-btn"
-            onClick={() => setPanel("ssh")}
-          >
-            <KeyRound size={16} />
-            {t("settings.connectSsh")}
-          </button>{" "}
+          {SSH_UI_ENABLED && (
+            <button
+              className="btn btn-secondary welcome-recheck-btn"
+              onClick={() => setPanel("ssh")}
+            >
+              <KeyRound size={16} />
+              {t("settings.connectSsh")}
+            </button>
+          )}{" "}
           <button
             className="btn btn-secondary welcome-recheck-btn "
             onClick={() => setPanel("remote")}
@@ -419,13 +422,15 @@ function Welcome({
       </div>
 
       <div className="onboard-connect-row">
-        <button
-          className="onboard-btn onboard-btn-glass"
-          onClick={() => setPanel("ssh")}
-        >
-          <KeyRound size={16} />
-          <span>{t("settings.connectSsh")}</span>
-        </button>
+        {SSH_UI_ENABLED && (
+          <button
+            className="onboard-btn onboard-btn-glass"
+            onClick={() => setPanel("ssh")}
+          >
+            <KeyRound size={16} />
+            <span>{t("settings.connectSsh")}</span>
+          </button>
+        )}
         <button
           className="onboard-btn onboard-btn-glass"
           onClick={() => setPanel("remote")}

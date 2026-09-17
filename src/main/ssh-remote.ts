@@ -1114,6 +1114,8 @@ interface YamlPathHit {
   valueEnd: number;
 }
 
+export type { YamlPathHit };
+
 interface SegmentMatch {
   indent: number;
   rawValue: string;
@@ -1249,7 +1251,7 @@ export function findTopLevelKey(
   };
 }
 
-function locateInYaml(content: string, key: string): YamlPathHit | null {
+export function locateInYaml(content: string, key: string): YamlPathHit | null {
   const segments = key.split(".").filter(Boolean);
   if (segments.length === 0) return null;
   return segments.length === 1

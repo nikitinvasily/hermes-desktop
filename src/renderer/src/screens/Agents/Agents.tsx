@@ -30,12 +30,16 @@ interface AgentsProps {
   activeProfile: string;
   onSelectProfile: (name: string) => void;
   onChatWith: (name: string) => void;
+  /** Direct-remote connection: cloud sync manages the LOCAL profiles, not the
+   * server's — hide the sync affordance while connected elsewhere. */
+  remoteMode?: boolean;
 }
 
 function Agents({
   activeProfile,
   onSelectProfile,
   onChatWith,
+  remoteMode = false,
 }: AgentsProps): React.JSX.Element {
   const { t } = useI18n();
   const { openProfile } = useProfileModal();
@@ -261,7 +265,7 @@ function Agents({
           <p className="agents-subtitle">{t("agents.subtitle")}</p>
         </div>
         <div className="agents-header-actions">
-          {syncStatus && !syncStatus.signedIn && (
+          {!remoteMode && syncStatus && !syncStatus.signedIn && (
             <span
               className="agents-sync-hint"
               title={t("agents.syncSignedOutHint")}
@@ -269,7 +273,7 @@ function Agents({
               {t("agents.syncSignedOut")}
             </span>
           )}
-          {syncStatus?.signedIn && (
+          {!remoteMode && syncStatus?.signedIn && (
             <span
               className="agents-sync-hint"
               title={
@@ -284,7 +288,7 @@ function Agents({
                 : (syncStatus.accountLabel ?? "")}
             </span>
           )}
-          {syncStatus?.signedIn && (
+          {!remoteMode && syncStatus?.signedIn && (
             <button
               className="btn btn-secondary btn-sm"
               onClick={() => void runSync()}
