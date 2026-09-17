@@ -280,6 +280,12 @@ import {
   remoteListProfiles,
   remoteCreateProfile,
   remoteSetActiveProfile,
+  remoteGetApiServerKeyStatus,
+  remoteGenerateApiServerKey,
+  remoteGetCredentialPool,
+  remoteAddCredentialPoolEntry,
+  remoteRemoveCredentialPoolEntry,
+  remoteListCustomProviders,
   remoteGetConfigValue,
   remoteSetConfigValue,
   remoteReadEnv,
@@ -1401,9 +1407,12 @@ export function registerIpcHandlers(context: IpcContext): void {
   // generate one with a button click (local mode) or show instructions (remote/SSH).
   // Additive shape: `hasKey` stays the required primary field; `providerId` /
   // `checkedAt` are optional extras for a follow-up Settings/Gateway UI.
-  ipcMain.handle("get-api-server-key-status", (_event, profile?: string) =>
-    getApiServerKeyStatus(profile),
-  );
+  ipcMain.handle("get-api-server-key-status", (_event, profile?: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "remote")
+      return remoteGetApiServerKeyStatus(conn, profile);
+    return getApiServerKeyStatus(profile);
+  });
 
   // Drops the cached secrets-provider values so the next status check re-reads
   // the vault — lets the renderer's "Refresh from vault" button take effect
@@ -1415,6 +1424,11 @@ export function registerIpcHandlers(context: IpcContext): void {
   ipcMain.handle(
     "generate-api-server-key",
     async (_event, profile?: string) => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "remote") {
+        const key = await remoteGenerateApiServerKey(conn, profile);
+        return { key };
+      }
       const { randomUUID } = await import("crypto");
       const key = `desk-${randomUUID()}`;
       // Write to both the active profile .env and the default .env so the
@@ -2920,9 +2934,11 @@ export function registerIpcHandlers(context: IpcContext): void {
   // This store owns provider identity (name + base URL) so a configured
   // provider renders as a card independent of whether a model is added yet; the
   // key still lives in the profile `.env` and models in `models.json`.
-  ipcMain.handle("list-custom-providers", (_event, profile?: string) =>
-    listCustomProviders(profile),
-  );
+  ipcMain.handle("list-custom-providers", (_event, profile?: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "remote") return remoteListCustomProviders(conn, profile);
+    return listCustomProviders(profile);
+  });
   ipcMain.handle(
     "upsert-custom-provider",
     (
@@ -3240,17 +3256,55 @@ export function registerIpcHandlers(context: IpcContext): void {
   // credential pool helpers default to the currently active profile's
   // auth.json (see config.ts:authFilePath), so the renderer can pass an
   // explicit profile or rely on the active-profile fallback.
-  ipcMain.handle("get-credential-pool", (_event, profile?: string) =>
-    getCredentialPool(profile),
-  );
+  ipcMain.handle("get-credential-pool", (_event, _profile?: string) => {
+    const conn = getConnectionConfig();
+    // The pool lives in the server's auth.json; the REST response is a
+    // redacted per-provider view (token previews only).
+    if (conn.mode === "remote")
+      return remoteGetCredentialPool(conn).then((providers) =>
+        Object.fromEntries(
+          providers.map((p) => [
+            p.provider,
+            p.entries.map((e) => ({
+              id: e.id,
+              label: e.label,
+              auth_type: e.authType,
+              priority: e.priority,
+              source: e.source,
+              request_count: e.requestCount,
+              base_url: undefined,
+            })),
+          ]),
+        ),
+      );
+    return getCredentialPool(_profile);
+  });
   ipcMain.handle(
     "set-credential-pool",
-    (
+    async (
       _event,
       provider: string,
       entries: Array<Record<string, unknown>>,
       profile?: string,
     ) => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "remote") {
+        // The REST pool is a redacted view; a full replace cannot round-trip
+        // secrets. Support the removal flow: drop entries missing from the
+        // new list by index (1-based, same order the UI edits).
+        const current =
+          (await remoteGetCredentialPool(conn)).find(
+            (p) => p.provider === provider,
+          )?.entries ?? [];
+        const keep = new Set(entries.map((e) => String(e.id)));
+        for (let i = current.length; i >= 1; i--) {
+          const entry = current[i - 1];
+          if (!keep.has(String(entry.id))) {
+            await remoteRemoveCredentialPoolEntry(conn, provider, i);
+          }
+        }
+        return true;
+      }
       setCredentialPool(provider, entries, profile);
       return true;
     },
@@ -3269,6 +3323,19 @@ export function registerIpcHandlers(context: IpcContext): void {
       label: string,
       profile?: string,
     ) => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "remote")
+        return remoteAddCredentialPoolEntry(conn, provider, apiKey, label).then(
+          (entries) =>
+            entries.map((e) => ({
+              id: e.id,
+              label: e.label,
+              auth_type: e.authType,
+              priority: e.priority,
+              source: e.source,
+              request_count: e.requestCount,
+            })),
+        );
       return addCredentialPoolEntry(provider, apiKey, label, profile);
     },
   );

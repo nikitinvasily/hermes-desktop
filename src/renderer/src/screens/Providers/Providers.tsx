@@ -133,9 +133,14 @@ interface CredentialPoolEntry {
 function Providers({
   profile,
   visible,
+  remoteMode = false,
 }: {
   profile?: string;
   visible?: boolean;
+  /** Direct-remote connection: the Hermes One account card manages the LOCAL
+   * machine's account and auto-provisioned keys — hide it while connected to
+   * a server (ensure-key is already local-only in the main process). */
+  remoteMode?: boolean;
 }): React.JSX.Element {
   const { t } = useI18n();
   const [activeTab, setActiveTab] = useState<"providers" | "auxiliary">(
@@ -685,87 +690,94 @@ function Providers({
 
       {activeTab === "providers" && (
         <>
-          <div className="settings-section">
-            <div className="settings-section-title">
-              {t("providers.hermesAccount.sectionTitle")}
-            </div>
-            {!account && (
-              <p className="settings-section-hint">
-                {t("providers.hermesAccount.sectionHint")}
-              </p>
-            )}
-            {account ? (
-              <div className="hermes-account-card">
-                {account.user.avatarUrl ? (
-                  <img
-                    className="hermes-account-avatar"
-                    src={account.user.avatarUrl}
-                    alt=""
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <span
-                    className="hermes-account-avatar hermes-account-avatar-letter"
-                    aria-hidden="true"
-                  >
-                    {(account.user.name || account.user.email || "?")
-                      .charAt(0)
-                      .toUpperCase()}
-                  </span>
-                )}
-                <span className="hermes-account-who">
-                  <span className="hermes-account-name">
-                    {account.user.name || account.user.email || account.user.id}
-                  </span>
-                  {account.user.name && account.user.email && (
-                    <span className="hermes-account-email">
-                      {account.user.email}
+          {!remoteMode && (
+            <div className="settings-section">
+              <div className="settings-section-title">
+                {t("providers.hermesAccount.sectionTitle")}
+              </div>
+              {!account && (
+                <p className="settings-section-hint">
+                  {t("providers.hermesAccount.sectionHint")}
+                </p>
+              )}
+              {account ? (
+                <div className="hermes-account-card">
+                  {account.user.avatarUrl ? (
+                    <img
+                      className="hermes-account-avatar"
+                      src={account.user.avatarUrl}
+                      alt=""
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <span
+                      className="hermes-account-avatar hermes-account-avatar-letter"
+                      aria-hidden="true"
+                    >
+                      {(account.user.name || account.user.email || "?")
+                        .charAt(0)
+                        .toUpperCase()}
                     </span>
                   )}
-                  <span className="hermes-account-chips">
-                    <span className="hermes-account-chip is-connected">
-                      <span className="hermes-account-dot" aria-hidden="true" />
-                      {t("providers.hermesAccount.connected")}
+                  <span className="hermes-account-who">
+                    <span className="hermes-account-name">
+                      {account.user.name ||
+                        account.user.email ||
+                        account.user.id}
                     </span>
-                    <span className="hermes-account-chip">
-                      <RefreshCw size={11} aria-hidden="true" />
-                      {t("providers.hermesAccount.syncOn")}
-                    </span>
-                    {credits !== null && (
-                      <span
-                        className="hermes-account-chip"
-                        title={t("providers.hermesAccount.creditsTitle")}
-                      >
-                        <Coins size={11} aria-hidden="true" />
-                        {t("providers.hermesAccount.credits", {
-                          amount: credits.toFixed(2),
-                        })}
+                    {account.user.name && account.user.email && (
+                      <span className="hermes-account-email">
+                        {account.user.email}
                       </span>
                     )}
+                    <span className="hermes-account-chips">
+                      <span className="hermes-account-chip is-connected">
+                        <span
+                          className="hermes-account-dot"
+                          aria-hidden="true"
+                        />
+                        {t("providers.hermesAccount.connected")}
+                      </span>
+                      <span className="hermes-account-chip">
+                        <RefreshCw size={11} aria-hidden="true" />
+                        {t("providers.hermesAccount.syncOn")}
+                      </span>
+                      {credits !== null && (
+                        <span
+                          className="hermes-account-chip"
+                          title={t("providers.hermesAccount.creditsTitle")}
+                        >
+                          <Coins size={11} aria-hidden="true" />
+                          {t("providers.hermesAccount.credits", {
+                            amount: credits.toFixed(2),
+                          })}
+                        </span>
+                      )}
+                    </span>
                   </span>
-                </span>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={async () => {
+                      await window.hermesAPI.accountLogout(profile);
+                      setAccount(null);
+                    }}
+                  >
+                    {t("providers.hermesAccount.signOut")}
+                  </button>
+                </div>
+              ) : (
                 <button
                   type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={async () => {
-                    await window.hermesAPI.accountLogout(profile);
-                    setAccount(null);
-                  }}
+                  className="btn btn-primary btn-sm"
+                  onClick={() => setShowAccountModal(true)}
                 >
-                  {t("providers.hermesAccount.signOut")}
+                  <User size={14} />
+                  {t("providers.hermesAccount.signIn")}
                 </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={() => setShowAccountModal(true)}
-              >
-                <User size={14} />
-                {t("providers.hermesAccount.signIn")}
-              </button>
-            )}
-          </div>
+              )}
+            </div>
+          )}
 
           <div className="settings-section">
             <div className="settings-section-title settings-section-title-row">

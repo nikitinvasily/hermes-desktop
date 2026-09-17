@@ -1099,14 +1099,11 @@ function Layout({
 
           {visitedViews.has("providers") && (
             <div style={paneStyle("providers")}>
-              {remoteMode ? (
-                <RemoteNotice feature="Providers" />
-              ) : (
-                <Providers
-                  profile={activeProfile}
-                  visible={view === "providers"}
-                />
-              )}
+              <Providers
+                profile={activeProfile}
+                visible={view === "providers"}
+                remoteMode={remoteMode}
+              />
             </div>
           )}
 
@@ -1157,11 +1154,7 @@ function Layout({
 
           {visitedViews.has("gateway") && (
             <div style={paneStyle("gateway")}>
-              {remoteMode ? (
-                <RemoteNotice feature="Gateway" />
-              ) : (
-                <Gateway profile={activeProfile} />
-              )}
+              <Gateway profile={activeProfile} />
             </div>
           )}
         </main>

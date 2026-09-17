@@ -720,6 +720,175 @@ export async function remoteSetActiveProfile(
   }
 }
 
+// ── gateway screen: API server key ─────────────────────────────────────────
+
+export interface RemoteApiServerKeyStatus {
+  hasKey: boolean;
+  checkedAt: number;
+}
+
+export async function remoteGetApiServerKeyStatus(
+  conn: ConnectionConfig,
+  profile?: string,
+): Promise<RemoteApiServerKeyStatus> {
+  // The dashboard's .env view is redacted; the raw .env through /api/fs tells
+  // us presence without ever shipping the secret to the client.
+  const env = await remoteReadEnv(conn, profile).catch(
+    () => ({}) as Record<string, string>,
+  );
+  return {
+    hasKey: Boolean(env.API_SERVER_KEY && env.API_SERVER_KEY.trim()),
+    checkedAt: Date.now(),
+  };
+}
+
+export async function remoteGenerateApiServerKey(
+  conn: ConnectionConfig,
+  profile?: string,
+): Promise<string> {
+  const { randomUUID } = await import("crypto");
+  const key = `desk-${randomUUID()}`;
+  await remoteSetEnvValue(conn, "API_SERVER_KEY", key, profile);
+  // Match the local behavior: restart so the gateway picks the key up. The
+  // restart targets the requested profile's gateway on the server.
+  try {
+    await remoteDashboardRequestJson(
+      conn,
+      "/api/gateway/restart",
+      { method: "POST", body: {} },
+      profile,
+    );
+  } catch {
+    // A restart failure must not lose the write — the key is already saved.
+  }
+  return key;
+}
+
+// ── providers screen: credential pool ──────────────────────────────────────
+
+export interface RemoteCredentialPoolEntry {
+  index: number;
+  id: string;
+  label: string;
+  authType: string;
+  source: string;
+  priority: number;
+  lastStatus: string | null;
+  requestCount: number;
+  tokenPreview: string;
+  hasRefresh: boolean;
+}
+
+export async function remoteGetCredentialPool(
+  conn: ConnectionConfig,
+): Promise<Array<{ provider: string; entries: RemoteCredentialPoolEntry[] }>> {
+  const data = await remoteDashboardRequestJson<{
+    providers?: Array<{ provider?: string; entries?: unknown }>;
+  }>(conn, "/api/credentials/pool", {});
+  const rows = Array.isArray(data?.providers) ? data.providers : [];
+  return rows.flatMap(
+    (
+      row,
+    ): Array<{ provider: string; entries: RemoteCredentialPoolEntry[] }> => {
+      const provider = typeof row?.provider === "string" ? row.provider : "";
+      if (!provider) return [];
+      const entries = (Array.isArray(row.entries) ? row.entries : []).map(
+        (entry): RemoteCredentialPoolEntry => {
+          const r = asRecord(entry);
+          return {
+            index: numberValue(r.index),
+            id: stringValue(r.id),
+            label: stringValue(r.label),
+            authType: stringValue(r.auth_type),
+            source: stringValue(r.source),
+            priority: numberValue(r.priority),
+            lastStatus:
+              typeof r.last_status === "string" && r.last_status
+                ? r.last_status
+                : null,
+            requestCount: numberValue(r.request_count),
+            tokenPreview: stringValue(r.token_preview),
+            hasRefresh: r.has_refresh === true,
+          };
+        },
+      );
+      return [{ provider, entries }];
+    },
+  );
+}
+
+export async function remoteAddCredentialPoolEntry(
+  conn: ConnectionConfig,
+  provider: string,
+  apiKey: string,
+  label: string,
+): Promise<RemoteCredentialPoolEntry[]> {
+  await remoteDashboardRequestJson(conn, "/api/credentials/pool", {
+    method: "POST",
+    body: { provider, api_key: apiKey, label },
+  });
+  // Return the refreshed pool rows for the provider so the UI updates.
+  const rows = await remoteGetCredentialPool(conn);
+  return rows.find((r) => r.provider === provider)?.entries ?? [];
+}
+
+export async function remoteRemoveCredentialPoolEntry(
+  conn: ConnectionConfig,
+  provider: string,
+  index: number,
+): Promise<void> {
+  await remoteDashboardRequestJson(
+    conn,
+    `/api/credentials/pool/${encodeURIComponent(provider)}/${index}`,
+    { method: "DELETE" },
+  );
+}
+
+// ── providers screen: custom endpoints ─────────────────────────────────────
+
+/** Mirrors CustomProviderRecord (shared/custom-providers): the Providers
+ * screen renders `name` and `baseUrl`, `createdAt` only sorts. The dashboard
+ * endpoint response shape is normalized defensively. */
+export interface RemoteCustomProviderRecord {
+  id: string;
+  name: string;
+  baseUrl: string;
+  createdAt: number;
+}
+
+export async function remoteListCustomProviders(
+  conn: ConnectionConfig,
+  profile?: string,
+): Promise<RemoteCustomProviderRecord[]> {
+  const data = await remoteDashboardRequestJson<Record<string, unknown>>(
+    conn,
+    "/api/providers/custom-endpoints",
+    {},
+    profile,
+  );
+  const rowsRaw = Array.isArray(data?.endpoints)
+    ? (data.endpoints as unknown[])
+    : Array.isArray(data?.providers)
+      ? (data.providers as unknown[])
+      : Array.isArray(data)
+        ? (data as unknown[])
+        : [];
+  return rowsRaw
+    .map((row): RemoteCustomProviderRecord | null => {
+      const r = asRecord(row);
+      const id = stringValue(r.id ?? r.endpoint_id);
+      const baseUrl = stringValue(r.base_url ?? r.url);
+      if (!id && !baseUrl) return null;
+      return {
+        id: id || baseUrl,
+        name: stringValue(r.name ?? r.label) || stringValue(r.model) || baseUrl,
+        baseUrl,
+        createdAt: numberValue(r.created_at, Date.now()),
+      };
+    })
+    .filter((r): r is RemoteCustomProviderRecord => r !== null);
+}
+
 // ── memory providers ───────────────────────────────────────────────────────
 
 export async function remoteDiscoverMemoryProviders(
