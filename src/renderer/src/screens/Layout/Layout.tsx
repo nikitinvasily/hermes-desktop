@@ -15,6 +15,7 @@ import {
   cycleRunId,
   runIdAtOrdinal,
   loadingSessionIds as deriveLoadingSessionIds,
+  pendingSidebarRows,
 } from "./chatRuns";
 import { ActiveSessionsBar } from "./ActiveSessionsBar";
 import { StatusBar } from "./StatusBar";
@@ -173,6 +174,20 @@ function Layout({
   const loadingSessionIds = useMemo(
     () => deriveLoadingSessionIds(runs),
     [runs],
+  );
+
+  // Ephemeral sidebar rows for chats that have no session yet (issue #55):
+  // a brand-new chat appears in the sidebar immediately with a default (or
+  // first-message) title, until the first turn materializes the real session.
+  const pendingRows = useMemo(
+    () =>
+      pendingSidebarRows(
+        runs,
+        connectionId,
+        activeProfile,
+        t("sessions.newChatPending"),
+      ),
+    [runs, connectionId, activeProfile, t],
   );
 
   const updateSidebarScrollbar = useCallback((visible: boolean) => {
@@ -874,9 +889,14 @@ function Layout({
                   connectionId={connectionId}
                   activeProfile={activeProfile}
                   currentSessionId={currentSessionId}
+                  activePendingRunId={
+                    currentSessionId === null ? (activeRunId ?? null) : null
+                  }
                   loadingSessionIds={loadingSessionIds}
                   resumingSessionId={resumingSessionId}
+                  pendingRows={pendingRows}
                   onSelect={handleResumeSession}
+                  onOpenPendingRun={handleActivateRun}
                   onNewChatInProject={handleNewChatInProject}
                   onSessionDeleted={(id) => {
                     // If the open chat was the one deleted, drop to a fresh chat

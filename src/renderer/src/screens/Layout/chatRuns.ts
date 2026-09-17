@@ -62,6 +62,46 @@ export function patchRun(
 }
 
 /**
+ * Ephemeral sidebar row for a chat that exists only as a renderer run (issue
+ * #55): a scratch run mints no session in state.db until its first message,
+ * so without this row a just-created chat is invisible in the sidebar. Rows
+ * key off the runId (not a session id) and disappear once the run gains a
+ * sessionId — the synced real session then takes over the slot.
+ */
+export interface PendingSidebarRow {
+  id: string;
+  title: string;
+  contextFolder: string | null;
+}
+
+/**
+ * Derive pending sidebar rows for the scratch runs of one connection/profile.
+ * A run that already reported its session id is NOT pending — its real row
+ * comes from the sessions cache, and emitting both would duplicate the chat.
+ * `fallbackTitle` is the localized "New chat" default for runs whose first
+ * message has not landed yet.
+ */
+export function pendingSidebarRows(
+  runs: ChatRun[],
+  connectionId: string,
+  profile: string,
+  fallbackTitle: string,
+): PendingSidebarRow[] {
+  return runs
+    .filter(
+      (r) =>
+        r.connectionId === connectionId &&
+        r.profile === profile &&
+        !r.sessionId,
+    )
+    .map((r) => ({
+      id: `pending-${r.runId}`,
+      title: r.title?.trim() || fallbackTitle,
+      contextFolder: r.initialContextFolder ?? null,
+    }));
+}
+
+/**
  * Keep the selected shell profile/connection and the visible chat run in sync.
  *
  * Existing conversations remain under the connection and profile they started

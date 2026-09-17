@@ -4,6 +4,7 @@ import {
   isScratchRun,
   mintRun,
   openSessionRunTransition,
+  pendingSidebarRows,
   runIdAtOrdinal,
   selectProfileRunTransition,
   type ChatRun,
@@ -175,6 +176,34 @@ describe("chat run profile transitions", () => {
       initialContextFolder: null,
     });
     randomUUID.mockRestore();
+  });
+
+  it("derives pending sidebar rows only for sessionless runs of the active connection/profile", () => {
+    // Issue #55: a brand-new chat must appear in the sidebar immediately,
+    // but a run that already has a session id is covered by the real cache
+    // row — emitting both would duplicate the chat.
+    const runs = [
+      run("run-blank", "default", { initialContextFolder: null }),
+      run("run-folder", "default", {
+        initialContextFolder: "/tmp/proj",
+      }),
+      run("run-titled", "default", { title: "hello world" }),
+      run("run-session", "default", { sessionId: "session-1" }),
+      run("run-other-profile", "alfie"),
+      run("run-ssh", "default", { connectionId: "connection-ssh" }),
+    ];
+
+    expect(
+      pendingSidebarRows(runs, "connection-main", "default", "New chat"),
+    ).toEqual([
+      { id: "pending-run-blank", title: "New chat", contextFolder: null },
+      {
+        id: "pending-run-folder",
+        title: "New chat",
+        contextFolder: "/tmp/proj",
+      },
+      { id: "pending-run-titled", title: "hello world", contextFolder: null },
+    ]);
   });
 
   it("replaces the active same-profile scratch run when opening a session", () => {

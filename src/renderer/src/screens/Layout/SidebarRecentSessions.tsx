@@ -31,6 +31,7 @@ import SidebarSessionMenu, {
 import ArchiveDialog from "./ArchiveDialog";
 import ProjectDialog, { type ProjectDialogState } from "./ProjectDialog";
 import type { ProjectInfo } from "../../../../shared/projects";
+import type { PendingSidebarRow } from "./chatRuns";
 
 interface RecentSession {
   id: string;
@@ -170,9 +171,12 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   connectionId,
   activeProfile,
   currentSessionId,
+  activePendingRunId,
   loadingSessionIds,
   resumingSessionId,
+  pendingRows,
   onSelect,
+  onOpenPendingRun,
   onNewChatInProject,
   onSessionDeleted,
   scrollRootRef,
@@ -183,11 +187,19 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   /** Active profile — the list is per-profile, so switching forces a reload. */
   activeProfile: string;
   currentSessionId: string | null;
+  /** Run id of the active chat when it has no session yet (issue #55):
+   *  highlights the matching pending row as the current chat. */
+  activePendingRunId: string | null;
   /** Session ids of every run currently generating (multiple run at once). */
   loadingSessionIds: Set<string>;
   /** A session whose history is being fetched for resume (transient spinner). */
   resumingSessionId: string | null;
+  /** Ephemeral rows for scratch runs (issue #55): shown with a default or
+   *  first-message title until the real session lands via cache sync. */
+  pendingRows: PendingSidebarRow[];
   onSelect: (sessionId: string) => void;
+  /** Activate the run behind a pending row (id "pending-<runId>"). */
+  onOpenPendingRun: (runId: string) => void;
   /** Start a new chat bound to a project folder (project `+`) or unbound
    *  (Chats header `+`, folder = null). */
   onNewChatInProject?: (folder: string | null) => void;
@@ -617,6 +629,15 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     () => sessions.filter((s) => pinnedIds.has(s.id)),
     [sessions, pinnedIds],
   );
+  // Pending rows (issue #55) are merged into the session list BEFORE
+  // grouping so each lands in its own project group (by initialContextFolder)
+  // or in Chats. They sit at the top of their group: the cached list is
+  // recency-sorted, and a just-created chat is by definition the newest.
+  // Filtering on `open` keeps collapsed-sidebar renders cheap.
+  const visiblePendingRows = useMemo(
+    () => (open ? pendingRows : []),
+    [open, pendingRows],
+  );
   const { projectGroups, chats } = useMemo(() => {
     const base = groupSessionsByWorkspace(
       sessions.filter((s) => !pinnedIds.has(s.id)),
@@ -624,31 +645,66 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     // Agent-side project folders with zero sessions still render as (empty)
     // groups (issue #27) — without this a just-created project is invisible
     // until its first chat exists.
-    if (!projects || projects.length === 0) return base;
-    const known = new Set(base.projectGroups.map((g) => g.path));
-    const extra: Array<{
-      path: string;
-      name: string;
-      sessions: RecentSession[];
-    }> = [];
-    for (const p of projects) {
-      for (const f of p.folders) {
-        if (f.path && !known.has(f.path)) {
-          known.add(f.path);
-          extra.push({ path: f.path, name: folderName(f.path), sessions: [] });
+    let groups = base.projectGroups;
+    if (projects && projects.length > 0) {
+      const known = new Set(groups.map((g) => g.path));
+      const extra: Array<{
+        path: string;
+        name: string;
+        sessions: RecentSession[];
+      }> = [];
+      for (const p of projects) {
+        for (const f of p.folders) {
+          if (f.path && !known.has(f.path)) {
+            known.add(f.path);
+            extra.push({ path: f.path, name: folderName(f.path), sessions: [] });
+          }
+        }
+        if (p.primaryPath && !known.has(p.primaryPath)) {
+          known.add(p.primaryPath);
+          extra.push({
+            path: p.primaryPath,
+            name: folderName(p.primaryPath),
+            sessions: [],
+          });
         }
       }
-      if (p.primaryPath && !known.has(p.primaryPath)) {
-        known.add(p.primaryPath);
-        extra.push({
-          path: p.primaryPath,
-          name: folderName(p.primaryPath),
-          sessions: [],
-        });
-      }
+      groups = [...groups, ...extra];
     }
-    return { ...base, projectGroups: [...base.projectGroups, ...extra] };
-  }, [sessions, pinnedIds, projects]);
+    // Prepend pending rows (issue #55) to their group (creating the group
+    // when needed) — cached rows are recency-ordered, so the ephemeral new
+    // chat goes first. Unbound pending rows lead the flat Chats list.
+    let chatsList = base.chats;
+    if (visiblePendingRows.length > 0) {
+      const pendingByFolder = new Map<string, RecentSession[]>();
+      const pendingChats: RecentSession[] = [];
+      for (const row of visiblePendingRows) {
+        const folder = row.contextFolder?.trim();
+        if (!folder) {
+          pendingChats.push(row);
+          continue;
+        }
+        const list = pendingByFolder.get(folder);
+        if (list) list.push(row);
+        else pendingByFolder.set(folder, [row]);
+      }
+      groups = groups.map((g) =>
+        pendingByFolder.has(g.path)
+          ? {
+              ...g,
+              sessions: [...(pendingByFolder.get(g.path) ?? []), ...g.sessions],
+            }
+          : g,
+      );
+      for (const [path, list] of pendingByFolder) {
+        if (!groups.some((g) => g.path === path)) {
+          groups.push({ path, name: folderName(path), sessions: list });
+        }
+      }
+      chatsList = [...pendingChats, ...chatsList];
+    }
+    return { projectGroups: groups, chats: chatsList };
+  }, [sessions, pinnedIds, projects, visiblePendingRows]);
   // Resolve each group's display name: the agent project's human name when
   // projects.db/the dashboard tree knows this folder, else the path's last
   // segment (issue #23). The projects list is a second name source so a
@@ -906,12 +962,57 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     });
   };
 
+  const renderPendingRow = (
+    row: PendingSidebarRow,
+    project = false,
+    visible = expanded,
+  ): React.JSX.Element => {
+    const runId = row.id.slice("pending-".length);
+    const active = activePendingRunId !== null && activePendingRunId === runId;
+    return (
+      <div
+        key={row.id}
+        role="button"
+        tabIndex={visible ? 0 : -1}
+        className={`sidebar-recent-session ${project ? "project-child" : ""} ${
+          active ? "active" : ""
+        } pending`}
+        onClick={() => onOpenPendingRun(runId)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onOpenPendingRun(runId);
+          }
+        }}
+        title={row.title}
+      >
+        <Circle
+          className={`sidebar-recent-session-dot ${
+            active ? "sidebar-recent-session-dot--active" : ""
+          }`}
+          size={7}
+          fill={active ? "currentColor" : "none"}
+        />
+        <span className="sidebar-recent-session-title">{row.title}</span>
+      </div>
+    );
+  };
+
+  const isPendingRow = (s: RecentSession): boolean =>
+    s.id.startsWith("pending-");
+
   const renderSessionButton = (
     s: RecentSession,
     project = false,
     visible = expanded,
     pinned = false,
   ): React.JSX.Element => {
+    if (isPendingRow(s))
+      return renderPendingRow(
+        { ...s, contextFolder: s.contextFolder ?? null },
+        project,
+        visible,
+      );
     const title = s.title || t("sessions.newConversation");
     const loading = resumingSessionId === s.id || loadingSessionIds.has(s.id);
     const active = !loading && currentSessionId === s.id;

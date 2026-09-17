@@ -97,6 +97,15 @@ beforeEach(() => {
 
 function renderSidebar(
   onNewChatInProject: (folder: string | null) => void,
+  extra: {
+    pendingRows?: Array<{
+      id: string;
+      title: string;
+      contextFolder: string | null;
+    }>;
+    activePendingRunId?: string | null;
+    onOpenPendingRun?: (runId: string) => void;
+  } = {},
 ): void {
   render(
     <SidebarRecentSessions
@@ -104,9 +113,12 @@ function renderSidebar(
       connectionId="connection-main"
       activeProfile="default"
       currentSessionId={null}
+      activePendingRunId={extra.activePendingRunId ?? null}
       loadingSessionIds={new Set()}
       resumingSessionId={null}
+      pendingRows={extra.pendingRows ?? []}
       onSelect={vi.fn()}
+      onOpenPendingRun={extra.onOpenPendingRun ?? vi.fn()}
       onNewChatInProject={onNewChatInProject}
       onSessionDeleted={vi.fn()}
       scrollRootRef={{ current: null }}
@@ -141,5 +153,64 @@ describe("SidebarRecentSessions new-chat buttons", () => {
     expect(buttons).toHaveLength(1);
     fireEvent.click(buttons[0]);
     expect(onNewChatInProject).toHaveBeenCalledWith(null);
+  });
+});
+
+describe("SidebarRecentSessions pending chat rows (issue #55)", () => {
+  it("shows an unbound pending chat at the top of Chats and opens its run on click", async () => {
+    const onOpenPendingRun = vi.fn();
+    renderSidebar(vi.fn(), {
+      pendingRows: [
+        {
+          id: "pending-run-a",
+          title: "sessions.newChatPending",
+          contextFolder: null,
+        },
+      ],
+      activePendingRunId: "run-a",
+      onOpenPendingRun,
+    });
+
+    const row = await screen.findByText("sessions.newChatPending");
+    expect(row.closest(".sidebar-recent-session")).toHaveClass("active");
+    fireEvent.click(row);
+    expect(onOpenPendingRun).toHaveBeenCalledWith("run-a");
+  });
+
+  it("groups a project-bound pending chat under its project folder", async () => {
+    renderSidebar(vi.fn(), {
+      pendingRows: [
+        {
+          id: "pending-run-b",
+          title: "sessions.newChatPending",
+          contextFolder: "/tmp/proj",
+        },
+      ],
+    });
+
+    // The pending row renders inside the /tmp/proj project group — the same
+    // group header as the cached session-proj row.
+    const row = await screen.findByText("sessions.newChatPending");
+    const group = row.closest(".sidebar-recent-project");
+    expect(group).not.toBeNull();
+    expect(group?.textContent).toContain("Project chat");
+  });
+
+  it("renders no options button on a pending row (no DB session behind it)", async () => {
+    renderSidebar(vi.fn(), {
+      pendingRows: [
+        {
+          id: "pending-run-c",
+          title: "sessions.newChatPending",
+          contextFolder: null,
+        },
+      ],
+    });
+    const row = await screen.findByText("sessions.newChatPending");
+    const container = row.closest(".sidebar-recent-session");
+    expect(container).not.toBeNull();
+    expect(
+      container?.querySelector(".sidebar-recent-session-options") ?? null,
+    ).toBeNull();
   });
 });
