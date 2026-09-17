@@ -179,9 +179,7 @@ describe("chat run profile transitions", () => {
   });
 
   it("derives pending sidebar rows only for sessionless runs of the active connection/profile", () => {
-    // Issue #55: a brand-new chat must appear in the sidebar immediately,
-    // but a run that already has a session id is covered by the real cache
-    // row — emitting both would duplicate the chat.
+    // Issue #55: a brand-new chat must appear in the sidebar immediately.
     const runs = [
       run("run-blank", "default", { initialContextFolder: null }),
       run("run-folder", "default", {
@@ -194,7 +192,13 @@ describe("chat run profile transitions", () => {
     ];
 
     expect(
-      pendingSidebarRows(runs, "connection-main", "default", "New chat"),
+      pendingSidebarRows(
+        runs,
+        "connection-main",
+        "default",
+        "New chat",
+        new Set(["session-1"]),
+      ),
     ).toEqual([
       { id: "pending-run-blank", title: "New chat", contextFolder: null },
       {
@@ -204,6 +208,44 @@ describe("chat run profile transitions", () => {
       },
       { id: "pending-run-titled", title: "hello world", contextFolder: null },
     ]);
+  });
+
+  it("holds a run's pending row after its session id lands until the synced list contains it", () => {
+    // Issue #55 follow-up: the session id is announced mid-send but the
+    // sidebar sync lags — dropping the row at the announcement made the chat
+    // vanish until the next refresh. The row must persist until the REAL
+    // row replaces it, then disappear (no duplicate).
+    const runs = [
+      run("run-fresh", "default", {
+        sessionId: "session-new",
+        title: "my question",
+      }),
+    ];
+
+    // Synced list does not know the session yet → row is held.
+    expect(
+      pendingSidebarRows(
+        runs,
+        "connection-main",
+        "default",
+        "New chat",
+        new Set(["session-other"]),
+      ),
+    ).toEqual([
+      { id: "pending-run-fresh", title: "my question", contextFolder: null },
+    ]);
+
+    // Synced list contains the session → pending row is released (the real
+    // row now owns the slot).
+    expect(
+      pendingSidebarRows(
+        runs,
+        "connection-main",
+        "default",
+        "New chat",
+        new Set(["session-new"]),
+      ),
+    ).toEqual([]);
   });
 
   it("replaces the active same-profile scratch run when opening a session", () => {

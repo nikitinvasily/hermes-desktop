@@ -39,6 +39,15 @@ interface RecentSession {
   contextFolder?: string | null;
 }
 
+export interface SidebarSyncedIdsDetail {
+  ids: string[];
+}
+
+// Fired by the sidebar whenever its synced (non-pending) list changes, so
+// Layout can release a held pending row exactly when the real session row
+// has replaced it (issue #55 follow-up: no disappearance gap mid-send).
+export const SIDEBAR_SYNCED_IDS_EVENT = "hermes-sidebar-synced-ids-changed";
+
 // ChatGPT-style paged conversation list under the pinned app navigation.
 export const RECENT_SESSIONS_PAGE_SIZE = 30;
 
@@ -322,6 +331,14 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
       // Skip the state update (and re-render) when nothing changed — the
       // common case for periodic refreshes.
       setSessions((prev) => (sameSessions(prev, next) ? prev : next));
+      // Tell Layout which session ids are now visible in the synced list so
+      // it can drop the held pending row of a run whose session just landed
+      // (issue #55) exactly when the real row replaces it — no gap, no dup.
+      window.dispatchEvent(
+        new CustomEvent<SidebarSyncedIdsDetail>(SIDEBAR_SYNCED_IDS_EVENT, {
+          detail: { ids: next.map((s) => s.id) },
+        }),
+      );
     },
     [normalizeRows],
   );
@@ -341,6 +358,11 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
       setHasMore(list.length > loadedLimit);
       const next = normalizeRows(list, loadedLimit);
       setSessions((prev) => (sameSessions(prev, next) ? prev : next));
+      window.dispatchEvent(
+        new CustomEvent<SidebarSyncedIdsDetail>(SIDEBAR_SYNCED_IDS_EVENT, {
+          detail: { ids: next.map((s) => s.id) },
+        }),
+      );
     },
     [normalizeRows],
   );
@@ -657,7 +679,11 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         for (const f of p.folders) {
           if (f.path && !known.has(f.path)) {
             known.add(f.path);
-            extra.push({ path: f.path, name: folderName(f.path), sessions: [] });
+            extra.push({
+              path: f.path,
+              name: folderName(f.path),
+              sessions: [],
+            });
           }
         }
         if (p.primaryPath && !known.has(p.primaryPath)) {

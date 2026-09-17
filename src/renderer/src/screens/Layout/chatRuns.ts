@@ -75,24 +75,29 @@ export interface PendingSidebarRow {
 }
 
 /**
- * Derive pending sidebar rows for the scratch runs of one connection/profile.
- * A run that already reported its session id is NOT pending — its real row
- * comes from the sessions cache, and emitting both would duplicate the chat.
- * `fallbackTitle` is the localized "New chat" default for runs whose first
- * message has not landed yet.
+ * Derive pending sidebar rows for the scratch runs of one connection/profile,
+ * HOLDING the row of a run that just gained its session id until `syncedIds`
+ * (the session ids currently visible in the sidebar's synced list) contains
+ * it. Without the hold there is a gap between the session-id announcement
+ * (first turn) and the cache sync painting the real row — the pending row
+ * vanished mid-send and the chat disappeared from the sidebar until the next
+ * refresh (issue #55 follow-up). Runs of other connections/profiles are never
+ * shown. `fallbackTitle` is the localized "New chat" default for runs whose
+ * first message has not landed yet.
  */
 export function pendingSidebarRows(
   runs: ChatRun[],
   connectionId: string,
   profile: string,
   fallbackTitle: string,
+  syncedIds: ReadonlySet<string> = new Set(),
 ): PendingSidebarRow[] {
   return runs
     .filter(
       (r) =>
         r.connectionId === connectionId &&
         r.profile === profile &&
-        !r.sessionId,
+        (!r.sessionId || !syncedIds.has(r.sessionId)),
     )
     .map((r) => ({
       id: `pending-${r.runId}`,
