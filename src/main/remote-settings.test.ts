@@ -103,10 +103,8 @@ describe("remote memory", () => {
       async (_c: unknown, path: string) => {
         if (path === "/api/status") return { active_sessions: 0 };
         if (path.startsWith("/api/fs/read-text")) {
-          if (path.includes("MEMORY.md"))
-            return { text: "only memory entry" };
-          if (path.includes("USER.md"))
-            throw new Error("404: File not found");
+          if (path.includes("MEMORY.md")) return { text: "only memory entry" };
+          if (path.includes("USER.md")) throw new Error("404: File not found");
           if (path.includes("config.yaml")) return { text: "" };
           throw new Error(`unexpected: ${path}`);
         }
@@ -124,7 +122,11 @@ describe("remote memory", () => {
   it("round-trips an added entry through write-text", async () => {
     const writes: string[] = [];
     remoteDashboardRequestJson.mockImplementation(
-      async (_c: unknown, path: string, options?: { body?: { content?: string } }) => {
+      async (
+        _c: unknown,
+        path: string,
+        options?: { body?: { content?: string } },
+      ) => {
         if (path.startsWith("/api/fs/read-text")) {
           if (path.includes("MEMORY.md")) return { text: "existing" };
           if (path.includes("config.yaml")) return { text: "" };
@@ -163,8 +165,7 @@ describe("remote soul", () => {
     remoteDashboardRequestJson.mockImplementation(
       async (_c: unknown, path: string) => {
         if (path.includes("/soul")) throw new Error("404");
-        if (path.startsWith("/api/fs/read-text"))
-          return { text: "FILE SOUL" };
+        if (path.startsWith("/api/fs/read-text")) return { text: "FILE SOUL" };
         throw new Error(`unexpected: ${path}`);
       },
     );
@@ -174,7 +175,11 @@ describe("remote soul", () => {
   it("reset restores the shipped default", async () => {
     const puts: string[] = [];
     remoteDashboardRequestJson.mockImplementation(
-      async (_c: unknown, path: string, options?: { body?: { content?: string } }) => {
+      async (
+        _c: unknown,
+        path: string,
+        options?: { body?: { content?: string } },
+      ) => {
         if (path.endsWith("/soul")) {
           puts.push(options?.body?.content ?? "");
           return {};
@@ -272,6 +277,44 @@ describe("remote config/env", () => {
     ).resolves.toBe("zai");
   });
 
+  it("falls back to /api/profiles when status omits hermes_home (gated bind)", async () => {
+    // A gated dashboard deliberately omits hermes_home from the public
+    // /api/status payload; the settings home must come from the authenticated
+    // profiles router instead (issue #53).
+    remoteGetHermesHome.mockResolvedValue("");
+    remoteDashboardRequestJson.mockImplementation(
+      async (_c: unknown, path: string) => {
+        if (path === "/api/profiles")
+          return {
+            profiles: [
+              { name: "other", path: "/home/hermes/.hermes/profiles/other" },
+              { name: "default", path: HOME, is_default: true },
+            ],
+          };
+        if (path.startsWith("/api/fs/read-text")) {
+          if (path.includes(encodeURIComponent(`${HOME}/config.yaml`)))
+            return { text: "agent:\n  reasoning_effort: medium\n" };
+          throw new Error(`unexpected: ${path}`);
+        }
+        throw new Error(`unexpected: ${path}`);
+      },
+    );
+    await expect(
+      remoteGetConfigValue(remoteConnection(), "agent.reasoning_effort"),
+    ).resolves.toBe("medium");
+    // The fallback home is cached: a second read must not re-probe profiles.
+    remoteDashboardRequestJson.mockClear();
+    await expect(
+      remoteGetConfigValue(remoteConnection(), "agent.reasoning_effort"),
+    ).resolves.toBe("medium");
+    expect(remoteDashboardRequestJson).not.toHaveBeenCalledWith(
+      expect.anything(),
+      "/api/profiles",
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
   it("parses the remote .env like the local reader", async () => {
     fsText(`${HOME}/.env`, '# comment\nZAI_API_KEY="sk-test"\nEMPTY=');
     const env = await remoteReadEnv(remoteConnection());
@@ -291,9 +334,7 @@ describe("remote memory providers", () => {
         ],
       },
     });
-    const providers = await remoteDiscoverMemoryProviders(
-      remoteConnection(),
-    );
+    const providers = await remoteDiscoverMemoryProviders(remoteConnection());
     expect(providers.map((p) => [p.name, p.active])).toEqual([
       ["builtin", true],
       ["honcho", false],

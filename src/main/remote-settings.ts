@@ -82,7 +82,33 @@ async function remoteHome(
   if (cachedHermesHome && Date.now() - cachedHermesHome.at < HOME_TTL_MS) {
     return cachedHermesHome.home;
   }
-  const home = await remoteGetHermesHome({ ...conn, profile });
+  let home = await remoteGetHermesHome({ ...conn, profile });
+  if (!home) {
+    // A gated (non-loopback) dashboard deliberately omits hermes_home from the
+    // PUBLIC /api/status payload (deployment recon stays loopback-only), so an
+    // authenticated remote client cannot learn the home from status. The
+    // profiles router is auth-gated (served through the same OAuth/token
+    // transport as every other settings call) and reports each profile's path.
+    const trimmed = profile?.trim();
+    const wanted = !trimmed || trimmed === "default" ? null : trimmed;
+    const rows = await remoteDashboardRequestJson<{ profiles?: unknown }>(
+      { ...conn, apiKey: "" },
+      "/api/profiles",
+      {},
+      profile,
+    );
+    const list = Array.isArray(rows?.profiles) ? rows.profiles : [];
+    const match =
+      (wanted
+        ? list.find((row) => {
+            const r = asRecord(row);
+            return stringValue(r.name) === wanted;
+          })
+        : undefined) ??
+      list.find((row) => asRecord(row).is_default === true) ??
+      list[0];
+    home = stringValue(asRecord(match).path);
+  }
   if (!home)
     throw new Error("Remote dashboard did not report its Hermes home.");
   cachedHermesHome = { home, at: Date.now() };
