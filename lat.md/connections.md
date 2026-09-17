@@ -63,6 +63,12 @@ Direct Remote requests build a profile-scoped session configuration. SSH dashboa
 
 Local [[src/main/session-cache.ts#syncSessionCache]], [[src/main/session-cache.ts#listCachedSessions]], [[src/main/sessions.ts#listSessions]], [[src/main/sessions.ts#searchSessions]], title mutation, deletion cleanup, and batched context-folder reads resolve `state.db` and `sessions.json` from the explicit profile. Omitted IDs retain the active connection/profile fallback for legacy callers.
 
+### Remote settings parity
+
+Direct Remote connections route the Settings-family IPC through the dashboard REST API instead of reading the local `~/.hermes` (issue #51).
+
+All of it lives in [[src/main/remote-settings.ts]]; the IPC branches in [[src/main/ipc/register.ts#registerIpcHandlers]] pick them for `conn.mode === "remote"`. Coverage: memory (MEMORY.md/USER.md via `/api/fs/read-text` + `/api/fs/write-text`), soul (`/api/profiles/{n}/soul` with an fs fallback), toolsets (`GET/PUT /api/tools/toolsets*`), logs (`/api/logs`), gateway status/lifecycle (`/api/status`, `/api/gateway/start|stop`), config (`/api/fs` surgical YAML splice mirroring the SSH path), env (`.env` parse read + `PUT /api/env` write), profiles (`GET /api/profiles` with the LOCAL active-profile override), doctor/dump (`POST /api/ops/*` spawned actions), and memory providers (`GET /api/memory`). The server's `HERMES_HOME` is resolved once via [[src/main/remote-metadata.ts#remoteGetHermesHome]] and cached (TTL 5 minutes), invalidated by [[src/main/remote-settings.ts#remoteInvalidateSettingsCaches]] on every connection switch.
+
 ### Connection-explicit dashboard transport
 
 Dashboard startup and WebSocket refresh resolve the chat's stable connection ID instead of consulting whichever record is currently selected.
