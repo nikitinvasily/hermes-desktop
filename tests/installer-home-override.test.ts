@@ -17,12 +17,14 @@ function createHermesInstall(home: string): void {
     process.platform === "win32" ? "Scripts" : "bin",
   );
   mkdirSync(bin, { recursive: true });
+  // Non-empty stubs: validateHermesHome rejects zero-byte binaries (issue
+  // #49) — placeholder touch-files must not count as a real agent install.
   if (process.platform === "win32") {
-    writeFileSync(join(bin, "python.exe"), "");
-    writeFileSync(join(bin, "hermes.exe"), "");
+    writeFileSync(join(bin, "python.exe"), "stub");
+    writeFileSync(join(bin, "hermes.exe"), "stub");
   } else {
-    writeFileSync(join(bin, "python"), "");
-    writeFileSync(join(repo, "hermes"), "");
+    writeFileSync(join(bin, "python"), "#!/bin/sh\n");
+    writeFileSync(join(repo, "hermes"), "#!/bin/sh\n");
   }
 }
 

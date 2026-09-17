@@ -511,7 +511,11 @@ export function validateHermesHome(dir: string): boolean {
   const home = dir?.trim();
   if (!home || !existsSync(home)) return false;
   const { python, script } = installBinariesFor(home);
-  return existsSync(python) && existsSync(script);
+  if (!existsSync(python) || !existsSync(script)) return false;
+  // A zero-byte binary is a placeholder, not an install — test instances boot
+  // with touch-file stubs to skip the installer screen (CDP verification
+  // procedure), and a home like that must never count as a real agent.
+  return statSync(python).size > 0 && statSync(script).size > 0;
 }
 
 export function checkInstallStatus(): InstallStatus {

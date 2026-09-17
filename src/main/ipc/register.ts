@@ -84,6 +84,7 @@ import {
   inspectInstallTarget,
   validateHermesHome,
   setHermesHomeOverride,
+  HERMES_HOME,
   getHermesVersion,
   clearVersionCache,
   runHermesDoctor,
@@ -1244,6 +1245,12 @@ export function registerIpcHandlers(context: IpcContext): void {
         );
       }
       if (conn.mode === "ssh" && conn.ssh) {
+        // Onboarding an isolated/test HERMES_HOME (fake agent binaries) must
+        // never rewrite the remote agent's global model config: the Setup
+        // screen routes here through the ACTIVE ssh connection, and an
+        // unconditional write — dashboard or legacy — clobbered the remote
+        // config.yaml with `custom` + localhost URLs (issue #49).
+        if (!validateHermesHome(HERMES_HOME)) return true;
         return withSshDashboardSessions(
           conn,
           (config) => remoteSetModelConfig(config, provider, model, baseUrl),
