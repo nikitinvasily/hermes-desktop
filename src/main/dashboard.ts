@@ -397,14 +397,9 @@ export async function getRemoteDashboardStatusForConfig(
   config: ConnectionConfig,
   profile?: string,
 ): Promise<DashboardStatus> {
-  if (config.remoteChatTransport === "legacy") {
-    return {
-      supported: false,
-      running: false,
-      error: "Remote dashboard transport is disabled in Settings.",
-    };
-  }
-
+  // Remote is dashboard-only (issue #59) — remoteChatTransport is always
+  // pinned to "dashboard" at the config layer, so the old "legacy disables
+  // the dashboard" branch is unreachable and removed.
   const baseUrl = normalizeRemoteDashboardBaseUrl(config.remoteUrl);
   if (!baseUrl) {
     return {

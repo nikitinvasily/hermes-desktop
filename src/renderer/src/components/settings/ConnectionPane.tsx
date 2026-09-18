@@ -42,7 +42,6 @@ export default function ConnectionPane(): React.JSX.Element {
     setApiServerKeyMissing,
     generatingKey,
     setGeneratingKey,
-    remoteChatTransport,
     sshChatTransport,
     transportProbe,
     sshHost,
@@ -355,39 +354,18 @@ export default function ConnectionPane(): React.JSX.Element {
               </div>
             </div>
           )}
-          <div className="settings-field">
-            <label className="settings-field-label">Chat transport</label>
-            <div className="settings-theme-options">
-              {CHAT_TRANSPORT_OPTIONS.filter(
-                (option) => remoteAuthMode !== "oauth" || option !== "legacy",
-              ).map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  className={`settings-theme-option ${
-                    remoteChatTransport === option ? "active" : ""
-                  }`}
-                  onClick={() =>
-                    void handleChatTransportChange("remote", option)
-                  }
-                >
-                  {option[0].toUpperCase() + option.slice(1)}
-                </button>
-              ))}
+          {/* Chat transport selector removed for remote connections (issue #59):
+              remote is dashboard-only now; the probe below still reports the
+              dashboard availability. SSH keeps its own selector. */}
+          {transportProbe && (
+            <div
+              className={`settings-transport-status settings-transport-status--${transportProbe.kind}`}
+            >
+              <span>{transportProbe.label}</span>
+              {transportProbe.loading && <span>Checking…</span>}
+              {transportProbe.detail && <code>{transportProbe.detail}</code>}
             </div>
-            <div className="settings-field-hint">
-              {t("settings.remoteChatTransportHint")}
-            </div>
-            {transportProbe && (
-              <div
-                className={`settings-transport-status settings-transport-status--${transportProbe.kind}`}
-              >
-                <span>{transportProbe.label}</span>
-                {transportProbe.loading && <span>Checking…</span>}
-                {transportProbe.detail && <code>{transportProbe.detail}</code>}
-              </div>
-            )}
-          </div>
+          )}
           <div className="settings-hermes-actions">
             <button
               className="btn btn-secondary"

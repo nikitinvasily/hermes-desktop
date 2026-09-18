@@ -195,8 +195,6 @@ export default {
   remoteOAuthLoginFailed: "Remote gateway sign-in failed.",
   remoteOAuthCancelled: "Remote gateway sign-in cancelled.",
   remoteOAuthLogoutSuccess: "Signed out from the remote gateway.",
-  remoteChatTransportHint:
-    "Auto detects token or OAuth dashboard authentication. OAuth never falls back to the legacy remote API when sign-in is missing or expired.",
   testingConnection: "Testing...",
   testConnection: "Test Connection",
   save: "Save",

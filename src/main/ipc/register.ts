@@ -213,6 +213,7 @@ import {
   getPublicConnectionConfig,
   getPublicConnectionRegistry,
   normalizeRemoteChatTransport,
+  normalizeRemoteChatTransportDashboard,
   removeConnection,
   renameConnection,
   resolveConnectionApiKeyUpdate,
@@ -310,10 +311,7 @@ import {
   remoteSetModelConfig,
   remoteUpdateModel,
 } from "../remote-models";
-import {
-  emptyOAuthProviderStatuses,
-  remoteGetOAuthProviderStatuses,
-} from "../remote-provider-statuses";
+import { remoteGetOAuthProviderStatuses } from "../remote-provider-statuses";
 import {
   listModels,
   addModel,
@@ -705,31 +703,17 @@ async function withSshDashboardModelLibrary<T>(
 }
 
 async function withRemoteDashboard<T>(
-  conn: ConnectionConfig,
+  _conn: ConnectionConfig,
   dashboardOperation: () => Promise<T>,
-  legacyOperation: () => Promise<T> | T,
 ): Promise<T> {
-  if (conn.remoteAuthMode === "oauth") {
-    if (conn.remoteChatTransport === "legacy") {
-      throw new Error(
-        "Legacy remote transport cannot authenticate to an OAuth gateway.",
-      );
-    }
-    return dashboardOperation();
-  }
-  if (conn.remoteChatTransport === "legacy") return legacyOperation();
-  try {
-    return await dashboardOperation();
-  } catch (err) {
-    if (conn.remoteChatTransport === "auto") return legacyOperation();
-    throw err;
-  }
+  // Remote connections are dashboard-only (issue #59): no legacy fallback
+  // and no auto degradation — a dashboard failure surfaces as an error.
+  return dashboardOperation();
 }
 
 async function getActiveDashboardMediaConfig(): Promise<RemoteSessionBridgeConfig | null> {
   const conn = getConnectionConfig();
   if (conn.mode === "remote") {
-    if (conn.remoteChatTransport === "legacy") return null;
     if (!conn.remoteUrl.trim() || !conn.apiKey.trim()) return null;
     return { remoteUrl: conn.remoteUrl, apiKey: conn.apiKey };
   }
@@ -999,15 +983,8 @@ export function registerIpcHandlers(context: IpcContext): void {
     async (_event, profile?: string): Promise<Record<string, boolean>> => {
       const conn = getConnectionConfig();
       if (conn.mode === "remote") {
-        return withRemoteDashboard(
-          conn,
-          () =>
-            remoteGetOAuthProviderStatuses(
-              conn,
-              OAUTH_LOGIN_PROVIDERS,
-              profile,
-            ),
-          () => emptyOAuthProviderStatuses(OAUTH_LOGIN_PROVIDERS),
+        return withRemoteDashboard(conn, () =>
+          remoteGetOAuthProviderStatuses(conn, OAUTH_LOGIN_PROVIDERS, profile),
         );
       }
       if (conn.mode === "ssh" && conn.ssh) {
@@ -1234,11 +1211,7 @@ export function registerIpcHandlers(context: IpcContext): void {
   ipcMain.handle("get-model-config", (_event, profile?: string) => {
     const conn = getConnectionConfig();
     if (conn.mode === "remote")
-      return withRemoteDashboard(
-        conn,
-        () => remoteGetModelConfig(conn),
-        () => getModelConfig(profile),
-      );
+      return withRemoteDashboard(conn, () => remoteGetModelConfig(conn));
     if (conn.mode === "ssh" && conn.ssh)
       return withSshDashboardSessions(
         conn,
@@ -1260,33 +1233,8 @@ export function registerIpcHandlers(context: IpcContext): void {
     ) => {
       const conn = getConnectionConfig();
       if (conn.mode === "remote") {
-        return withRemoteDashboard(
-          conn,
-          () => remoteSetModelConfig(conn, provider, model, baseUrl),
-          () => {
-            const prev = getModelConfig(profile);
-            // Same library-mirroring as the pure-local path below: carry the
-            // activated model's context-window and api_mode into config.yaml
-            // so this local fallback write doesn't leave a stale transport.
-            const libEntry = resolveLibraryModelEntry(provider, model, baseUrl);
-            setModelConfig(
-              provider,
-              model,
-              baseUrl,
-              profile,
-              libEntry?.contextLength ?? null,
-              libEntry?.apiMode ?? null,
-            );
-            if (
-              isGatewayRunning(profile) &&
-              (prev.provider !== provider ||
-                prev.model !== model ||
-                prev.baseUrl !== baseUrl)
-            ) {
-              restartGateway(profile);
-            }
-            return true;
-          },
+        return withRemoteDashboard(conn, () =>
+          remoteSetModelConfig(conn, provider, model, baseUrl),
         );
       }
       if (conn.mode === "ssh" && conn.ssh) {
@@ -1531,11 +1479,13 @@ export function registerIpcHandlers(context: IpcContext): void {
 
   ipcMain.handle(
     "set-connection-chat-transports",
-    (_event, remoteChatTransport: unknown, sshChatTransport: unknown) => {
+    (_event, _remoteChatTransport: unknown, sshChatTransport: unknown) => {
       const current = getConnectionConfig();
       setConnectionConfig({
         ...current,
-        remoteChatTransport: normalizeRemoteChatTransport(remoteChatTransport),
+        // Remote is dashboard-only (issue #59): whatever the renderer sends,
+        // the remote transport is pinned; only SSH honors the choice.
+        remoteChatTransport: normalizeRemoteChatTransportDashboard(),
         sshChatTransport: normalizeRemoteChatTransport(sshChatTransport),
       });
       resetSshDashboardAvailability();
@@ -2146,15 +2096,12 @@ export function registerIpcHandlers(context: IpcContext): void {
         getModelContextWindow(provider, model, baseUrl, undefined, profile);
       const conn = getConnectionConfig();
       if (conn.mode === "remote") {
-        return withRemoteDashboard(
-          conn,
-          () =>
-            resolveActiveModelContextWindow(
-              model,
-              () => remoteGetModelConfig(conn),
-              fallback,
-            ),
-          fallback,
+        return withRemoteDashboard(conn, () =>
+          resolveActiveModelContextWindow(
+            model,
+            () => remoteGetModelConfig(conn),
+            fallback,
+          ),
         );
       }
       if (conn.mode === "ssh" && conn.ssh) {
@@ -3146,10 +3093,9 @@ export function registerIpcHandlers(context: IpcContext): void {
     ): Promise<Record<string, CachedSession[]>> => {
       const conn = sessionConnection(connectionId);
       const scopedProfile = activeSshProfile(profile);
-      const flatten = (groups: Map<string, CachedSession[]>): Record<
-        string,
-        CachedSession[]
-      > => {
+      const flatten = (
+        groups: Map<string, CachedSession[]>,
+      ): Record<string, CachedSession[]> => {
         const out: Record<string, CachedSession[]> = {};
         for (const [folder, list] of groups) {
           out[folder] = mergeRemoteBindings(list);
@@ -3388,11 +3334,6 @@ export function registerIpcHandlers(context: IpcContext): void {
   ipcMain.handle("list-models", () => {
     const conn = getConnectionConfig();
     if (conn.mode === "remote") {
-      if (conn.remoteChatTransport === "legacy") {
-        throw new Error(
-          "Remote model library reads require dashboard transport.",
-        );
-      }
       return remoteListModels(conn);
     }
     if (conn.mode === "ssh" && conn.ssh) {
@@ -3424,11 +3365,6 @@ export function registerIpcHandlers(context: IpcContext): void {
       const conn = getConnectionConfig();
       let addedModel: Awaited<ReturnType<typeof addModel>>;
       if (conn.mode === "remote") {
-        if (conn.remoteChatTransport === "legacy") {
-          throw new Error(
-            "Remote model library writes require dashboard transport.",
-          );
-        }
         // Remote/SSH library writes don't carry the context-length override
         // yet (local-mode feature for now); the local branch persists it.
         addedModel = await remoteAddModel(conn, name, provider, model, baseUrl);
@@ -3457,11 +3393,6 @@ export function registerIpcHandlers(context: IpcContext): void {
     const conn = getConnectionConfig();
     let removed: boolean;
     if (conn.mode === "remote") {
-      if (conn.remoteChatTransport === "legacy") {
-        throw new Error(
-          "Remote model library writes require dashboard transport.",
-        );
-      }
       removed = await remoteRemoveModel(conn, id);
     } else if (conn.mode === "ssh" && conn.ssh) {
       removed = await withSshDashboardModelLibrary(
@@ -3489,11 +3420,6 @@ export function registerIpcHandlers(context: IpcContext): void {
       const conn = getConnectionConfig();
       let updated: boolean;
       if (conn.mode === "remote") {
-        if (conn.remoteChatTransport === "legacy") {
-          throw new Error(
-            "Remote model library writes require dashboard transport.",
-          );
-        }
         updated = await remoteUpdateModel(conn, id, fields);
       } else if (conn.mode === "ssh" && conn.ssh) {
         updated = await withSshDashboardModelLibrary(
