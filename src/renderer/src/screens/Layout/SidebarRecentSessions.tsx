@@ -236,6 +236,10 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     setArchiveProjectName(projectName);
     setArchiveDialogOpen(true);
   };
+  // Remount counter for the archive modal: bumped after a confirmed delete
+  // from the archive so the modal reloads its list (the delete confirmation
+  // lives in the parent and the modal's list is child-local state).
+  const [archiveDialogNonce, setArchiveDialogNonce] = useState(0);
   // True when the shared delete-confirmation dialog was opened FROM the
   // archive modal — routes the confirm to the archive delete path.
   const [pendingDeleteIsArchived, setPendingDeleteIsArchived] = useState(false);
@@ -1500,6 +1504,11 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
                             connectionId,
                             activeProfile,
                           );
+                          // The archive modal keeps its own list state; the
+                          // shared confirm dialog lives in the parent, so the
+                          // modal never learns the row is gone. Bump its key
+                          // to remount it with a fresh list (issue #64).
+                          setArchiveDialogNonce((n) => n + 1);
                         } catch (err) {
                           console.error(
                             "Failed to delete archived session",
@@ -1530,6 +1539,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
       {archiveDialogOpen &&
         createPortal(
           <ArchiveDialog
+            key={archiveDialogNonce}
             connectionId={connectionId}
             activeProfile={activeProfile}
             filter={archiveFilter}
