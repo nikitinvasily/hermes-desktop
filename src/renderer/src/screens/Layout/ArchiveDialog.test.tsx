@@ -111,24 +111,36 @@ describe("ArchiveDialog filters (issue #64)", () => {
     expect(screen.getByText("Loose chat")).toBeTruthy();
   });
 
-  it("restores the clicked row (row click = restore AND open)", async () => {
+  it("Restore icon restores AND opens the chat; the row itself is display-only", async () => {
     mockListArchived();
+    const onRestored = vi.fn();
     const onOpen = vi.fn();
+    const onClose = vi.fn();
     render(
       <ArchiveDialog
         connectionId="conn-1"
         activeProfile="default"
         filter={{ kind: "unbound" }}
-        onRestored={vi.fn()}
+        onRestored={onRestored}
         onOpen={onOpen}
         onDeleteRequest={vi.fn()}
-        onClose={vi.fn()}
+        onClose={onClose}
       />,
     );
     await waitFor(() => {
       expect(screen.getByText("Loose chat")).toBeTruthy();
     });
+
+    // Row click must NOT restore (user decision, 2026-09-18).
     fireEvent.click(screen.getByText("Loose chat"));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(setSessionArchived).not.toHaveBeenCalled();
+    expect(onRestored).not.toHaveBeenCalled();
+
+    // The Restore icon restores, opens the chat as active, closes the dialog.
+    fireEvent.click(
+      screen.getByRole("button", { name: "navigation.archiveRestore" }),
+    );
     await waitFor(() => {
       expect(setSessionArchived).toHaveBeenCalledWith(
         "a-unbound",
@@ -136,7 +148,9 @@ describe("ArchiveDialog filters (issue #64)", () => {
         "conn-1",
         "default",
       );
+      expect(onRestored).toHaveBeenCalledTimes(1);
       expect(onOpen).toHaveBeenCalledWith("a-unbound");
+      expect(onClose).toHaveBeenCalledTimes(1);
     });
   });
 });

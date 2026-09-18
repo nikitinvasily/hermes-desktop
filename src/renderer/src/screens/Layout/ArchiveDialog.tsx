@@ -23,10 +23,11 @@ export type ArchiveFilter =
 /**
  * Modal listing the current connection's archived chats (issue #34). Opened
  * from the Archive button in the sidebar's Chats header, or with a project
- * filter from a project row's archive icon (issue #64). Restore and open are
- * DELIBERATELY separate actions: Restore returns the chat to the sidebar list
- * without switching the view; clicking the row restores AND opens it — that is
- * the explicit "I want to look at this chat" intent, not a side effect.
+ * filter from a project row's archive icon (issue #64). The row itself is
+ * display-only (user decision, 2026-09-18): restoring happens ONLY through
+ * the hover icon, which restores the chat AND opens it as the active chat
+ * (then the dialog closes). Delete goes through the shared confirmation
+ * dialog.
  */
 function ArchiveDialog({
   connectionId,
@@ -48,7 +49,7 @@ function ArchiveDialog({
   projectName?: string;
   /** Notify the parent after a successful restore so it refreshes the list. */
   onRestored: () => void;
-  /** Open the session in the chat view (row click = restore AND open). */
+  /** Open the restored session as the active chat (Restore icon click). */
   onOpen: (sessionId: string) => void;
   /** Surface deletion through the parent's shared confirmation dialog. */
   onDeleteRequest: (sessionId: string) => void;
@@ -104,19 +105,6 @@ function ArchiveDialog({
         next.delete(id);
         return next;
       });
-    });
-  };
-
-  const restore = (id: string): void => {
-    withBusy(id, async () => {
-      await window.hermesAPI.setSessionArchived(
-        id,
-        false,
-        connectionId,
-        activeProfile,
-      );
-      setSessions((prev) => (prev ? prev.filter((s) => s.id !== id) : prev));
-      onRestored();
     });
   };
 
@@ -186,17 +174,7 @@ function ArchiveDialog({
               return (
                 <div
                   key={s.id}
-                  role="button"
-                  tabIndex={busy ? -1 : 0}
                   className="archive-dialog-row"
-                  onClick={() => !busy && restoreAndOpen(s.id)}
-                  onKeyDown={(e) => {
-                    if (busy) return;
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      restoreAndOpen(s.id);
-                    }
-                  }}
                   title={s.title || t("sessions.newConversation")}
                 >
                   <ArchiveBox size={13} className="archive-dialog-row-icon" />
@@ -214,7 +192,7 @@ function ArchiveDialog({
                     title={t("navigation.archiveRestore")}
                     onClick={(e) => {
                       e.stopPropagation();
-                      restore(s.id);
+                      restoreAndOpen(s.id);
                     }}
                     onKeyDown={(e) => e.stopPropagation()}
                   >
