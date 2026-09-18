@@ -11,7 +11,7 @@ import {
   getRemoteAuthHeader,
   normaliseRemoteUrl,
 } from "./hermes";
-import { remoteRequestJson } from "./remote-sessions";
+import { remoteDashboardRequestJson } from "./remote-api";
 import { getConnectionConfig } from "./config";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
 import { sshRunCron } from "./ssh-remote";
@@ -305,12 +305,12 @@ async function remoteCronFlavor(
 }
 
 // Direct remote (HTTP) connections always talk to the unified dashboard, whose
-// auth may be OAuth (cookie jar) rather than a static token. remoteRequestJson
-// routes oauth connections through the Electron cookie session — the same
-// transport every other remote-parity screen uses — and scopes requests to the
-// requested profile via ?profile=. The legacy /api/jobs gateway flavor probe
-// only applies to the SSH tunnel path further down, which can point at either
-// server kind.
+// auth may be OAuth (cookie jar) rather than a static token.
+// remoteDashboardRequestJson resolves the auth mode (including the auto probe)
+// and routes oauth connections through the Electron cookie session — the same
+// request boundary every other remote-parity screen uses. Do NOT call
+// remoteRequestJson directly here: without the connection's mode/authMode it
+// silently falls back to the token transport and a gated dashboard 401s.
 async function remoteCronJson<T>(
   path: string,
   options: {
@@ -320,14 +320,7 @@ async function remoteCronJson<T>(
   profile?: string,
 ): Promise<T> {
   const conn = getConnectionConfig();
-  if (conn.mode !== "remote") {
-    throw new Error("remoteCronJson is only available in direct remote mode.");
-  }
-  return remoteRequestJson<T>(
-    { remoteUrl: conn.remoteUrl, apiKey: conn.apiKey, profile },
-    path,
-    options,
-  );
+  return remoteDashboardRequestJson<T>(conn, path, options, profile);
 }
 
 function remoteCronErrorMessage(err: unknown): string {
