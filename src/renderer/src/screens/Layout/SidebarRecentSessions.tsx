@@ -1101,7 +1101,10 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   ): React.JSX.Element => {
     const title = s.title || t("sessions.newConversation");
     const loading = resumingSessionId === s.id || loadingSessionIds.has(s.id);
-    const active = !loading && currentSessionId === s.id;
+    // The active highlight persists while the agent works (loading) — the
+    // spinner already signals activity, dropping the highlight made the
+    // current chat look unfocused on every command run (issue #72).
+    const active = currentSessionId === s.id;
     const editing = editingId === s.id;
     const menuOpen = menuTarget?.id === s.id;
 

@@ -10,7 +10,7 @@ Layout passes the selected connection ID and profile into both session surfaces.
 
 The current chat row carries a persistent quiet background fill (`--bg-tertiary` + `--text-primary`, the hover/focus treatment) instead of an accent tint (issue #72).
 
-There is no filled bullet or accent text color for the active row: the row looks identical whether the pointer is over it or not; only the background presence distinguishes it at rest.
+There is no filled bullet or accent text color for the active row: the row looks identical whether the pointer is over it or not; only the background presence distinguishes it at rest. The highlight also persists while the agent is working in that chat (`run.loading`): the spinner already signals activity, so the `active` flag is `currentSessionId === s.id` without a `!loading` guard — previously every command run visually unfocused the current chat.
 
 ## Collapse toggle brand mark
 
