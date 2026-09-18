@@ -1168,13 +1168,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         ) : pinned ? (
           <Pin className="sidebar-recent-session-dot" size={11} />
         ) : (
-          <Circle
-            className={`sidebar-recent-session-dot ${
-              active ? "sidebar-recent-session-dot--active" : ""
-            }`}
-            size={7}
-            fill={active ? "currentColor" : "none"}
-          />
+          <Circle className="sidebar-recent-session-dot" size={7} fill="none" />
         )}
         <span className="sidebar-recent-session-title">{title}</span>
         <button
