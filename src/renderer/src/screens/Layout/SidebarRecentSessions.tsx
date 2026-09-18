@@ -1001,6 +1001,20 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         next.delete(id);
         return next;
       });
+      // The tree-derived group map (issue #57 stage 2) is not refetched on
+      // this action; drop the row optimistically so an archived chat does
+      // not resurrect in its project group from the stale tree cache.
+      setProjectGroupSessions((prev) => {
+        if (Object.keys(prev).length === 0) return prev;
+        const next: Record<string, RecentSession[]> = {};
+        let changed = false;
+        for (const [folder, list] of Object.entries(prev)) {
+          const filtered = list.filter((s) => s.id !== id);
+          if (filtered.length !== list.length) changed = true;
+          next[folder] = filtered;
+        }
+        return changed ? next : prev;
+      });
       try {
         await window.hermesAPI.setSessionArchived(
           id,

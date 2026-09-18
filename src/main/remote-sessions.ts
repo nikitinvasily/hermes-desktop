@@ -437,9 +437,14 @@ export async function remoteListArchivedSessions(
   limit = 50,
   offset = 0,
 ): Promise<SessionSummary[]> {
+  // `/api/sessions` caps `limit` at 100 (422 above that); the Archive dialog
+  // asks for 200. Clamp here so the remote path returns rows instead of a
+  // validation error that rendered as an empty archive window (issue #57).
+  // No source filter: the local archived read includes cron rows too.
+  const boundedLimit = Math.max(1, Math.min(limit, 100));
   const response = await remoteRequestJson(
     config,
-    `/api/sessions?limit=${limit}&offset=${offset}&archived=only&order=recent`,
+    `/api/sessions?limit=${boundedLimit}&offset=${offset}&archived=only&order=recent`,
   );
   return sessionsFromResponse(response).map(normalizeSessionSummary);
 }
