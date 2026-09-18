@@ -2871,6 +2871,9 @@ body:has(.shell-vibrant),
   font-size: 12px;
   font-weight: 500;
   text-align: left;
+  /* Same muted color as the Projects/Chats section labels — one palette,
+     no extra greys (issue #72). */
+  color: var(--text-muted);
   transition:
     background var(--transition),
     color var(--transition);
@@ -2878,6 +2881,7 @@ body:has(.shell-vibrant),
 
 .sidebar-recent-project-heading:hover {
   background: var(--bg-tertiary);
+  color: var(--text-secondary);
 }
 
 .sidebar-recent-project-heading svg {
@@ -2912,7 +2916,7 @@ body:has(.shell-vibrant),
   cursor: pointer;
   text-align: left;
   font-family: var(--font-sans);
-  font-size: 12px;
+  font-size: 13px;
 
   transition: all var(--transition);
 }
@@ -2926,12 +2930,8 @@ body:has(.shell-vibrant),
   color: var(--text-muted);
 }
 
-.sidebar-recent-session-dot--active {
-  color: var(--accent-text, var(--accent));
-}
-
 .sidebar-recent-session-dot--loading {
-  color: var(--accent-text, var(--accent));
+  /* Neutral spinner: the base dot's muted color, no accent tint. */
   animation: spin 0.8s linear infinite;
 }
 
@@ -2946,9 +2946,10 @@ body:has(.shell-vibrant),
 }
 
 .sidebar-recent-session.active {
-  /* Active state is shown by the bullet + text color only — no filled
-     background (keeps the list visually quiet). */
-  color: var(--accent-text);
+  /* The active row carries the same highlight as hover (persistent
+     background), with no accent color — text and bullet stay neutral. */
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
 }
 
 .sidebar-recent-session-title {

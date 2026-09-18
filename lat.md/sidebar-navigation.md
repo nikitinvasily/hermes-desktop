@@ -6,6 +6,14 @@ The sidebar starts with New Chat, keeps app destinations pinned, then gives conv
 
 Layout passes the selected connection ID and profile into both session surfaces. Cache reads, sync, pagination, search, rename, and deletion therefore remain on that machine/profile instead of consulting a later global selection; see [[connections#Session locations]].
 
+## Active row highlight
+
+The current chat row carries a persistent quiet background fill (`--bg-tertiary` + `--text-primary`, the hover/focus treatment) instead of an accent tint (issue #72).
+
+There is no filled bullet or accent text color for the active row: the row looks identical whether the pointer is over it or not; only the background presence distinguishes it at rest. The highlight also persists while the agent is working in that chat (`run.loading`): the spinner already signals activity, so the `active` flag is `currentSessionId === s.id` without a `!loading` guard — previously every command run visually unfocused the current chat.
+
+Row titles render at 13px (one step up from the 12px chrome text), and the working-chat spinner uses the bullet's neutral muted color — no accent tint anywhere in the row. Project group headings render in the same `--text-muted` grey as the Projects/Chats section labels (one palette, no extra greys), lifting to `--text-secondary` on hover.
+
 ## Collapse toggle brand mark
 
 The sidebar header's collapse control doubles as the brand mark: collapsed it shows a circular dot that swaps to the expand icon on hover; expanded it is just the collapse icon, parked top-right for a clean, logo-free header.

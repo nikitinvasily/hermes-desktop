@@ -289,7 +289,6 @@ import {
   remoteStopGateway,
   remoteListProfiles,
   remoteCreateProfile,
-  remoteSetActiveProfile,
   remoteGetApiServerKeyStatus,
   remoteGenerateApiServerKey,
   remoteGetCredentialPool,

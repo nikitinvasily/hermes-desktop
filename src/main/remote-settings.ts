@@ -3,7 +3,7 @@ import { remoteDashboardRequestJson } from "./remote-api";
 import { remoteRequestJson } from "./remote-sessions";
 import { remoteGetHermesHome } from "./remote-metadata";
 import { parseMemoryLimitsConfig } from "./memory-limits";
-import type { MemoryInfo, MemoryEntry } from "./memory";
+import type { MemoryInfo } from "./memory";
 import type { ToolsetInfo } from "./tools";
 import type { MemoryProviderInfo } from "./installer";
 
