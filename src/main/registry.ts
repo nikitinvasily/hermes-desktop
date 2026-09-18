@@ -31,7 +31,7 @@ export type {
  */
 const REGISTRY_REPO = "fathah/hermes-registry";
 const REGISTRY_BRANCH = "main";
-const REGISTRY_RAW_BASE = `https://raw.githubusercontent.com/${REGISTRY_REPO}/refs/heads/${REGISTRY_BRANCH}`;
+export const REGISTRY_RAW_BASE = `https://raw.githubusercontent.com/${REGISTRY_REPO}/refs/heads/${REGISTRY_BRANCH}`;
 const REGISTRY_REPO_BASE = `https://github.com/${REGISTRY_REPO}/tree/${REGISTRY_BRANCH}`;
 // Icons are served by the registry web service (from its DB), not raw GitHub —
 // e.g. https://registry.hermesone.org/registry-icon/mcp/aws/icon.svg.
@@ -58,7 +58,7 @@ interface IndexEntry {
 }
 
 /** Per-entry manifest.json (mcp / agent / workflow). */
-interface EntryManifest {
+export interface EntryManifest {
   description?: string;
   // Matches the engine's accepted transports. "sse" must be preserved in the
   // written config — the engine only selects its SSE client when it sees it.
@@ -329,7 +329,7 @@ export async function fetchRegistryDetail(
   return detail;
 }
 
-async function fetchManifest(path: string): Promise<EntryManifest | null> {
+export async function fetchManifest(path: string): Promise<EntryManifest | null> {
   try {
     const res = await fetch(`${REGISTRY_RAW_BASE}/${path}/manifest.json`);
     if (!res.ok) return null;
@@ -351,7 +351,7 @@ let treeCache: { at: number; blobs: TreeBlob[] } | null = null;
 const TREE_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 /** All file paths under a folder, via the cached recursive git tree. */
-async function listFolderFiles(folder: string): Promise<string[]> {
+export async function listFolderFiles(folder: string): Promise<string[]> {
   if (!treeCache || Date.now() - treeCache.at >= TREE_CACHE_TTL_MS) {
     // Use GITHUB_TOKEN / GH_TOKEN when available to avoid anonymous
     // rate limits (60 req/h) on api.github.com.  Authenticated requests
@@ -405,7 +405,7 @@ function yamlScalar(value: string): string {
  * `transport: sse` and `headers`); a local server by `command` (+ `args`,
  * `env`). The engine discriminates purely on the presence of `url`.
  */
-function renderMcpYaml(id: string, m: EntryManifest): string {
+export function renderMcpYaml(id: string, m: EntryManifest): string {
   const lines: string[] = [`  ${id}:`];
   // Remote when the manifest carries a URL or declares an http/sse transport;
   // otherwise it's a stdio (subprocess) server.

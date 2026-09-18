@@ -75,7 +75,7 @@ function remoteConfigFilePath(home: string, profile?: string): string {
 let cachedHermesHome: { home: string; at: number } | null = null;
 const HOME_TTL_MS = 5 * 60 * 1000;
 
-async function remoteHome(
+export async function remoteHome(
   conn: ConnectionConfig,
   profile?: string,
 ): Promise<string> {
