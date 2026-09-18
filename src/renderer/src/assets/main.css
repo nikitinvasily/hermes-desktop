@@ -18068,10 +18068,21 @@ body:has(.shell-vibrant),
   border-radius: var(--radius-md);
   cursor: pointer;
   color: var(--text-primary);
+  /* Anchor the row's absolutely-positioned option buttons (issue #64). */
+  position: relative;
 }
 
 .archive-dialog-row:hover {
   background: var(--bg-tertiary);
+}
+
+/* The dialog rows reuse the sidebar's hover-reveal option buttons (Restore /
+   Trash); the sidebar reveals them via `.sidebar-recent-session:hover`, so the
+   archive rows need their own reveal rules or the buttons stay invisible
+   (opacity 0) even though they are clickable (issue #64). */
+.archive-dialog-row:hover .sidebar-recent-session-options,
+.archive-dialog-row:focus-within .sidebar-recent-session-options {
+  opacity: 1;
 }
 
 .archive-dialog-row-icon {
