@@ -714,6 +714,23 @@ interface HermesAPI {
     connectionId?: string,
     profile?: string,
   ) => Promise<Record<string, string>>;
+  listProjectGroupSessions: (
+    connectionId?: string,
+    profile?: string,
+  ) => Promise<
+    Record<
+      string,
+      Array<{
+        id: string;
+        title: string;
+        startedAt: number;
+        source: string;
+        messageCount: number;
+        model: string;
+        contextFolder: string | null;
+      }>
+    >
+  >;
   listProjects: (
     connectionId?: string,
     profile?: string,

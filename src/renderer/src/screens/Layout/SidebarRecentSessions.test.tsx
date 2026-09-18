@@ -39,6 +39,7 @@ beforeEach(() => {
       listCachedSessions,
       syncSessionCache,
       listProjectFolderNames: vi.fn(async () => ({})),
+      listProjectGroupSessions: vi.fn(async () => ({})),
       listProjects: vi.fn(async () => []),
       projectMutate: vi.fn(async () => undefined),
       getConnectionRegistry: vi.fn(async () => ({
