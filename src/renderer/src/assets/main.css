@@ -2871,6 +2871,10 @@ body:has(.shell-vibrant),
   font-size: 12px;
   font-weight: 500;
   text-align: left;
+  /* Grey one step lighter than the Projects/Chats section labels
+     (text-secondary vs text-muted) — project names read as content,
+     not chrome (issue #72). */
+  color: var(--text-secondary);
   transition:
     background var(--transition),
     color var(--transition);
@@ -2878,6 +2882,7 @@ body:has(.shell-vibrant),
 
 .sidebar-recent-project-heading:hover {
   background: var(--bg-tertiary);
+  color: var(--text-primary);
 }
 
 .sidebar-recent-project-heading svg {
