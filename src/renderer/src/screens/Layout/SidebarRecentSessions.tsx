@@ -1023,6 +1023,21 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         next.delete(id);
         return next;
       });
+      // The tree-derived group map (issue #57 stage 2) is not refetched after
+      // a delete; drop the row there too or the deleted chat resurrects in
+      // its project group from the stale tree until the next connection/
+      // profile change or restart (issue #80). Mirrors handleArchive.
+      setProjectGroupSessions((prev) => {
+        if (Object.keys(prev).length === 0) return prev;
+        const next: Record<string, RecentSession[]> = {};
+        let changed = false;
+        for (const [folder, list] of Object.entries(prev)) {
+          const filtered = list.filter((s) => s.id !== id);
+          if (filtered.length !== list.length) changed = true;
+          next[folder] = filtered;
+        }
+        return changed ? next : prev;
+      });
       try {
         await window.hermesAPI.deleteSession(id, connectionId, activeProfile);
         onSessionDeleted?.(id);

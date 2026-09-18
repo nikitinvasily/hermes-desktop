@@ -444,3 +444,90 @@ describe("SidebarRecentSessions ordering (issue #74)", () => {
     expect(titles[1]).toContain("Created late");
   });
 });
+
+describe("SidebarRecentSessions delete vs the tree-derived groups (issue #80)", () => {
+  interface TreeRow {
+    id: string;
+    title: string;
+    startedAt?: number;
+    lastActivityAt?: number;
+    contextFolder?: string | null;
+  }
+
+  function renderWithTreeGroups(
+    windowRows: TreeRow[],
+    treeGroups: Record<string, TreeRow[]>,
+  ): void {
+    listCachedSessions.mockImplementation(async () => windowRows);
+    syncSessionCache.mockImplementation(
+      async (): Promise<Array<Record<string, unknown>>> =>
+        windowRows as unknown as Array<Record<string, unknown>>,
+    );
+    Object.defineProperty(window, "hermesAPI", {
+      configurable: true,
+      writable: true,
+      value: {
+        ...(window.hermesAPI as unknown as Record<string, unknown>),
+        deleteSession: vi.fn(async () => undefined),
+        listProjectGroupSessions: vi.fn(
+          async (): Promise<Record<string, unknown>> =>
+            treeGroups as unknown as Record<string, unknown>,
+        ),
+      },
+    });
+    render(
+      <SidebarRecentSessions
+        open
+        connectionId="connection-main"
+        activeProfile="default"
+        currentSessionId={null}
+        loadingSessionIds={new Set()}
+        resumingSessionId={null}
+        onSelect={vi.fn()}
+        onNewChatInProject={vi.fn()}
+        onSessionDeleted={vi.fn()}
+        scrollRootRef={{ current: null }}
+      />,
+    );
+  }
+
+  async function deleteRowViaMenu(title: string): Promise<void> {
+    const row = await screen.findByText(title);
+    fireEvent.contextMenu(
+      row.closest(".sidebar-recent-session") as HTMLElement,
+    );
+    const deleteItem = await screen.findAllByText(
+      "navigation.sessionMenu.delete",
+    );
+    fireEvent.click(deleteItem[deleteItem.length - 1]);
+    const confirm = await screen.findByText(
+      "navigation.sessionMenu.deleteConfirmAction",
+    );
+    fireEvent.click(confirm);
+  }
+
+  it("removes a tree-group chat from its project group on delete, not only from the window", async () => {
+    // The chat exists ONLY in the tree-derived groups (issue #57 stage 2):
+    // the recency window already lost it, the projects tree still lists it.
+    renderWithTreeGroups(
+      [{ id: "session-loose", title: "Loose chat", contextFolder: null }],
+      {
+        "/tmp/proj": [
+          {
+            id: "session-tree",
+            title: "Tree-only chat",
+            contextFolder: "/tmp/proj",
+          },
+        ],
+      },
+    );
+
+    await screen.findByText("Tree-only chat");
+    await deleteRowViaMenu("Tree-only chat");
+
+    // The row must be gone from the rendered group immediately — not
+    // resurrected from the stale tree map until a restart (issue #80).
+    await screen.findByText("Loose chat");
+    expect(screen.queryByText("Tree-only chat")).toBeNull();
+  });
+});
