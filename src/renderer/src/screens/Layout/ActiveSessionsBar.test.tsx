@@ -33,7 +33,6 @@ describe("ActiveSessionsBar", () => {
       <ActiveSessionsBar
         runs={[run()]}
         activeRunId="run-1"
-        onSelect={() => {}}
         onClose={() => {}}
         onNew={() => {}}
       />,
@@ -51,7 +50,6 @@ describe("ActiveSessionsBar", () => {
       <ActiveSessionsBar
         runs={[run({ sessionId: "session-1", title: "Help with coding" })]}
         activeRunId="run-1"
-        onSelect={() => {}}
         onClose={() => {}}
         onNew={onNew}
       />,
@@ -69,7 +67,6 @@ describe("ActiveSessionsBar", () => {
       <ActiveSessionsBar
         runs={[run({ sessionId: "session-1" })]}
         activeRunId="run-1"
-        onSelect={() => {}}
         onClose={() => {}}
         onNew={() => {}}
       />,
@@ -78,5 +75,57 @@ describe("ActiveSessionsBar", () => {
     expect(screen.getByRole("tab")).toHaveTextContent(
       "sessions.newConversation",
     );
+  });
+
+  it("renders only the active run's tab when background runs exist (issue #78)", () => {
+    const onClose = vi.fn();
+    render(
+      <ActiveSessionsBar
+        runs={[
+          run({ runId: "run-1", sessionId: "session-1", title: "Foreground" }),
+          run({
+            runId: "run-2",
+            connectionId: "connection-remote",
+            profile: "remote-agent",
+            sessionId: "session-2",
+            title: "Background",
+            loading: true,
+          }),
+        ]}
+        activeRunId="run-1"
+        onClose={onClose}
+        onNew={() => {}}
+      />,
+    );
+
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0]).toHaveTextContent("Foreground");
+    expect(tabs[0]).not.toHaveTextContent("Background");
+
+    fireEvent.click(screen.getByRole("button", { name: "sessions.closeTab" }));
+    expect(onClose).toHaveBeenCalledWith("run-1");
+  });
+
+  it("keeps the strip empty when the active run is blank even if background runs are live", () => {
+    render(
+      <ActiveSessionsBar
+        runs={[
+          run(),
+          run({
+            runId: "run-2",
+            profile: "remote-agent",
+            sessionId: "session-2",
+            title: "Background",
+            loading: true,
+          }),
+        ]}
+        activeRunId="run-1"
+        onClose={() => {}}
+        onNew={() => {}}
+      />,
+    );
+
+    expect(screen.queryByRole("tab")).toBeNull();
   });
 });

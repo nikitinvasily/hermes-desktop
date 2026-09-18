@@ -42,11 +42,11 @@ A native system strip pinned full-width beneath the sidebar+content row surfaces
 
 Visually the strip is a Safari-style tab bar: the strip uses the darker `--bg-secondary` toolbar shade; tabs are flat (no border/fill) and separated by thin vertical dividers drawn with an `::before` on each non-first chip. The active tab fills with `--bg-primary` — the same colour as the transparent content area below it — and rounds its top corners, so it docks into the page; the dividers flanking the active tab are hidden for a seamless join.
 
-## Blank until a real session exists
+## One tab: the active session only
 
-The bar always renders so it is always a drag area, but chips stay hidden only while the sole conversation is still a blank scratch chat.
+The bar always renders so it is always a drag area, but its chip stays hidden while the active conversation is still a blank scratch chat.
 
-Chips show when more than one run is open, any run is loading, or any run has a session id/title (`showChips` in [[src/renderer/src/screens/Layout/ActiveSessionsBar.tsx#ActiveSessionsBar]]). A loading chip renders a thinking-orbs [[loading-indicators|OrbLoader]] (`composing`, size 20) in place of its profile avatar — the orb's canvas is transparent and theme-aware, so `.active-session-chip-orb` drops the colour-filled avatar circle rather than painting the profile colour behind it. When chips show, a browser-style new-tab **"+"** button (`.active-session-new`, `no-drag`) trails them and calls `onNew` → `handleNewChat` in [[src/renderer/src/screens/Layout/Layout.tsx]] to open a fresh conversation.
+Exactly one chip is rendered — the ACTIVE run's (issue #78: background tabs removed from the strip; the sidebar is the switcher). It shows when the active run has a session id, is loading, or has a title (`showChips` in [[src/renderer/src/screens/Layout/ActiveSessionsBar.tsx#ActiveSessionsBar]]). Background runs stay mounted and streaming; they are reachable via the sidebar row click (live-session run activation) and the tab-cycling shortcuts (Cmd/Ctrl+1..9, Cmd/Ctrl+Shift+[/]), they just have no chip. A loading chip renders a thinking-orbs [[loading-indicators|OrbLoader]] (`composing`, size 20) in place of its profile avatar — the orb's canvas is transparent and theme-aware, so `.active-session-chip-orb` drops the colour-filled avatar circle rather than painting the profile colour behind it. When the chip shows, a browser-style new-tab **"+"** button (`.active-session-new`, `no-drag`) trails it and calls `onNew` → `handleNewChat` in [[src/renderer/src/screens/Layout/Layout.tsx]] to open a fresh conversation.
 
 Because the bar doubles as the drag strip, [[src/renderer/src/screens/Layout/Layout.tsx]] renders it as the first child of `.content`; the verify-warning banner (when shown) sits just below it, clear of the drag layer.
 

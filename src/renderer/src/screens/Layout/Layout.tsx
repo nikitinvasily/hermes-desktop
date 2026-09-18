@@ -1179,7 +1179,6 @@ function Layout({
           <ActiveSessionsBar
             runs={runs}
             activeRunId={activeRunId}
-            onSelect={handleActivateRun}
             onClose={handleCloseRun}
             onNew={handleNewChat}
             getAppearance={getAppearance}
