@@ -33,6 +33,13 @@ export interface SessionSummary {
   id: string;
   source: string;
   startedAt: number;
+  /**
+   * Last activity (state.db `last_activity_at`, dashboard `last_active`),
+   * falling back to `startedAt` when the backend does not provide it.
+   * Drives the sidebar's by-modification ordering (issue #74); optional so
+   * surfaces that do not care keep compiling.
+   */
+  lastActivityAt?: number | null;
   endedAt: number | null;
   messageCount: number;
   model: string;
@@ -268,6 +275,29 @@ function getDb(readonly = true, profile?: unknown): Database.Database | null {
   return getDbConnection(readonly, profile);
 }
 
+/**
+ * True when the sessions table carries the agent's `last_activity_at`
+ * column; listings order and expose by-modification data only when it does
+ * (older databases keep the started_at behavior, issue #74).
+ */
+export function hasLastActivityColumn(db: Database.Database): boolean {
+  const columns = db.prepare("PRAGMA table_info(sessions)").all() as Array<{
+    name: string;
+  }>;
+  return columns.some((column) => column.name === "last_activity_at");
+}
+
+/**
+ * ORDER BY expression for by-modification ordering (issue #74): last
+ * activity when the column exists, else plain started_at. The paired SELECT
+ * list must add `s.last_activity_at` only under the same guard.
+ */
+function lastActivityOrder(db: Database.Database): string {
+  return hasLastActivityColumn(db)
+    ? "ORDER BY COALESCE(s.last_activity_at, s.started_at) DESC"
+    : "ORDER BY s.started_at DESC";
+}
+
 export function listSessions(
   limit = 30,
   offset = 0,
@@ -283,19 +313,21 @@ export function listSessions(
         s.id,
         s.source,
         s.started_at,
+        ${hasLastActivityColumn(db) ? "s.last_activity_at," : ""}
         s.ended_at,
         s.message_count,
         s.model,
         s.title
       FROM sessions s
       WHERE ${sessionVisibilityPredicate(db)}
-      ORDER BY s.started_at DESC
+      ${lastActivityOrder(db)}
       LIMIT ? OFFSET ?`,
     )
     .all(limit, offset) as Array<{
     id: string;
     source: string;
     started_at: number;
+    last_activity_at?: number | null;
     ended_at: number | null;
     message_count: number;
     model: string;
@@ -306,6 +338,7 @@ export function listSessions(
     id: r.id,
     source: r.source,
     startedAt: r.started_at,
+    lastActivityAt: r.last_activity_at ?? r.started_at,
     endedAt: r.ended_at,
     messageCount: r.message_count,
     model: r.model || "",
@@ -362,6 +395,7 @@ export function listArchivedSessions(
         s.id,
         s.source,
         s.started_at,
+        ${hasLastActivityColumn(db) ? "s.last_activity_at," : ""}
         s.ended_at,
         s.message_count,
         s.model,
@@ -370,13 +404,14 @@ export function listArchivedSessions(
         s.git_repo_root
       FROM sessions s
       WHERE s.archived = 1
-      ORDER BY s.started_at DESC
+      ${lastActivityOrder(db)}
       LIMIT ? OFFSET ?`,
     )
     .all(limit, offset) as Array<{
     id: string;
     source: string;
     started_at: number;
+    last_activity_at?: number | null;
     ended_at: number | null;
     message_count: number;
     model: string;
@@ -390,6 +425,7 @@ export function listArchivedSessions(
       id: r.id,
       source: r.source,
       startedAt: r.started_at,
+      lastActivityAt: r.last_activity_at ?? r.started_at,
       endedAt: r.ended_at,
       messageCount: r.message_count,
       model: r.model || "",

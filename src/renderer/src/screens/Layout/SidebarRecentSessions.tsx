@@ -38,6 +38,13 @@ interface RecentSession {
   contextFolder?: string | null;
   /** Recency timestamp when known (cached/tree rows); absent on pending rows. */
   startedAt?: number;
+  /** By-modification ordering key (issue #74); startedAt fallback. */
+  lastActivityAt?: number;
+}
+
+/** Recency key for sidebar ordering (issue #74): last activity, startedAt fallback. */
+function activityKey(s: RecentSession): number {
+  return s.lastActivityAt ?? s.startedAt ?? 0;
 }
 
 // ChatGPT-style paged conversation list under the pinned app navigation.
@@ -320,15 +327,19 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         title: string;
         contextFolder?: string | null;
         startedAt?: number;
+        lastActivityAt?: number;
       }>,
       limit = RECENT_SESSIONS_PAGE_SIZE,
     ): RecentSession[] =>
-      list.slice(0, limit).map(({ id, title, contextFolder, startedAt }) => ({
-        id,
-        title,
-        contextFolder: contextFolder ?? null,
-        startedAt,
-      })),
+      list
+        .slice(0, limit)
+        .map(({ id, title, contextFolder, startedAt, lastActivityAt }) => ({
+          id,
+          title,
+          contextFolder: contextFolder ?? null,
+          startedAt,
+          lastActivityAt: lastActivityAt ?? startedAt,
+        })),
     [],
   );
 
@@ -578,11 +589,12 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
               title: s.title,
               contextFolder: rowFolder,
               startedAt: s.startedAt,
+              lastActivityAt: s.lastActivityAt,
             });
           }
         }
         for (const list of Object.values(next)) {
-          list.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
+          list.sort((a, b) => activityKey(b) - activityKey(a));
         }
         setProjectGroupSessions(next);
       })
@@ -696,14 +708,17 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     const base = groupSessionsByWorkspace(
       sessions.filter((s) => !pinnedIds.has(s.id)),
     );
-    // Agent-side project folders with zero sessions still render as (empty)
-    // groups (issue #27) — without this a just-created project is invisible
-    // until its first chat exists.
-    let groups = base.projectGroups;
+    // Inside-group order is by-modification (issue #74): the main side sorts
+    // its lists, but re-sorting here keeps groups correct even when a window
+    // arrives unsorted (remote fallback paths).
+    let groups = base.projectGroups.map((g) => ({
+      ...g,
+      sessions: [...g.sessions].sort((a, b) => activityKey(b) - activityKey(a)),
+    }));
     // Complete per-project membership from the agent's projects tree (issue
     // #57, stage 2): window rows and tree rows merge per folder, deduped by
     // session id (window rows win — they carry fresher titles), recency order
-    // kept by startedAt descending.
+    // kept by last activity descending (issue #74).
     const treeFolders = Object.keys(projectGroupSessions);
     if (treeFolders.length > 0) {
       const merged = groups.map((g) => {
@@ -714,7 +729,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
           ...g.sessions,
           ...extra.filter((s) => !seen.has(s.id)),
         ];
-        combined.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
+        combined.sort((a, b) => activityKey(b) - activityKey(a));
         return { ...g, sessions: combined };
       });
       const known = new Set(merged.map((g) => g.path));
@@ -789,6 +804,8 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
       }
       groups = [...groups, ...extra];
     }
+    // Flat Chats list: by-modification order (issue #74).
+    base.chats.sort((a, b) => activityKey(b) - activityKey(a));
     return { projectGroups: groups, chats: base.chats };
   }, [sessions, pinnedIds, projects, projectGroupSessions]);
   // Resolve each group's display name: the agent project's human name when
@@ -809,6 +826,22 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     (path: string): string =>
       projectNames[path] || projectNamesFromList[path] || folderName(path),
     [projectNames, projectNamesFromList],
+  );
+
+  // Stable alphabetical project order (issue #74): archiving a chat must not
+  // reshuffle the Projects section, so groups sort by display name
+  // (locale-aware), not by their sessions' recency.
+  const sortedProjectGroups = useMemo(
+    () =>
+      [...projectGroups].sort((a, b) => {
+        const na = displayName(a.path);
+        const nb = displayName(b.path);
+        return (
+          na.localeCompare(nb, undefined, { sensitivity: "base" }) ||
+          a.path.localeCompare(b.path)
+        );
+      }),
+    [projectGroups, displayName],
   );
 
   // Choices for "Move to project": EVERY loaded agent project (zero-session
@@ -1278,7 +1311,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
               }`}
             >
               <div className="sidebar-recent-collapse-inner">
-                {projectGroups.map((group) => {
+                {sortedProjectGroups.map((group) => {
                   const projectOpen = !closedProjectFolders.has(group.path);
                   const visible = expanded && projectsOpen && projectOpen;
                   // The agent-side project record for this group, when the

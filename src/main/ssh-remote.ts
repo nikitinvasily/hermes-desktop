@@ -1388,9 +1388,11 @@ conn.row_factory = sqlite3.Row
 # the legacy unfiltered behavior.
 cols = [row[1] for row in conn.execute("PRAGMA table_info(sessions)")]
 vis = "WHERE archived = 0" if "archived" in cols else ""
+order = "COALESCE(last_activity_at, started_at)" if "last_activity_at" in cols else "started_at"
+sel = ", last_activity_at" if "last_activity_at" in cols else ""
 rows = conn.execute(
-    "SELECT id, source, started_at, ended_at, message_count, model, title, cwd, git_repo_root "
-    f"FROM sessions {vis} ORDER BY started_at DESC LIMIT ? OFFSET ?",
+    f"SELECT id, source, started_at{sel}, ended_at, message_count, model, title, cwd, git_repo_root "
+    f"FROM sessions {vis} ORDER BY {order} DESC LIMIT ? OFFSET ?",
     (limit, offset)
 ).fetchall()
 result = []
@@ -1418,7 +1420,9 @@ for r in rows:
             folder = None
     result.append({
         "id": r["id"], "source": r["source"] or "cli",
-        "startedAt": r["started_at"], "endedAt": r["ended_at"],
+        "startedAt": r["started_at"],
+        "lastActivityAt": r["last_activity_at"] if "last_activity_at" in r.keys() else (r["started_at"] or 0),
+        "endedAt": r["ended_at"],
         "messageCount": r["message_count"] or 0, "model": r["model"] or "",
         "title": r["title"], "preview": "", "contextFolder": folder
     })
@@ -1508,9 +1512,11 @@ conn.row_factory = sqlite3.Row
 cols = [row[1] for row in conn.execute("PRAGMA table_info(sessions)")]
 if "archived" not in cols:
     print("[]"); sys.exit(0)
+order = "COALESCE(last_activity_at, started_at)" if "last_activity_at" in cols else "started_at"
+sel = ", last_activity_at" if "last_activity_at" in cols else ""
 rows = conn.execute(
-    "SELECT id, source, started_at, ended_at, message_count, model, title, cwd, git_repo_root "
-    "FROM sessions WHERE archived = 1 ORDER BY started_at DESC LIMIT ? OFFSET ?",
+    f"SELECT id, source, started_at{sel}, ended_at, message_count, model, title, cwd, git_repo_root "
+    f"FROM sessions WHERE archived = 1 ORDER BY {order} DESC LIMIT ? OFFSET ?",
     (limit, offset)
 ).fetchall()
 result = []
@@ -1532,7 +1538,9 @@ for r in rows:
             folder = None
     result.append({
         "id": r["id"], "source": r["source"] or "cli",
-        "startedAt": r["started_at"], "endedAt": r["ended_at"],
+        "startedAt": r["started_at"],
+        "lastActivityAt": r["last_activity_at"] if "last_activity_at" in r.keys() else (r["started_at"] or 0),
+        "endedAt": r["ended_at"],
         "messageCount": r["message_count"] or 0, "model": r["model"] or "",
         "title": r["title"], "preview": "", "contextFolder": folder
     })
@@ -3407,6 +3415,7 @@ export async function sshListCachedSessions(
     id: s.id,
     title: s.title || s.id,
     startedAt: s.startedAt,
+    lastActivityAt: s.lastActivityAt ?? s.startedAt,
     source: s.source,
     messageCount: s.messageCount,
     model: s.model,

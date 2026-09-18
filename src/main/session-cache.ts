@@ -11,6 +11,7 @@ import {
 } from "../shared/session-title";
 import { getAppLocale } from "./locale";
 import { getDbConnection, sessionVisibilityPredicate } from "./db";
+import { hasLastActivityColumn } from "./sessions";
 import { getSessionContextFolders } from "./session-context-folder-store";
 import {
   filterDerivedWorkspaceFolders,
@@ -39,6 +40,8 @@ export interface CachedSession {
   id: string;
   title: string;
   startedAt: number;
+  /** By-modification ordering key (issue #74): last activity, startedAt fallback. */
+  lastActivityAt: number;
   source: string;
   messageCount: number;
   model: string;
@@ -91,6 +94,15 @@ function readCache(profile?: unknown): CacheData {
       sessions: Array.isArray(parsed.sessions)
         ? parsed.sessions.map((s) => ({
             ...s,
+            startedAt: typeof s.startedAt === "number" ? s.startedAt : 0,
+            // Caches written before issue #74 carry no lastActivityAt —
+            // degrade to startedAt until the next sync refreshes the field.
+            lastActivityAt:
+              typeof s.lastActivityAt === "number"
+                ? s.lastActivityAt
+                : typeof s.startedAt === "number"
+                  ? s.startedAt
+                  : 0,
             contextFolder:
               typeof s.contextFolder === "string" ? s.contextFolder : null,
           }))
@@ -164,9 +176,14 @@ export function syncSessionCache(profile?: unknown): CachedSession[] {
       .prepare(
         `SELECT s.id, s.started_at, s.source, s.message_count, s.model, s.title,
                 s.cwd, s.git_repo_root
+                ${hasLastActivityColumn(db) ? ", s.last_activity_at" : ""}
          FROM sessions s
          WHERE ${sessionVisibilityPredicate(db)}
-         ORDER BY s.started_at DESC`,
+         ORDER BY ${
+           hasLastActivityColumn(db)
+             ? "COALESCE(s.last_activity_at, s.started_at)"
+             : "s.started_at"
+         } DESC`,
       )
       .all() as Array<{
       id: string;
@@ -177,6 +194,7 @@ export function syncSessionCache(profile?: unknown): CachedSession[] {
       title: string | null;
       cwd: string | null;
       git_repo_root: string | null;
+      last_activity_at?: number | null;
     }>;
 
     // Index existing sessions by id once so the per-row update below is
@@ -195,6 +213,7 @@ export function syncSessionCache(profile?: unknown): CachedSession[] {
           messageCount: row.message_count,
           model: row.model || existing.model,
           title: row.title || existing.title,
+          lastActivityAt: row.last_activity_at ?? row.started_at,
         });
         continue;
       }
@@ -221,6 +240,7 @@ export function syncSessionCache(profile?: unknown): CachedSession[] {
         id: row.id,
         title,
         startedAt: row.started_at,
+        lastActivityAt: row.last_activity_at ?? row.started_at,
         source: row.source,
         messageCount: row.message_count,
         model: row.model || "",
@@ -249,7 +269,7 @@ export function syncSessionCache(profile?: unknown): CachedSession[] {
       localWorkspaceHomes(profile),
       localKnownProjectFolders(profile),
     );
-    allSessions.sort((a, b) => b.startedAt - a.startedAt);
+    allSessions.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
 
     const updated: CacheData = {
       sessions: allSessions,

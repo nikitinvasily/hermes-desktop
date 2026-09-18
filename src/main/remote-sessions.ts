@@ -258,13 +258,17 @@ function sessionTitle(row: RemoteRecord, id: string): string {
 
 function normalizeSessionSummary(row: RemoteRecord): SessionSummary {
   const id = stringValue(row.id, stringValue(row.session_id));
+  const startedAt = numberValue(
+    row.started_at,
+    numberValue(row.session_started, numberValue(row.last_active)),
+  );
   return {
     id,
     source: stringValue(row.source, "chat"),
-    startedAt: numberValue(
-      row.started_at,
-      numberValue(row.session_started, numberValue(row.last_active)),
-    ),
+    startedAt,
+    // By-modification ordering key (issue #74): the dashboard surfaces
+    // `last_active`; fall back to startedAt when the row lacks it.
+    lastActivityAt: numberValue(row.last_active, startedAt),
     endedAt: nullableNumber(row.ended_at),
     messageCount: numberValue(row.message_count),
     model: stringValue(row.model),
@@ -292,6 +296,7 @@ function normalizeCachedSession(row: RemoteRecord): CachedSession {
     id: summary.id,
     title: summary.title ?? sessionTitle(row, summary.id),
     startedAt: summary.startedAt,
+    lastActivityAt: summary.lastActivityAt ?? summary.startedAt,
     source: summary.source,
     messageCount: summary.messageCount,
     model: summary.model,

@@ -6,11 +6,13 @@ function row(
   id: string,
   contextFolder: string | null,
   startedAt = 1000,
+  lastActivityAt?: number,
 ): CachedSession {
   return {
     id,
     title: `Session ${id}`,
     startedAt,
+    lastActivityAt: lastActivityAt ?? startedAt,
     source: "chat",
     messageCount: 0,
     model: "",
