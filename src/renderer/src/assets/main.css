@@ -3507,8 +3507,10 @@ body:has(.shell-vibrant),
   position: relative;
   z-index: 1001;
   -webkit-app-region: drag;
-  min-height: 34px;
-  padding: 0 8px 0 12px;
+  /* Taller than the 34px global drag strip: with a single tab (issue #78) the
+     bar can afford more presence — bigger type and avatar — without crowding. */
+  min-height: 42px;
+  padding: 0 8px 0 14px;
   overflow-x: auto;
   /* Darker toolbar shade so the lighter active tab (--bg-primary) reads as
      part of the page below it. */
@@ -3529,20 +3531,20 @@ body:has(.shell-vibrant),
 .active-session-chip {
   display: flex;
   align-items: center;
-  gap: 6px;
-  max-width: 160px;
+  gap: 8px;
+  max-width: 240px;
   flex-shrink: 0;
   /* Opt out of the strip's drag region so the chip is clickable. */
   -webkit-app-region: no-drag;
   position: relative;
-  padding: 0 12px;
+  padding: 0 14px;
   border: none;
   border-radius: 8px 8px 0 0;
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
   font-family: var(--font-sans);
-  font-size: 12px;
+  font-size: 13px;
   white-space: nowrap;
   transition:
     background var(--transition),
@@ -3585,8 +3587,8 @@ body:has(.shell-vibrant),
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   line-height: 1;
 }
