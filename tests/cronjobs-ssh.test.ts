@@ -13,7 +13,7 @@ const { connectionRef, fetchSpy, sshConfig, sshRunCronSpy } = vi.hoisted(() => {
     sshConfig,
     connectionRef: {
       value: {
-        mode: "ssh" as const,
+        mode: "ssh" as "ssh" | "remote",
         ssh: sshConfig,
       },
     },
@@ -24,10 +24,13 @@ const { connectionRef, fetchSpy, sshConfig, sshRunCronSpy } = vi.hoisted(() => {
 
 vi.mock("../src/main/config", () => ({
   getConnectionConfig: () => connectionRef.value,
+  // Imported transitively via remote-sessions → session-cache → i18n/locale.
+  readDesktopConfig: () => ({}),
 }));
 
 vi.mock("../src/main/hermes", () => ({
   isRemoteMode: () => true,
+  isRemoteOnlyMode: () => connectionRef.value.mode === "remote",
   getApiUrl: () => "http://127.0.0.1:18642",
   getRemoteAuthHeader: () => ({}),
   normaliseRemoteUrl: (url: string) => url.replace(/\/+$/, ""),
