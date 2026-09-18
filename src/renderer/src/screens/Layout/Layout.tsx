@@ -11,6 +11,7 @@ import {
   isScratchRun,
   openSessionRunTransition,
   selectProfileRunTransition,
+  selectConnectionRunTransition,
   findRunByLocation,
   cycleRunId,
   runIdAtOrdinal,
@@ -51,6 +52,7 @@ import {
 } from "../../assets/icons";
 import type { LucideIcon } from "lucide-react";
 import { useI18n } from "../../components/useI18n";
+import type { ProjectInfo } from "../../../../shared/projects";
 
 type View =
   | "chat"
@@ -92,6 +94,65 @@ const SIDEBAR_WIDTH_MIN = 200;
 const SIDEBAR_WIDTH_MAX = 420;
 const SIDEBAR_SCROLLBAR_HIDE_MS = 700;
 
+/** Normalize a folder path for cross-connection comparison (separator and
+ *  trailing-slash only — case-sensitive, matching samePath semantics used
+ *  elsewhere in the sidebar). */
+function normFolderPath(p: string): string {
+  return p.replace(/\\/g, "/").replace(/\/+$/, "");
+}
+
+/**
+ * Find the folder on the TARGET connection equivalent to the departing chat's
+ * project folder (issue #70): an exact normalized path match first, then a
+ * project with the same NAME (paths differ between machines — the Mac keeps
+ * projects under ~/Documents, the server under /home/...). Returns null when
+ * nothing matches; the new chat then stays unbound.
+ */
+async function matchProjectFolderAcrossConnections(
+  departingFolder: string,
+  sourceConnectionId: string,
+  targetConnectionId: string,
+  profile: string,
+): Promise<string | null> {
+  let sourceProjects: ProjectInfo[];
+  let targetProjects: ProjectInfo[];
+  try {
+    [sourceProjects, targetProjects] = await Promise.all([
+      window.hermesAPI
+        .listProjects(sourceConnectionId, profile)
+        .catch((): ProjectInfo[] => []),
+      window.hermesAPI
+        .listProjects(targetConnectionId, profile)
+        .catch((): ProjectInfo[] => []),
+    ]);
+  } catch {
+    return null;
+  }
+  const norm = normFolderPath(departingFolder);
+  // 1. The very same folder path exists on the target connection.
+  for (const p of targetProjects) {
+    const folderHit = p.folders.find((f) => normFolderPath(f.path) === norm);
+    if (folderHit) return folderHit.path;
+    if (p.primaryPath && normFolderPath(p.primaryPath) === norm) {
+      return p.primaryPath;
+    }
+  }
+  // 2. Same project name: resolve which source project owns the departing
+  //    folder, then look for that name on the target connection.
+  const owner = sourceProjects.find(
+    (p) =>
+      p.folders.some((f) => normFolderPath(f.path) === norm) ||
+      (p.primaryPath !== null && normFolderPath(p.primaryPath) === norm),
+  );
+  if (!owner) return null;
+  const byName =
+    targetProjects.find((p) => p.name === owner.name) ??
+    targetProjects.find(
+      (p) => p.name.toLowerCase() === owner.name.toLowerCase(),
+    );
+  return byName?.primaryPath ?? null;
+}
+
 interface LayoutProps {
   connectionId: string;
   verifyWarning?: boolean;
@@ -121,34 +182,100 @@ function Layout({
   const [resumingSessionId, setResumingSessionId] = useState<string | null>(
     null,
   );
-  // Connection switches (status-bar chip or Settings) must not leave a chat
-  // from the previous connection visible. Same policy as profile switches:
-  // keep the old run mounted in the background, activate a run bound to the
-  // new connection. Runs on the previous connectionId stay reachable if the
-  // user switches back.
+  // Connection switches (status-bar chip or Settings) return to the last run
+  // that was active on the target connection (issue #70); runs on the previous
+  // connectionId stay mounted in the background and reachable when the user
+  // switches back. `lastActiveRunByConnection` remembers which run was visible
+  // per connection so a switch back reopens THAT conversation, not a scratch.
   const connectionIdRef = useRef(connectionId);
+  const lastActiveRunByConnection = useRef<Map<string, string>>(new Map());
+  // Set during render when a connection switch mints a scratch run that should
+  // be seeded with the equivalent project folder; consumed by the effect below.
+  const pendingSeedRef = useRef<{
+    departingFolder: string;
+    sourceConnectionId: string;
+    profile: string;
+    seedRunId: string;
+  } | null>(null);
   if (
     connectionIdRef.current !== connectionId &&
     // Skip the boot-time ""→real-id fill: the initial scratch run is minted
     // before the registry resolves and must not be treated as a switch.
     connectionIdRef.current !== ""
   ) {
+    const previousConnectionId = connectionIdRef.current;
+    const previousRunId = activeRunId;
+    const departingRun = runs.find((r) => r.runId === previousRunId);
     connectionIdRef.current = connectionId;
-    if (runs.length > 0) {
-      const next = selectProfileRunTransition(
-        runs,
-        activeRunId,
-        connectionId,
-        activeProfile,
+    // Remember the run we are leaving, so switching back returns to it. Only
+    // runs that actually belong to the departing connection count — the tab
+    // bar can activate a run from another connection without a connection
+    // switch, and recording that under the old connection would restore the
+    // wrong machine's chat.
+    if (
+      previousConnectionId &&
+      departingRun &&
+      departingRun.connectionId === previousConnectionId
+    ) {
+      lastActiveRunByConnection.current.set(
+        previousConnectionId,
+        previousRunId,
       );
-      if (next.activeRunId !== activeRunId || next.runs !== runs) {
-        // Defer the setState: this runs during render of a parent-driven
-        // update (App's connectionId changed); scheduling our own update in
-        // the same commit keeps React happy.
+    }
+    if (runs.length > 0) {
+      const restored = selectConnectionRunTransition(
+        runs,
+        connectionId,
+        lastActiveRunByConnection.current,
+      );
+      if (restored) {
+        // Restore even a pristine scratch: it is exactly what the user left
+        // on that connection. Run the state update via microtask (we are in
+        // render), and align activeProfile with the restored run.
+        const restoredRunId = restored.activeRunId;
         queueMicrotask(() => {
-          setRuns(next.runs);
-          setActiveRunId(next.activeRunId);
+          setRuns(restored.runs);
+          const restoredRun = restored.runs.find(
+            (r) => r.runId === restoredRunId,
+          );
+          if (restoredRun) setActiveProfile(restoredRun.profile);
+          setActiveRunId(restoredRunId);
         });
+      } else {
+        // No run on the target connection yet: mint a scratch (existing
+        // profile-switch semantics), then try to seed it with the equivalent
+        // project folder on the new connection (issue #70).
+        const next = selectProfileRunTransition(
+          runs,
+          activeRunId,
+          connectionId,
+          activeProfile,
+        );
+        if (next.activeRunId !== activeRunId || next.runs !== runs) {
+          queueMicrotask(() => {
+            setRuns(next.runs);
+            setActiveRunId(next.activeRunId);
+          });
+        }
+        const departingFolder =
+          departingRun?.contextFolder ??
+          departingRun?.initialContextFolder ??
+          null;
+        if (departingFolder) {
+          const seedRunId = next.runs.find(
+            (r) => r.runId === next.activeRunId,
+          )?.runId;
+          if (seedRunId) {
+            // Consumed by the effect below after this render commits — the
+            // async project match cannot run from render itself.
+            pendingSeedRef.current = {
+              departingFolder,
+              sourceConnectionId: previousConnectionId,
+              profile: departingRun?.profile ?? activeProfile,
+              seedRunId,
+            };
+          }
+        }
       }
     }
   }
@@ -289,6 +416,58 @@ function Layout({
   const handleRunTitle = useCallback((runId: string, title: string) => {
     setRuns((prev) => patchRun(prev, runId, { title }));
   }, []);
+  // Live context folder of each chat, reported from Chat.tsx (same pattern as
+  // onTitleChange) so a connection switch can carry the project over (issue #70).
+  const handleRunContextFolder = useCallback(
+    (runId: string, folder: string | null) => {
+      setRuns((prev) => {
+        const current = prev.find((r) => r.runId === runId);
+        if (!current || current.contextFolder === folder) return prev;
+        return patchRun(prev, runId, { contextFolder: folder });
+      });
+    },
+    [],
+  );
+  // Connection-switch project seeding (issue #70): after the switch commits,
+  // match the departed chat's project folder on the NEW connection (exact path
+  // first, then same project name via listProjects on both sides) and seed the
+  // freshly minted scratch run with it. Guarded so a resolved match only
+  // touches a run that is still a pristine scratch bound to the current
+  // connection — if the user typed, switched tabs, or switched connections
+  // again while the match was in flight, the seed is abandoned.
+  useEffect(() => {
+    const pending = pendingSeedRef.current;
+    pendingSeedRef.current = null;
+    if (!pending) return;
+    let cancelled = false;
+    void (async () => {
+      const matched = await matchProjectFolderAcrossConnections(
+        pending.departingFolder,
+        pending.sourceConnectionId,
+        connectionId,
+        pending.profile,
+      );
+      if (cancelled || !matched) return;
+      setRuns((prev) => {
+        const target = prev.find((r) => r.runId === pending.seedRunId);
+        if (
+          !target ||
+          !isScratchRun(target) ||
+          target.connectionId !== connectionId
+        ) {
+          return prev;
+        }
+        return patchRun(prev, pending.seedRunId, {
+          initialContextFolder: matched,
+          contextFolder: matched,
+        });
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // connectionId changes are exactly what pushes a new pendingSeed.
+  }, [connectionId]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
       return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true";
@@ -613,6 +792,13 @@ function Layout({
     (runId: string) => {
       const idx = runs.findIndex((r) => r.runId === runId);
       window.hermesAPI.abortChat(runId, runs[idx]?.connectionId);
+      // Drop any "last active on connection" memory pointing at the closed
+      // run, so a switch back falls back to the newest run there instead of
+      // trying to restore a gone id (issue #70).
+      for (const [conn, remembered] of lastActiveRunByConnection.current) {
+        if (remembered === runId)
+          lastActiveRunByConnection.current.delete(conn);
+      }
       const remaining = runs.filter((r) => r.runId !== runId);
       if (remaining.length === 0) {
         const fresh = mintRun(connectionId, activeProfile);
@@ -1033,6 +1219,7 @@ function Layout({
                   onLoadingChange={handleRunLoading}
                   onSessionIdChange={handleRunSessionId}
                   onTitleChange={handleRunTitle}
+                  onContextFolderChange={handleRunContextFolder}
                   agentAppearance={getAppearance(run.profile)}
                 />
               </div>

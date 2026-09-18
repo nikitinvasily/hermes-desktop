@@ -5,6 +5,7 @@ import {
   mintRun,
   openSessionRunTransition,
   runIdAtOrdinal,
+  selectConnectionRunTransition,
   selectProfileRunTransition,
   type ChatRun,
 } from "./chatRuns";
@@ -122,6 +123,7 @@ describe("chat run profile transitions", () => {
         sessionId: null,
         loading: false,
         initialContextFolder: null,
+        contextFolder: null,
       },
     ]);
     randomUUID.mockRestore();
@@ -173,6 +175,7 @@ describe("chat run profile transitions", () => {
       loading: false,
       seed: undefined,
       initialContextFolder: null,
+      contextFolder: null,
     });
     randomUUID.mockRestore();
   });
@@ -211,6 +214,72 @@ describe("chat run profile transitions", () => {
 
     expect(next.activeRunId).toBe("run-saved");
     expect(next.runs).toEqual([active, saved]);
+  });
+});
+
+describe("chat run connection transitions (issue #70)", () => {
+  const localRun = run("run-local", "default", {
+    connectionId: "connection-local",
+    sessionId: "session-local",
+  });
+  const remoteRun = run("run-remote", "default", {
+    connectionId: "connection-remote",
+    sessionId: "session-remote",
+  });
+
+  it("returns to the remembered run on the target connection", () => {
+    const memory = new Map([["connection-remote", "run-remote"]]);
+    const next = selectConnectionRunTransition(
+      [localRun, remoteRun],
+      "connection-remote",
+      memory,
+    );
+    expect(next?.activeRunId).toBe("run-remote");
+    expect(next?.runs).toHaveLength(2);
+  });
+
+  it("falls back to the newest run on the connection when nothing is remembered", () => {
+    const older = run("run-older", "default", {
+      connectionId: "connection-remote",
+    });
+    const next = selectConnectionRunTransition(
+      [localRun, older, remoteRun],
+      "connection-remote",
+      new Map(),
+    );
+    expect(next?.activeRunId).toBe("run-remote");
+  });
+
+  it("returns null when no run exists on the target connection", () => {
+    const next = selectConnectionRunTransition(
+      [localRun],
+      "connection-remote",
+      new Map([["connection-remote", "run-gone"]]),
+    );
+    expect(next).toBeNull();
+  });
+
+  it("ignores a remembered id that no longer maps to a run", () => {
+    const next = selectConnectionRunTransition(
+      [localRun],
+      "connection-local",
+      new Map([["connection-local", "run-closed"]]),
+    );
+    // Falls back to the newest local run instead of the stale memory.
+    expect(next?.activeRunId).toBe("run-local");
+  });
+
+  it("restores a pristine scratch run as-is (what the user left there)", () => {
+    const scratch = run("run-remote-scratch", "default", {
+      connectionId: "connection-remote",
+    });
+    const next = selectConnectionRunTransition(
+      [localRun, scratch],
+      "connection-remote",
+      new Map([["connection-remote", "run-remote-scratch"]]),
+    );
+    expect(next?.activeRunId).toBe("run-remote-scratch");
+    expect(next?.runs).toHaveLength(2);
   });
 });
 
