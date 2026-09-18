@@ -123,6 +123,11 @@ function folderName(path: string): string {
   return parts.at(-1) || path;
 }
 
+/** Normalize separators/trailing slashes so paths compare reliably. */
+function normalizeFolderPath(p: string): string {
+  return p.replace(/\\/g, "/").replace(/\/+$/, "");
+}
+
 function groupSessionsByWorkspace(sessions: RecentSession[]): {
   projectGroups: Array<{
     path: string;
@@ -729,6 +734,32 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
       }
       groups = [...merged, ...unseen];
     }
+    // Projects-only rule (issue #68): a folder with sessions but NO project
+    // record is not a project — its sessions belong to the flat Chats list,
+    // not a pseudo-group without edit/delete affordances. Applied only when
+    // the project list has LOADED (non-null): while it is still loading (or
+    // failed, e.g. a remote 401), keep the old behavior so groups do not
+    // vanish during transient errors.
+    if (projects !== null) {
+      const knownFolders = new Set<string>();
+      for (const p of projects) {
+        for (const f of p.folders) {
+          if (f.path) knownFolders.add(normalizeFolderPath(f.path));
+        }
+        if (p.primaryPath) knownFolders.add(normalizeFolderPath(p.primaryPath));
+      }
+      const kept: typeof groups = [];
+      let demoted: RecentSession[] = [];
+      for (const g of groups) {
+        if (knownFolders.has(normalizeFolderPath(g.path))) {
+          kept.push(g);
+        } else {
+          demoted = demoted.concat(g.sessions);
+        }
+      }
+      groups = kept;
+      if (demoted.length > 0) base.chats.push(...demoted);
+    }
     if (projects && projects.length > 0) {
       const known = new Set(groups.map((g) => g.path));
       const extra: Array<{
@@ -781,19 +812,23 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   );
 
   // Choices for "Move to project": EVERY loaded agent project (zero-session
-  // ones included — the same source as the Projects section, issue #36) plus
-  // session-derived folders that have no project record. Building this from
-  // session contextFolders alone hid projects whose sessions sat outside the
-  // loaded 50-row window (worst over SSH, where cwd-less cron rows crowd it).
+  // ones included — the same source as the Projects section, issue #36).
+  // Projects-only (issue #68): session-derived folders with no project
+  // record are no longer offered — a chat cannot be moved into a folder
+  // that is not a project. The session-derived pass below stays only as a
+  // fallback while the project list has not loaded (null), matching the
+  // Projects-section filter's graceful degradation.
   const projectChoices = useMemo<SidebarMenuProject[]>(() => {
     const byPath = new Map<string, SidebarMenuProject>();
-    for (const s of sessions) {
-      const folder = s.contextFolder?.trim();
-      if (folder && !byPath.has(folder)) {
-        byPath.set(folder, {
-          path: folder,
-          name: projectNames[folder] || folderName(folder),
-        });
+    if (projects === null) {
+      for (const s of sessions) {
+        const folder = s.contextFolder?.trim();
+        if (folder && !byPath.has(folder)) {
+          byPath.set(folder, {
+            path: folder,
+            name: projectNames[folder] || folderName(folder),
+          });
+        }
       }
     }
     for (const p of projects ?? []) {

@@ -40,7 +40,17 @@ beforeEach(() => {
       syncSessionCache,
       listProjectFolderNames: vi.fn(async () => ({})),
       listProjectGroupSessions: vi.fn(async () => ({})),
-      listProjects: vi.fn(async () => []),
+      // One project owning /tmp/proj so the shared fixtures group there;
+      // issue-#68 tests override this per-test.
+      listProjects: vi.fn(async () => [
+        {
+          id: "p-proj",
+          slug: "proj",
+          name: "Project",
+          primaryPath: "/tmp/proj",
+          folders: [{ path: "/tmp/proj", label: null, isPrimary: true }],
+        },
+      ]),
       projectMutate: vi.fn(async () => undefined),
       getConnectionRegistry: vi.fn(async () => ({
         version: 1 as const,
@@ -122,7 +132,7 @@ describe("SidebarRecentSessions new-chat buttons", () => {
 
     // Wait for the cache read to paint the project group.
     const btn = await screen.findByRole("button", {
-      name: "New chat in proj",
+      name: "New chat in Project",
     });
     fireEvent.click(btn);
 
@@ -142,5 +152,127 @@ describe("SidebarRecentSessions new-chat buttons", () => {
     expect(buttons).toHaveLength(1);
     fireEvent.click(buttons[0]);
     expect(onNewChatInProject).toHaveBeenCalledWith(null);
+  });
+});
+
+describe("SidebarRecentSessions projects-only groups (issue #68)", () => {
+  const listProjects = vi.fn();
+
+  function renderSidebarProjects(
+    projects: Array<{
+      id: string;
+      slug: string;
+      name: string;
+      primaryPath: string | null;
+      folders: Array<{ path: string; label?: string | null }>;
+    }> | null,
+  ): void {
+    Object.defineProperty(window, "hermesAPI", {
+      configurable: true,
+      writable: true,
+      value: {
+        ...(window.hermesAPI as unknown as Record<string, unknown>),
+        listProjects,
+      },
+    });
+    listProjects.mockImplementation(async () => projects);
+    render(
+      <SidebarRecentSessions
+        open
+        connectionId="connection-main"
+        activeProfile="default"
+        currentSessionId={null}
+        loadingSessionIds={new Set()}
+        resumingSessionId={null}
+        onSelect={vi.fn()}
+        onNewChatInProject={vi.fn()}
+        onSessionDeleted={vi.fn()}
+        scrollRootRef={{ current: null }}
+      />,
+    );
+  }
+
+  function renderSidebarProjectsFailed(): void {
+    Object.defineProperty(window, "hermesAPI", {
+      configurable: true,
+      writable: true,
+      value: {
+        ...(window.hermesAPI as unknown as Record<string, unknown>),
+        listProjects: vi.fn(async () => {
+          throw new Error("401 session_expired");
+        }),
+      },
+    });
+    render(
+      <SidebarRecentSessions
+        open
+        connectionId="connection-main"
+        activeProfile="default"
+        currentSessionId={null}
+        loadingSessionIds={new Set()}
+        resumingSessionId={null}
+        onSelect={vi.fn()}
+        onNewChatInProject={vi.fn()}
+        onSessionDeleted={vi.fn()}
+        scrollRootRef={{ current: null }}
+      />,
+    );
+  }
+
+  it("demotes sessions in a folder with no project record to Chats", async () => {
+    listCachedSessions.mockImplementation(
+      async (): Promise<
+        Array<{ id: string; title: string; contextFolder?: string | null }>
+      > => [
+        {
+          id: "session-proj",
+          title: "Project chat",
+          contextFolder: "/tmp/proj",
+        },
+        { id: "session-loose", title: "Loose chat", contextFolder: null },
+        { id: "session-misc", title: "Misc chat", contextFolder: "/tmp/misc" },
+      ],
+    );
+    syncSessionCache.mockImplementation(
+      async (): Promise<
+        Array<{ id: string; title: string; contextFolder?: string | null }>
+      > => [
+        {
+          id: "session-proj",
+          title: "Project chat",
+          contextFolder: "/tmp/proj",
+        },
+        { id: "session-loose", title: "Loose chat", contextFolder: null },
+        { id: "session-misc", title: "Misc chat", contextFolder: "/tmp/misc" },
+      ],
+    );
+    renderSidebarProjects([
+      {
+        id: "p1",
+        slug: "proj",
+        name: "Project",
+        primaryPath: "/tmp/proj",
+        folders: [{ path: "/tmp/proj" }],
+      },
+    ]);
+
+    // Wait for the project group to paint, then assert the misc chat is NOT
+    // in a group of its own: its title appears under Chats (flat list).
+    await screen.findByText("Project chat");
+    expect(screen.getByText("Misc chat")).toBeTruthy();
+    // The misc folder group heading must not render as a project group.
+    const headings = screen
+      .queryAllByText("misc")
+      .filter((el) => el.textContent?.trim() === "misc");
+    expect(headings).toHaveLength(0);
+  });
+
+  it("keeps pseudo-groups while the project list failed to load (401 fallback)", async () => {
+    renderSidebarProjectsFailed();
+    await screen.findByText("Project chat");
+    // The /tmp/proj group still renders (fallback behavior).
+    expect(
+      await screen.findByRole("button", { name: "New chat in proj" }),
+    ).toBeTruthy();
   });
 });
