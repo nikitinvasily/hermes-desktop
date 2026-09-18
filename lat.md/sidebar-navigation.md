@@ -56,7 +56,7 @@ Workspace-linked conversations are grouped under project rows so repository chat
 
 When [[src/renderer/src/screens/Chat/Chat.tsx#Chat]] saves a session context folder, it emits a renderer event that [[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx]] uses to force-refresh the cache. This keeps project grouping visible immediately after a workspace is linked.
 
-Projects and Chats are top-level collapsible sections, and each project folder can also be expanded or collapsed. [[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx]] persists those disclosure states in `localStorage`; the sidebar CSS keeps section and folder rows on the same left rail, keeps disclosure arrows right-aligned, animates each disclosure with grid-row transitions, and removes hidden rows from keyboard tab order.
+Projects and Chats are top-level collapsible sections, and each project folder can also be expanded or collapsed. [[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx]] persists those disclosure states in `localStorage`; the sidebar CSS keeps section and folder rows on the same left rail, animates each disclosure with grid-row transitions, and removes hidden rows from keyboard tab order. Section headers (Projects/Chats/Pinned) show their disclosure arrow snug against the label, while project folder rows carry no disclosure arrow at all (issue #60) — the whole row toggles, with `aria-expanded` kept for assistive tech.
 
 ### New chat from a heading
 
