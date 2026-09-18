@@ -121,6 +121,9 @@ interface ChatProps {
   onSessionIdChange?: (runId: string, sessionId: string | null) => void;
   /** Reports the first user message as a best-effort conversation title. */
   onTitleChange?: (runId: string, title: string) => void;
+  /** Reports the live working folder so the layout can carry the project
+   *  across connection switches (issue #70). */
+  onContextFolderChange?: (runId: string, folder: string | null) => void;
   /** Resolved avatar/colour of `profile`, so idle agent avatars in the
    *  transcript show the agent's profile picture instead of the loading gif. */
   agentAppearance?: { color?: string | null; avatar?: string | null };
@@ -140,6 +143,7 @@ function Chat({
   onLoadingChange,
   onSessionIdChange,
   onTitleChange,
+  onContextFolderChange,
   agentAppearance,
 }: ChatProps): React.JSX.Element {
   const { t } = useI18n();
@@ -306,6 +310,31 @@ function Chat({
       );
     };
   }, [hermesSessionId, contextFolder]);
+
+  // Report the live folder upward (issue #70): the layout keeps a per-run
+  // mirror of contextFolder so a connection switch can carry the project to
+  // the new connection. Fire-and-forget; parent dedupes no-ops.
+  useEffect(() => {
+    onContextFolderChange?.(runId, contextFolder);
+  }, [runId, contextFolder, onContextFolderChange]);
+
+  // Follow initialContextFolder changes while this chat is still pristine
+  // (connection-switch project seeding, issue #70): the cross-connection
+  // project match resolves AFTER this run mounted with a null folder. Once
+  // the user has sent anything (a session exists), later prop changes are
+  // ignored — the folder is the user's to control from then on.
+  const prevInitialFolderRef = useRef<string | null>(
+    initialContextFolder ?? null,
+  );
+  useEffect(() => {
+    const prev = prevInitialFolderRef.current;
+    const next = initialContextFolder ?? null;
+    if (prev === next) return;
+    prevInitialFolderRef.current = next;
+    if (hermesSessionId) return;
+    if (messagesRef.current.some((m) => m.role === "user")) return;
+    setContextFolder(next);
+  }, [initialContextFolder, hermesSessionId, messagesRef]);
 
   // Whether the worktree panel is visible (only applies when contextFolder is set)
   // Default false so the panel doesn't open automatically and interfere with scrolling

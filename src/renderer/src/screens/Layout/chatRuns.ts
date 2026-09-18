@@ -24,6 +24,10 @@ export interface ChatRun {
   /** Working folder the chat was created with (sidebar project `+`). Seeded
    *  into Chat's contextFolder state on mount; null = unbound chat. */
   initialContextFolder?: string | null;
+  /** Live working folder of the chat, reported upward from Chat.tsx so the
+   *  layout can carry the project across connection switches (issue #70).
+   *  Mirrors contextFolder in Chat state; starts at initialContextFolder. */
+  contextFolder?: string | null;
 }
 
 /** A blank chat that can be reassigned to another profile without losing work. */
@@ -49,6 +53,7 @@ export function mintRun(
     loading: false,
     seed,
     initialContextFolder: initialContextFolder ?? null,
+    contextFolder: initialContextFolder ?? null,
   };
 }
 
@@ -103,6 +108,40 @@ export function selectProfileRunTransition(
 
   const next = mintRun(connectionId, profile);
   return { activeRunId: next.runId, runs: [...runs, next] };
+}
+
+/**
+ * Connection-switch transition (issue #70): return to the last run that was
+ * active on the target connection, if one is still mounted. Unlike a profile
+ * switch, this deliberately REOPENS a conversation — the user asked to go back
+ * to that machine, so the chat they left there is what they expect to see.
+ *
+ * Returns null when no mounted run belongs to the target connection: the
+ * caller then falls back to selectProfileRunTransition (scratch run) plus an
+ * async project match to seed the new chat (see Layout.tsx).
+ */
+export function selectConnectionRunTransition(
+  runs: ChatRun[],
+  connectionId: string,
+  lastActiveRunIdByConnection: ReadonlyMap<string, string>,
+): { activeRunId: string; runs: ChatRun[] } | null {
+  const rememberedId = lastActiveRunIdByConnection.get(connectionId);
+  const remembered = rememberedId
+    ? runs.find((r) => r.runId === rememberedId)
+    : undefined;
+  if (remembered) {
+    return { activeRunId: remembered.runId, runs };
+  }
+  // No memory (e.g. first switch after launch): fall back to the most
+  // recently MINTED run on that connection — run order tracks mount order,
+  // and the last one is the newest conversation opened there.
+  const lastOnConnection = [...runs]
+    .reverse()
+    .find((r) => r.connectionId === connectionId);
+  if (lastOnConnection) {
+    return { activeRunId: lastOnConnection.runId, runs };
+  }
+  return null;
 }
 
 /**
