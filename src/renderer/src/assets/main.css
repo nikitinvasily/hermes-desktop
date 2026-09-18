@@ -2815,7 +2815,6 @@ body:has(.shell-vibrant),
 }
 
 .sidebar-recent-section-toggle span {
-  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2823,7 +2822,6 @@ body:has(.shell-vibrant),
 }
 
 .sidebar-recent-disclosure-icon {
-  margin-left: auto;
   color: var(--text-muted);
 }
 

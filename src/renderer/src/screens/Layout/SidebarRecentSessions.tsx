@@ -1333,17 +1333,6 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
                         >
                           <Folder size={13} />
                           <span>{displayName(group.path)}</span>
-                          {projectOpen ? (
-                            <ChevronDown
-                              className="sidebar-recent-disclosure-icon"
-                              size={12}
-                            />
-                          ) : (
-                            <ChevronRight
-                              className="sidebar-recent-disclosure-icon"
-                              size={12}
-                            />
-                          )}
                         </button>
                         {projectRecord && (
                           <>
