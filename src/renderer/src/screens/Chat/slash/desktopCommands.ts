@@ -65,7 +65,8 @@ export const DESKTOP_SLASH_COMMANDS: SlashCommandDefinition[] = [
   ...(
     [
       ["agents", "Open Agents page"],
-      ["office", "Open Office 3D page"],
+      // "office" is hidden at the fork level (issue #82) — no nav entry, no
+      // slash command.
       ["discover", "Open Discover page"],
       ["providers", "Open Providers page"],
       ["schedules", "Open Schedules page"],
