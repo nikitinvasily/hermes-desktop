@@ -25,6 +25,10 @@ import {
   dashboardChatEnabledForConnection,
   useDashboardChatTransport,
 } from "./hooks/useDashboardChatTransport";
+import {
+  connectionTransportRevision,
+  connectionTransportSignature,
+} from "./connectionTransport";
 import { useI18n } from "../../components/useI18n";
 import { useChatPreferences } from "../../components/ChatPreferencesProvider";
 import { buildChatTranscript } from "./transcriptUtils";
@@ -223,6 +227,10 @@ function Chat({
   >("auto");
   const [connectionModeLoaded, setConnectionModeLoaded] = useState(false);
   const [connectionRevision, setConnectionRevision] = useState(0);
+  // Last applied transport signature for THIS connection (issue #76): lets
+  // the connection-config listener ignore broadcasts that didn't change the
+  // transport (e.g. select-connection re-activating this chat's connection).
+  const connectionRevisionSignatureRef = useRef<string | null>(null);
   // Working folder bound to this conversation (issue #27). Per-conversation;
   // persisted per session so a re-opened conversation restores its folder, and
   // reset on new chat below.
@@ -390,6 +398,10 @@ function Chat({
                 ? (conn.sshChatTransport ?? "auto")
                 : "dashboard",
           );
+          if (connectionRevisionSignatureRef.current === null) {
+            connectionRevisionSignatureRef.current =
+              connectionTransportSignature(conn);
+          }
         }
       } catch {
         if (!cancelled) {
@@ -402,9 +414,13 @@ function Chat({
       }
     };
     void loadConnectionConfig();
+    // Re-bump the transport revision ONLY when the connection's transport
+    // parameters actually changed. `connection-config-changed` also fires for
+    // `select-connection`, which can merely RE-activate this chat's own
+    // connection (issue #76); a blind revision bump there tears down a
+    // healthy WebSocket mid-turn and freezes the chat's spinner.
     const unsubscribe = window.hermesAPI.onConnectionConfigChanged((conn) => {
       if (conn.connectionId !== connectionId) return;
-      setConnectionRevision((revision) => revision + 1);
       setConnectionModeLoaded(true);
       setConnectionMode(conn.mode);
       setRemoteMode(conn.mode !== "local");
@@ -415,6 +431,15 @@ function Chat({
             ? (conn.sshChatTransport ?? "auto")
             : "dashboard",
       );
+      setConnectionRevision((revision) =>
+        connectionTransportRevision(
+          conn,
+          revision,
+          connectionRevisionSignatureRef.current,
+        ),
+      );
+      connectionRevisionSignatureRef.current =
+        connectionTransportSignature(conn);
     });
     return (): void => {
       cancelled = true;
@@ -753,6 +778,17 @@ function Chat({
   const respondDashboardClarify = dashboardTransport.respondClarify;
   const sessionYolo = dashboardTransport.sessionYolo;
   const toggleSessionYolo = dashboardTransport.toggleSessionYolo;
+  const resyncAfterDetach = dashboardTransport.resyncAfterDetach;
+  const hasDetachedTurn = dashboardTransport.hasDetachedTurn;
+  // When this chat becomes visible again after its transport was torn down
+  // mid-turn (connection switch, issue #76), catch up: reconnect, resume the
+  // session (a still-running agent re-attaches its event stream) and
+  // reconcile the transcript with state.db. Runs once per detach; the
+  // transport clears the detached marker on success.
+  useEffect(() => {
+    if (!active || !hasDetachedTurn) return;
+    void resyncAfterDetach();
+  }, [active, hasDetachedTurn, resyncAfterDetach]);
   const handleClarifyRespond = useCallback(
     (msg: ClarifyMessage, answer: string): Promise<boolean> =>
       msg.responsePath === "dashboard"

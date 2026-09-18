@@ -12,6 +12,11 @@ import {
 } from "../dashboardEventAdapter";
 import { DashboardGatewayClient } from "../dashboardGatewayClient";
 import { executeSlash, type SlashExecOutcome } from "../slashExec";
+import {
+  dbItemsToChatMessages,
+  reconcileAfterDbRefresh,
+  type DbHistoryItem,
+} from "../sessionHistory";
 import type { AgentCommandsCatalogResponse } from "../slash/types";
 import type { ActiveTurn, Attachment, ChatMessage, UsageState } from "../types";
 import type { DesktopSessionContinuationItem } from "../../../../../shared/session-continuation";
@@ -116,6 +121,14 @@ interface UseDashboardChatTransportArgs {
 interface UseDashboardChatTransportResult {
   abort: () => void;
   enabled: boolean;
+  /** True while a turn was retired as "continues on the agent" after a
+   *  transport teardown (issue #76) and no resync has caught up yet. */
+  hasDetachedTurn: boolean;
+  /** Catch the chat up after its transport was torn down mid-turn (issue
+   *  #76): reconnect, resume the stored session (re-attaching the event
+   *  stream of a still-running agent), and reconcile the transcript with
+   *  state.db. No-op when there is nothing to resync. */
+  resyncAfterDetach: () => Promise<void>;
   /** Whether the live session's approval guard is bypassed (session.info
    *  `yolo`: OR of the per-session flag, process env, approvals.mode=off).
    *  null = not known yet (no session.info seen for this session). */
@@ -1134,7 +1147,61 @@ export function useDashboardChatTransport({
     appliedModelRef.current = null;
   }, [model, provider]);
 
+  // True when a previously-running turn was detached from its event stream
+  // (connection switch / WS drop) and retired with a "continues on the agent"
+  // marker (issue #76). Cleared once a resync catches the chat up. State (not
+  // just a ref) so the owning Chat re-renders and can trigger the resync.
+  const [detachedSessionId, setDetachedSessionId] = useState<string | null>(
+    null,
+  );
+  const detachedSessionIdRef = useRef<string | null>(null);
+  // The transport-binding effect below also runs on MOUNT, where there is
+  // nothing to tear down — retire only on an actual deps change.
+  const transportBoundRef = useRef(false);
+
+  // Retire a still-running turn whose event stream is going away (deliberate
+  // teardown or WebSocket drop): message.complete can no longer arrive, so
+  // clear the spinner and tell the user the agent keeps running server-side.
+  // The next prompt on this chat resumes the session, and session.resume
+  // replays/reconciles what was missed (issue #76).
+  const retireDetachedTurn = useCallback((): void => {
+    const activeTurn = activeTurnRef.current;
+    if (!activeTurn || activeTurn.status !== "running") return;
+    activeTurn.status = "failed";
+    activeTurnRef.current = null;
+    // Remember the session so a later reactivation can resync (issue #76).
+    detachedSessionIdRef.current = storedSessionIdRef.current;
+    setDetachedSessionId(storedSessionIdRef.current);
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `continued-${Date.now()}`,
+        role: "agent",
+        content:
+          "Connection switched — the turn continues on the agent. Reopen this chat to catch up on its result.",
+        pending: false,
+        localOnly: true,
+        ...(activeTurn.turnId ? { turnId: activeTurn.turnId } : {}),
+      },
+    ]);
+    setToolProgress(null);
+    setIsLoading(false);
+  }, [activeTurnRef, setIsLoading, setMessages, setToolProgress]);
+
+  // Latest-ref: the teardown effect and ensureClient's onClose must not
+  // re-run merely because this callback's identity changed (setter props can
+  // be unstable), so callers go through the ref.
+  const retireDetachedTurnRef = useRef(retireDetachedTurn);
+  retireDetachedTurnRef.current = retireDetachedTurn;
+
   useEffect(() => {
+    // Teardown of the transport binding (connection switch, profile switch,
+    // connection config change): the WebSocket is deliberately closed below,
+    // so a turn that is still running will never receive its
+    // message.complete. Retire it in the UI instead of leaving the spinner
+    // dangling forever (issue #76). Skipped on the initial mount.
+    if (transportBoundRef.current) retireDetachedTurnRef.current();
+    transportBoundRef.current = true;
     clientGenerationRef.current += 1;
     dashboardUnavailableRef.current = false;
     expirePendingApprovalsRef.current(true);
@@ -1493,6 +1560,12 @@ export function useDashboardChatTransport({
                 expirePendingClarifyRef.current(true);
                 expirePendingApprovalsRef.current(true);
                 clientRef.current = null;
+                // The socket dropped outside a deliberate teardown (tunnel
+                // blip, remote restart). A running turn can no longer hear
+                // its message.complete on THIS socket — retire it in the UI;
+                // ensureClient reconnects on the next prompt and
+                // session.resume reconciles the missed tail (issue #76).
+                retireDetachedTurnRef.current();
               }
             },
           });
@@ -2243,6 +2316,52 @@ export function useDashboardChatTransport({
       });
   }, [enabled]);
 
+  // Catch a chat up after its transport was torn down mid-turn (issue #76):
+  // reconnect, resume the stored session (the backend re-attaches the event
+  // stream of a STILL-RUNNING session via _resume_reuse_live, so further
+  // deltas/complete stream live again), and reconcile the transcript with the
+  // canonical state.db rows so anything emitted while detached appears.
+  // Failure is silent by design: the user can still send a new prompt, and
+  // ensureRuntimeSession performs the same resume on the next send.
+  const resyncAfterDetach = useCallback(async (): Promise<void> => {
+    // @lat: [[dashboard-detach#Resync on reactivation]]
+    if (!enabled) return;
+    const storedSessionId = storedSessionIdRef.current;
+    if (!storedSessionId) return;
+    try {
+      const client = await ensureClient();
+      if (clientRef.current !== client) return;
+      const response = await ensureRuntimeSession(client);
+      void response;
+      // Transcript catch-up over the canonical DB — the same path the legacy
+      // transport's end-of-stream refresh uses. Requires the raw DB items;
+      // getSessionMessages returns them per connection/profile.
+      const items = (await window.hermesAPI.getSessionMessages(
+        storedSessionIdRef.current ?? storedSessionId,
+        connectionId,
+        profile,
+      )) as unknown[];
+      const dbMessages = dbItemsToChatMessages(items as DbHistoryItem[]);
+      if (dbMessages.length > 0) {
+        flushDeltasNow(
+          reconcileAfterDbRefresh(messagesRef.current, dbMessages, {}),
+        );
+      }
+      detachedSessionIdRef.current = null;
+      setDetachedSessionId(null);
+    } catch {
+      // Leave the marker; a manual prompt retries the resume path.
+    }
+  }, [
+    connectionId,
+    ensureClient,
+    ensureRuntimeSession,
+    flushDeltasNow,
+    messagesRef,
+    profile,
+    enabled,
+  ]);
+
   useEffect(
     () => () => {
       expirePendingClarifyRef.current();
@@ -2256,6 +2375,8 @@ export function useDashboardChatTransport({
   return {
     abort,
     enabled,
+    hasDetachedTurn: detachedSessionId !== null,
+    resyncAfterDetach,
     sessionYolo,
     toggleSessionYolo,
     respondApproval,
