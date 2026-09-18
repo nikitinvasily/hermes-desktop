@@ -258,6 +258,7 @@ import {
   remoteUpdateSessionTitle,
   type RemoteSessionConfig,
 } from "../remote-sessions";
+import { remoteProjectGroupSessions } from "../project-group-sessions";
 import {
   remoteGetHermesHome,
   remoteGetHermesVersion,
@@ -3129,6 +3130,49 @@ export function registerIpcHandlers(context: IpcContext): void {
       getAllSessionContextFolders(undefined),
     );
   }
+
+  // Complete per-project session lists for the sidebar's project groups
+  // (issue #57, stage 2): the 50-row recency window truncates group
+  // membership, so counts breathe as unrelated sessions churn. Over
+  // Remote/SSH the agent's projects tree is the authoritative membership
+  // (full unarchived set, cron/kanban excluded); local connections need no
+  // supplement — syncSessionCache already reads the complete visible set.
+  ipcMain.handle(
+    "list-project-group-sessions",
+    (
+      _event,
+      connectionId?: string,
+      profile?: string,
+    ): Promise<Record<string, CachedSession[]>> => {
+      const conn = sessionConnection(connectionId);
+      const scopedProfile = activeSshProfile(profile);
+      const flatten = (groups: Map<string, CachedSession[]>): Record<
+        string,
+        CachedSession[]
+      > => {
+        const out: Record<string, CachedSession[]> = {};
+        for (const [folder, list] of groups) {
+          out[folder] = mergeRemoteBindings(list);
+        }
+        return out;
+      };
+      if (conn.mode === "remote")
+        return remoteProjectGroupSessions(
+          scopedRemoteSessionConfig(conn, scopedProfile),
+        ).then((result) => flatten(result.groups));
+      if (conn.mode === "ssh" && conn.ssh)
+        return withSshDashboardSessions(
+          conn,
+          (config) =>
+            remoteProjectGroupSessions(config).then((result) =>
+              flatten(result.groups),
+            ),
+          undefined,
+          scopedProfile,
+        ).catch(() => ({}));
+      return Promise.resolve({});
+    },
+  );
 
   // Session cache (fast local cache with generated titles)
   ipcMain.handle(

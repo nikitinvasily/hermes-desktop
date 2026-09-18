@@ -1382,9 +1382,15 @@ if not os.path.exists(db):
     print("[]"); sys.exit(0)
 conn = sqlite3.connect(db)
 conn.row_factory = sqlite3.Row
+# Visibility parity with the local read (sessionVisibilityPredicate) and the
+# dashboard route (archived=exclude): archived sessions must not surface in
+# the SSH fallback list (issue #57). Older databases without the column keep
+# the legacy unfiltered behavior.
+cols = [row[1] for row in conn.execute("PRAGMA table_info(sessions)")]
+vis = "WHERE archived = 0" if "archived" in cols else ""
 rows = conn.execute(
     "SELECT id, source, started_at, ended_at, message_count, model, title, cwd, git_repo_root "
-    "FROM sessions ORDER BY started_at DESC LIMIT ? OFFSET ?",
+    f"FROM sessions {vis} ORDER BY started_at DESC LIMIT ? OFFSET ?",
     (limit, offset)
 ).fetchall()
 result = []

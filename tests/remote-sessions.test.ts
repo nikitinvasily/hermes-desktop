@@ -100,7 +100,7 @@ describe("remote session REST bridge", () => {
 
         if (
           req.url ===
-          "/api/profiles/sessions?limit=2&offset=3&min_messages=0&archived=exclude&order=recent&profile=all"
+          "/api/profiles/sessions?limit=2&offset=3&min_messages=0&archived=exclude&order=recent&exclude_sources=cron&profile=all"
         ) {
           res.end(
             JSON.stringify({
@@ -124,7 +124,7 @@ describe("remote session REST bridge", () => {
 
         if (
           req.url ===
-          "/api/profiles/sessions?limit=50&offset=0&min_messages=0&archived=exclude&order=recent&profile=all"
+          "/api/profiles/sessions?limit=50&offset=0&min_messages=0&archived=exclude&order=recent&exclude_sources=cron&profile=all"
         ) {
           res.end(
             JSON.stringify({
@@ -194,7 +194,7 @@ describe("remote session REST bridge", () => {
 
         if (
           req.url ===
-          "/api/profiles/sessions?limit=75&offset=0&min_messages=0&archived=exclude&order=recent&profile=all"
+          "/api/profiles/sessions?limit=75&offset=0&min_messages=0&archived=exclude&order=recent&exclude_sources=cron&profile=all"
         ) {
           res.end(
             JSON.stringify({
@@ -301,7 +301,7 @@ describe("remote session REST bridge", () => {
 
     expect(requests[0]).toMatchObject({
       method: "GET",
-      url: "/api/profiles/sessions?limit=2&offset=3&min_messages=0&archived=exclude&order=recent&profile=all",
+      url: "/api/profiles/sessions?limit=2&offset=3&min_messages=0&archived=exclude&order=recent&exclude_sources=cron&profile=all",
       token: "test-token",
     });
     expect(sessions).toEqual([
@@ -395,7 +395,7 @@ describe("remote session REST bridge", () => {
       }
       if (
         req.url ===
-        "/api/sessions?limit=1&offset=0&archived=exclude&order=recent"
+        "/api/sessions?limit=1&offset=0&archived=exclude&order=recent&exclude_sources=cron"
       ) {
         res.end(
           JSON.stringify({
@@ -417,8 +417,8 @@ describe("remote session REST bridge", () => {
     const sessions = await remoteListSessions(config(), 1, 0);
 
     expect(requests.map((request) => request.url)).toEqual([
-      "/api/profiles/sessions?limit=1&offset=0&min_messages=0&archived=exclude&order=recent&profile=all",
-      "/api/sessions?limit=1&offset=0&archived=exclude&order=recent",
+      "/api/profiles/sessions?limit=1&offset=0&min_messages=0&archived=exclude&order=recent&exclude_sources=cron&profile=all",
+      "/api/sessions?limit=1&offset=0&archived=exclude&order=recent&exclude_sources=cron",
     ]);
     expect(sessions[0]).toMatchObject({ id: "legacy-sess", messageCount: 1 });
   });
@@ -503,7 +503,7 @@ describe("remote session REST bridge", () => {
       }
       if (
         req.url ===
-        "/api/profiles/sessions?limit=50&offset=0&min_messages=0&archived=exclude&order=recent&profile=all"
+        "/api/profiles/sessions?limit=50&offset=0&min_messages=0&archived=exclude&order=recent&exclude_sources=cron&profile=all"
       ) {
         res.end(
           JSON.stringify({
@@ -562,7 +562,7 @@ describe("remote session REST bridge", () => {
 
     await expect(remoteListCachedSessions(connection)).resolves.toEqual([]);
     expect(requestRemoteOAuthJson).toHaveBeenCalledWith(
-      "https://remote.example/api/profiles/sessions?limit=50&offset=0&min_messages=0&archived=exclude&order=recent&profile=work%20profile",
+      "https://remote.example/api/profiles/sessions?limit=50&offset=0&min_messages=0&archived=exclude&order=recent&exclude_sources=cron&profile=work%20profile",
       {},
     );
     expect(requests).toEqual([]);
@@ -678,7 +678,7 @@ describe("remote session REST bridge", () => {
 
     expect(requests.map((request) => request.url)).toEqual([
       "/api/sessions/search?q=Thinking%20aloud",
-      "/api/profiles/sessions?limit=75&offset=0&min_messages=0&archived=exclude&order=recent&profile=all",
+      "/api/profiles/sessions?limit=75&offset=0&min_messages=0&archived=exclude&order=recent&exclude_sources=cron&profile=all",
       "/api/sessions/sess-rich/messages",
     ]);
     expect(results).toEqual([

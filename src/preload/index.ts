@@ -988,6 +988,24 @@ const hermesAPI = {
   ): Promise<Record<string, string>> =>
     ipcRenderer.invoke("list-project-folder-names", connectionId, profile),
 
+  listProjectGroupSessions: (
+    connectionId?: string,
+    profile?: string,
+  ): Promise<
+    Record<
+      string,
+      Array<{
+        id: string;
+        title: string;
+        startedAt: number;
+        source: string;
+        messageCount: number;
+        model: string;
+        contextFolder: string | null;
+      }>
+    >
+  > => ipcRenderer.invoke("list-project-group-sessions", connectionId, profile),
+
   listProjects: (
     connectionId?: string,
     profile?: string,

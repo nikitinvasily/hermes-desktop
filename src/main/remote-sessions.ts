@@ -382,16 +382,21 @@ async function remoteSessionListPage(
   offset: number,
 ): Promise<unknown> {
   const profile = config.profile?.trim() || "all";
+  // `exclude_sources=cron` mirrors the core's own sidebar policy ("recents
+  // pass exclude_sources=cron ... so cron sessions can't starve recents"):
+  // a busy cron schedule constantly bumps its sessions' last_active and would
+  // crowd project sessions out of the recency window, making sidebar group
+  // counts fluctuate (issue #57).
   const profileEndpoint =
     `/api/profiles/sessions?limit=${limit}&offset=${offset}` +
-    `&min_messages=0&archived=exclude&order=recent&profile=${encodeURIComponent(profile)}`;
+    `&min_messages=0&archived=exclude&order=recent&exclude_sources=cron&profile=${encodeURIComponent(profile)}`;
 
   try {
     return await remoteRequestJson(config, profileEndpoint);
   } catch {
     return remoteRequestJson(
       config,
-      `/api/sessions?limit=${limit}&offset=${offset}&archived=exclude&order=recent`,
+      `/api/sessions?limit=${limit}&offset=${offset}&archived=exclude&order=recent&exclude_sources=cron`,
     );
   }
 }
@@ -432,9 +437,14 @@ export async function remoteListArchivedSessions(
   limit = 50,
   offset = 0,
 ): Promise<SessionSummary[]> {
+  // `/api/sessions` caps `limit` at 100 (422 above that); the Archive dialog
+  // asks for 200. Clamp here so the remote path returns rows instead of a
+  // validation error that rendered as an empty archive window (issue #57).
+  // No source filter: the local archived read includes cron rows too.
+  const boundedLimit = Math.max(1, Math.min(limit, 100));
   const response = await remoteRequestJson(
     config,
-    `/api/sessions?limit=${limit}&offset=${offset}&archived=only&order=recent`,
+    `/api/sessions?limit=${boundedLimit}&offset=${offset}&archived=only&order=recent`,
   );
   return sessionsFromResponse(response).map(normalizeSessionSummary);
 }

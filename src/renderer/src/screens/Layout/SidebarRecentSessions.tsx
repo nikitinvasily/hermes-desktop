@@ -37,6 +37,8 @@ interface RecentSession {
   id: string;
   title: string;
   contextFolder?: string | null;
+  /** Recency timestamp when known (cached/tree rows); absent on pending rows. */
+  startedAt?: number;
 }
 
 export interface SidebarSyncedIdsDetail {
@@ -257,6 +259,13 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   );
   const [pendingDeleteProject, setPendingDeleteProject] =
     useState<ProjectInfo | null>(null);
+  // Complete per-project session lists from the agent's projects tree
+  // (issue #57, stage 2). Over Remote/SSH the 50-row recency window truncates
+  // group membership; this map carries the full membership per folder. Empty
+  // until loaded and on local connections (the window already covers local).
+  const [projectGroupSessions, setProjectGroupSessions] = useState<
+    Record<string, RecentSession[]>
+  >({});
   const [deletingProject, setDeletingProject] = useState(false);
   const [projectError, setProjectError] = useState("");
   // Active connection mode — drives the dialog's folder picker (native vs
@@ -307,13 +316,15 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         id: string;
         title: string;
         contextFolder?: string | null;
+        startedAt?: number;
       }>,
       limit = RECENT_SESSIONS_PAGE_SIZE,
     ): RecentSession[] =>
-      list.slice(0, limit).map(({ id, title, contextFolder }) => ({
+      list.slice(0, limit).map(({ id, title, contextFolder, startedAt }) => ({
         id,
         title,
         contextFolder: contextFolder ?? null,
+        startedAt,
       })),
     [],
   );
@@ -553,6 +564,36 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     };
   }, [open, connectionId, activeProfile]);
 
+  // Load the complete per-project session lists (issue #57, stage 2) on the
+  // same triggers as the names map. A failure or local connection leaves an
+  // empty map — the window-derived groups stay in effect untouched.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setProjectGroupSessions({});
+    void window.hermesAPI
+      .listProjectGroupSessions(connectionId, activeProfile)
+      .then((groups) => {
+        if (cancelled) return;
+        const next: Record<string, RecentSession[]> = {};
+        for (const [folder, list] of Object.entries(groups ?? {})) {
+          next[folder] = (Array.isArray(list) ? list : []).map((s) => ({
+            id: s.id,
+            title: s.title,
+            contextFolder: folder,
+            startedAt: s.startedAt,
+          }));
+        }
+        setProjectGroupSessions(next);
+      })
+      .catch(() => {
+        /* window-derived groups remain */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, connectionId, activeProfile]);
+
   // Load the agent's project list (issue #27) — same triggers as the names
   // map, plus an explicit refresh() after mutations. The registry read gives
   // the active connection mode for the dialog's folder picker.
@@ -668,6 +709,40 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     // groups (issue #27) — without this a just-created project is invisible
     // until its first chat exists.
     let groups = base.projectGroups;
+    // Complete per-project membership from the agent's projects tree (issue
+    // #57, stage 2): window rows and tree rows merge per folder, deduped by
+    // session id (window rows win — they carry fresher titles), recency order
+    // kept by startedAt descending.
+    const treeFolders = Object.keys(projectGroupSessions);
+    if (treeFolders.length > 0) {
+      const merged = groups.map((g) => {
+        const extra = projectGroupSessions[g.path];
+        if (!extra || extra.length === 0) return g;
+        const seen = new Set(g.sessions.map((s) => s.id));
+        const combined = [
+          ...g.sessions,
+          ...extra.filter((s) => !seen.has(s.id)),
+        ];
+        combined.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
+        return { ...g, sessions: combined };
+      });
+      const known = new Set(merged.map((g) => g.path));
+      const unseen: Array<{
+        path: string;
+        name: string;
+        sessions: RecentSession[];
+      }> = [];
+      for (const folder of treeFolders) {
+        if (known.has(folder) || projectGroupSessions[folder].length === 0)
+          continue;
+        unseen.push({
+          path: folder,
+          name: folderName(folder),
+          sessions: [...projectGroupSessions[folder]],
+        });
+      }
+      groups = [...merged, ...unseen];
+    }
     if (projects && projects.length > 0) {
       const known = new Set(groups.map((g) => g.path));
       const extra: Array<{
@@ -730,7 +805,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
       chatsList = [...pendingChats, ...chatsList];
     }
     return { projectGroups: groups, chats: chatsList };
-  }, [sessions, pinnedIds, projects, visiblePendingRows]);
+  }, [sessions, pinnedIds, projects, visiblePendingRows, projectGroupSessions]);
   // Resolve each group's display name: the agent project's human name when
   // projects.db/the dashboard tree knows this folder, else the path's last
   // segment (issue #23). The projects list is a second name source so a
@@ -925,6 +1000,20 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         const next = new Set(prev);
         next.delete(id);
         return next;
+      });
+      // The tree-derived group map (issue #57 stage 2) is not refetched on
+      // this action; drop the row optimistically so an archived chat does
+      // not resurrect in its project group from the stale tree cache.
+      setProjectGroupSessions((prev) => {
+        if (Object.keys(prev).length === 0) return prev;
+        const next: Record<string, RecentSession[]> = {};
+        let changed = false;
+        for (const [folder, list] of Object.entries(prev)) {
+          const filtered = list.filter((s) => s.id !== id);
+          if (filtered.length !== list.length) changed = true;
+          next[folder] = filtered;
+        }
+        return changed ? next : prev;
       });
       try {
         await window.hermesAPI.setSessionArchived(
