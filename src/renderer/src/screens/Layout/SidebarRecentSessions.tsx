@@ -560,14 +560,24 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
       .listProjectGroupSessions(connectionId, activeProfile)
       .then((groups) => {
         if (cancelled) return;
+        // Key every row by its own (binding-merged) folder, not the tree
+        // node's folder: the main side re-homes rows per desktop bindings
+        // (issue #66), so a moved chat must leave the original project's
+        // list and land in the destination folder's list.
         const next: Record<string, RecentSession[]> = {};
         for (const [folder, list] of Object.entries(groups ?? {})) {
-          next[folder] = (Array.isArray(list) ? list : []).map((s) => ({
-            id: s.id,
-            title: s.title,
-            contextFolder: folder,
-            startedAt: s.startedAt,
-          }));
+          for (const s of Array.isArray(list) ? list : []) {
+            const rowFolder = s.contextFolder ?? folder;
+            (next[rowFolder] ??= []).push({
+              id: s.id,
+              title: s.title,
+              contextFolder: rowFolder,
+              startedAt: s.startedAt,
+            });
+          }
+        }
+        for (const list of Object.values(next)) {
+          list.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
         }
         setProjectGroupSessions(next);
       })
@@ -882,6 +892,33 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
           s.id === id ? { ...s, contextFolder: normalized } : s,
         ),
       );
+      // The tree-derived group map (issue #57 stage 2) is served from a
+      // server-cached tree and is not refetched on this action; re-home the
+      // row optimistically so a moved chat leaves its original project
+      // group immediately instead of lingering there until the next tree
+      // refetch (issue #66).
+      setProjectGroupSessions((prev) => {
+        if (Object.keys(prev).length === 0) return prev;
+        const next: Record<string, RecentSession[]> = {};
+        let changed = false;
+        let moved: RecentSession | null = null;
+        for (const [folder, list] of Object.entries(prev)) {
+          const row = list.find((s) => s.id === id) ?? null;
+          if (row) {
+            moved = row;
+            changed = true;
+          }
+          if (folder !== normalized)
+            next[folder] = list.filter((s) => s.id !== id);
+        }
+        if (normalized && moved) {
+          next[normalized] = [
+            { ...moved, contextFolder: normalized },
+            ...(next[normalized] ?? []),
+          ];
+        }
+        return changed ? next : prev;
+      });
       try {
         await window.hermesAPI.setSessionContextFolder(
           id,

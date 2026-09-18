@@ -1,6 +1,7 @@
 import type { RemoteSessionConfig } from "./remote-sessions";
 import { remoteRequestJson } from "./remote-sessions";
 import type { CachedSession } from "./session-cache";
+import { mergeDesktopBindingsIntoRemoteList } from "./project-names";
 
 /**
  * Complete per-project session lists for Remote/SSH sidebars (issue #57).
@@ -79,6 +80,40 @@ export interface ProjectGroupSessions {
   /** Group folder path → every non-archived, non-cron/kanban session the
    * agent's own grouping claims for it (recency-sorted, capped per project). */
   groups: Map<string, CachedSession[]>;
+}
+
+/**
+ * Re-home tree rows per the desktop Move-to-project bindings (issue #66).
+ * mergeDesktopBindingsIntoRemoteList relabels a row's folder, but a row
+ * bound to ANOTHER folder must also LEAVE the tree folder's list and land
+ * in the bound folder's list — otherwise a moved chat stays in its
+ * original project group. Sentinel ('') bindings (deliberate unlink) drop
+ * the row from every group; rows are deduped by id so a session never
+ * appears in two groups. Lists come back recency-sorted.
+ */
+export function regroupTreeSessionsByBindings(
+  groups: Map<string, CachedSession[]>,
+  bindings: Map<string, string>,
+): Record<string, CachedSession[]> {
+  const merged = mergeDesktopBindingsIntoRemoteList(
+    Array.from(groups.values()).flat(),
+    bindings,
+  );
+  const out: Record<string, CachedSession[]> = {};
+  const seen = new Set<string>();
+  for (const row of merged) {
+    const folder = row.contextFolder;
+    // null folder = deliberately unbound or filtered out — belongs to the
+    // flat Chats list, not a project group.
+    if (!folder) continue;
+    if (seen.has(row.id)) continue;
+    seen.add(row.id);
+    (out[folder] ??= []).push(row);
+  }
+  for (const list of Object.values(out)) {
+    list.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
+  }
+  return out;
 }
 
 /**
