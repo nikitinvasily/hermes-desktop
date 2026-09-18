@@ -264,7 +264,10 @@ import {
   remoteUpdateSessionTitle,
   type RemoteSessionConfig,
 } from "../remote-sessions";
-import { remoteProjectGroupSessions } from "../project-group-sessions";
+import {
+  remoteProjectGroupSessions,
+  regroupTreeSessionsByBindings,
+} from "../project-group-sessions";
 import {
   remoteGetHermesHome,
   remoteGetHermesVersion,
@@ -3125,15 +3128,15 @@ export function registerIpcHandlers(context: IpcContext): void {
     ): Promise<Record<string, CachedSession[]>> => {
       const conn = sessionConnection(connectionId);
       const scopedProfile = activeSshProfile(profile);
+      // Re-home tree rows per the desktop Move-to-project bindings (issue
+      // #66) — see regroupTreeSessionsByBindings in project-group-sessions.ts.
       const flatten = (
         groups: Map<string, CachedSession[]>,
-      ): Record<string, CachedSession[]> => {
-        const out: Record<string, CachedSession[]> = {};
-        for (const [folder, list] of groups) {
-          out[folder] = mergeRemoteBindings(list);
-        }
-        return out;
-      };
+      ): Record<string, CachedSession[]> =>
+        regroupTreeSessionsByBindings(
+          groups,
+          getAllSessionContextFolders(undefined),
+        );
       if (conn.mode === "remote")
         return remoteProjectGroupSessions(
           scopedRemoteSessionConfig(conn, scopedProfile),
