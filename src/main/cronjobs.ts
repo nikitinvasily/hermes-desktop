@@ -6,10 +6,12 @@ import { HERMES_HOME, HERMES_PYTHON, hermesCliArgs } from "./installer";
 import { profileHome } from "./utils";
 import {
   isRemoteMode,
+  isRemoteOnlyMode,
   getApiUrl,
   getRemoteAuthHeader,
   normaliseRemoteUrl,
 } from "./hermes";
+import { remoteRequestJson } from "./remote-sessions";
 import { getConnectionConfig } from "./config";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
 import { sshRunCron } from "./ssh-remote";
@@ -190,7 +192,11 @@ async function runNamedProfileSshCron(
   };
 }
 
-async function remoteFetch(
+// ---- SSH-tunnel cron helpers (flavor-probing fetch; only used when the
+// connection rides the SSH tunnel, whose local port may point at either the
+// unified dashboard or the legacy gateway api_server). ----
+
+async function sshCronFetch(
   path: string,
   init: RequestInit = {},
 ): Promise<Response> {
@@ -198,11 +204,15 @@ async function remoteFetch(
     ...getRemoteAuthHeader(),
     ...((init.headers as Record<string, string>) || {}),
   };
-  const apiUrl = await getCronApiUrl(headers);
-  return fetch(`${apiUrl}${path}`, { ...init, headers });
+  return fetch(`${await getSshCronApiUrl(headers)}${path}`, {
+    ...init,
+    headers,
+  });
 }
 
-async function getCronApiUrl(headers: Record<string, string>): Promise<string> {
+async function getSshCronApiUrl(
+  headers: Record<string, string>,
+): Promise<string> {
   try {
     return getApiUrl();
   } catch (err) {
@@ -218,12 +228,13 @@ async function getCronApiUrl(headers: Record<string, string>): Promise<string> {
     const fallbackUrl = normaliseRemoteUrl(
       `http://127.0.0.1:${conn.ssh.localPort}`,
     );
-    if (await isCronFallbackHealthy(fallbackUrl, headers)) return fallbackUrl;
+    if (await isSshCronFallbackHealthy(fallbackUrl, headers))
+      return fallbackUrl;
     throw err;
   }
 }
 
-async function isCronFallbackHealthy(
+async function isSshCronFallbackHealthy(
   apiUrl: string,
   headers: Record<string, string>,
 ): Promise<boolean> {
@@ -275,11 +286,14 @@ async function remoteCronFlavor(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 3000);
   try {
-    const res = await fetch(`${await getCronApiUrl(headers)}/api/cron/jobs`, {
-      method: "GET",
-      headers,
-      signal: controller.signal,
-    });
+    const res = await fetch(
+      `${await getSshCronApiUrl(headers)}/api/cron/jobs`,
+      {
+        method: "GET",
+        headers,
+        signal: controller.signal,
+      },
+    );
     return res.ok ? "dashboard" : "legacy";
   } catch {
     // Unreachable remote / dead tunnel: keep the legacy routes so the
@@ -288,6 +302,36 @@ async function remoteCronFlavor(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+// Direct remote (HTTP) connections always talk to the unified dashboard, whose
+// auth may be OAuth (cookie jar) rather than a static token. remoteRequestJson
+// routes oauth connections through the Electron cookie session — the same
+// transport every other remote-parity screen uses — and scopes requests to the
+// requested profile via ?profile=. The legacy /api/jobs gateway flavor probe
+// only applies to the SSH tunnel path further down, which can point at either
+// server kind.
+async function remoteCronJson<T>(
+  path: string,
+  options: {
+    method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+    body?: unknown;
+  } = {},
+  profile?: string,
+): Promise<T> {
+  const conn = getConnectionConfig();
+  if (conn.mode !== "remote") {
+    throw new Error("remoteCronJson is only available in direct remote mode.");
+  }
+  return remoteRequestJson<T>(
+    { remoteUrl: conn.remoteUrl, apiKey: conn.apiKey, profile },
+    path,
+    options,
+  );
+}
+
+function remoteCronErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 /**
@@ -311,7 +355,30 @@ export async function listCronJobs(
     return includeDisabled ? jobs : jobs.filter((job) => job.enabled);
   }
 
+  if (isRemoteOnlyMode()) {
+    // Direct remote: unified dashboard REST through the oauth-aware transport.
+    try {
+      const raw = await remoteCronJson<Record<string, unknown>[]>(
+        "/api/cron/jobs",
+        {},
+        profile,
+      );
+      const jobs: CronJob[] = [];
+      for (const job of raw) {
+        const normalized = normalizeJob(job);
+        if (!normalized) continue;
+        if (!includeDisabled && !normalized.enabled) continue;
+        jobs.push(normalized);
+      }
+      return jobs;
+    } catch (err) {
+      console.error("[CRON] remote list error:", remoteCronErrorMessage(err));
+      return [];
+    }
+  }
+
   if (isRemoteMode()) {
+    // SSH tunnel: flavor-probe between dashboard and gateway api_server.
     try {
       const headers = getRemoteAuthHeader();
       const flavor = await remoteCronFlavor(headers);
@@ -323,7 +390,7 @@ export async function listCronJobs(
         flavor === "dashboard"
           ? `/api/cron/jobs${includeDisabled ? "?include_disabled=true" : ""}${profileQs}`
           : `/api/jobs${includeDisabled ? "?include_disabled=true" : ""}`;
-      const res = await remoteFetch(path);
+      const res = await sshCronFetch(path);
       if (!res.ok) {
         console.error("[CRON] remote list failed:", await remoteJsonError(res));
         return [];
@@ -423,7 +490,30 @@ export async function createCronJob(
     return { success: sshResult.success, error: sshResult.error };
   }
 
+  if (isRemoteOnlyMode()) {
+    // Direct remote: unified dashboard REST through the oauth-aware transport.
+    try {
+      await remoteCronJson(
+        "/api/cron/jobs",
+        {
+          method: "POST",
+          body: {
+            name: name || "",
+            schedule,
+            prompt: prompt || "",
+            deliver: deliver || "local",
+          },
+        },
+        profile,
+      );
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: remoteCronErrorMessage(err) };
+    }
+  }
+
   if (isRemoteMode()) {
+    // SSH tunnel: flavor-probe between dashboard and gateway api_server.
     try {
       const headers = getRemoteAuthHeader();
       const flavor = await remoteCronFlavor(headers);
@@ -431,7 +521,7 @@ export async function createCronJob(
         flavor === "dashboard"
           ? `/api/cron/jobs${profile && profile !== "default" ? `?profile=${encodeURIComponent(profile)}` : ""}`
           : "/api/jobs";
-      const res = await remoteFetch(path, {
+      const res = await sshCronFetch(path, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -463,7 +553,22 @@ export async function removeCronJob(
   if (sshResult) {
     return { success: sshResult.success, error: sshResult.error };
   }
+  if (isRemoteOnlyMode()) {
+    // Direct remote: unified dashboard REST through the oauth-aware transport.
+    try {
+      await remoteCronJson(
+        `/api/cron/jobs/${encodeURIComponent(jobId)}`,
+        { method: "DELETE" },
+        profile,
+      );
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: remoteCronErrorMessage(err) };
+    }
+  }
+
   if (isRemoteMode()) {
+    // SSH tunnel: flavor-probe between dashboard and gateway api_server.
     try {
       const headers = getRemoteAuthHeader();
       const flavor = await remoteCronFlavor(headers);
@@ -475,7 +580,7 @@ export async function removeCronJob(
         flavor === "dashboard" && profile && profile !== "default"
           ? `?profile=${encodeURIComponent(profile)}`
           : "";
-      const res = await remoteFetch(`${base}${qs}`, {
+      const res = await sshCronFetch(`${base}${qs}`, {
         method: "DELETE",
       });
       if (!res.ok) {
@@ -499,29 +604,48 @@ async function remoteJobAction(
   if (sshResult) {
     return { success: sshResult.success, error: sshResult.error };
   }
+  if (!isRemoteOnlyMode()) {
+    // SSH tunnel: no unified transport — the local port may point at either
+    // the dashboard or the gateway api_server, so probe the flavor and use
+    // bare fetch with the tunnel auth header, as before.
+    try {
+      const headers = getRemoteAuthHeader();
+      const flavor = await remoteCronFlavor(headers);
+      // The dashboard fires a job with POST .../trigger; the gateway
+      // api_server uses POST .../run for the same action.
+      const actionPath =
+        action === "run" && flavor === "dashboard" ? "trigger" : action;
+      const qs =
+        flavor === "dashboard" && profile && profile !== "default"
+          ? `?profile=${encodeURIComponent(profile)}`
+          : "";
+      const res = await sshCronFetch(
+        flavor === "dashboard"
+          ? `/api/cron/jobs/${encodeURIComponent(jobId)}/${actionPath}${qs}`
+          : `/api/jobs/${encodeURIComponent(jobId)}/${actionPath}`,
+        { method: "POST" },
+      );
+      if (!res.ok) {
+        return { success: false, error: await remoteJsonError(res) };
+      }
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  }
+  // Direct remote: dashboard REST through the oauth-aware transport.
   try {
-    const headers = getRemoteAuthHeader();
-    const flavor = await remoteCronFlavor(headers);
     // The dashboard fires a job with POST .../trigger; the gateway
     // api_server uses POST .../run for the same action.
-    const actionPath =
-      action === "run" && flavor === "dashboard" ? "trigger" : action;
-    const qs =
-      flavor === "dashboard" && profile && profile !== "default"
-        ? `?profile=${encodeURIComponent(profile)}`
-        : "";
-    const res = await remoteFetch(
-      flavor === "dashboard"
-        ? `/api/cron/jobs/${encodeURIComponent(jobId)}/${actionPath}${qs}`
-        : `/api/jobs/${encodeURIComponent(jobId)}/${actionPath}`,
+    const actionPath = action === "run" ? "trigger" : action;
+    await remoteCronJson(
+      `/api/cron/jobs/${encodeURIComponent(jobId)}/${actionPath}`,
       { method: "POST" },
+      profile,
     );
-    if (!res.ok) {
-      return { success: false, error: await remoteJsonError(res) };
-    }
     return { success: true };
   } catch (err) {
-    return { success: false, error: (err as Error).message };
+    return { success: false, error: remoteCronErrorMessage(err) };
   }
 }
 

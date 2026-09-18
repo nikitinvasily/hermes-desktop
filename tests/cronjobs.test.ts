@@ -33,6 +33,7 @@ vi.mock("../src/main/utils", () => ({
 
 vi.mock("../src/main/hermes", () => ({
   isRemoteMode: () => false,
+  isRemoteOnlyMode: () => false,
   getApiUrl: () => "http://127.0.0.1:8642",
   getRemoteAuthHeader: () => ({}),
 }));

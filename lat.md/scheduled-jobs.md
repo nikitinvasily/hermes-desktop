@@ -8,6 +8,8 @@ Jobs explicitly marked `completed` keep that terminal state even though Hermes a
 
 The remote HTTP cron surface has two disjoint endpoint sets: the gateway api_server (`/api/jobs`, `{jobs:[...]}` wrapper, `POST .../run`) and the unified dashboard (`/api/cron/jobs`, bare array, `POST .../trigger`).
 
+Direct remote (HTTP) connections always talk to the unified dashboard through [[src/main/cronjobs.ts#remoteCronJson]], which rides the shared oauth-aware transport (`remoteRequestJson`) so cookie-authenticated dashboards accept cron requests; before that, a bare fetch with the token-only header silently 401'd and the screen rendered empty (issue #84).
+
 The SSH tunnel points at whichever the active chat transport selected, so [[src/main/cronjobs.ts#remoteCronFlavor]] probes `/api/cron/jobs` before each operation and routes accordingly — a probe cache would go stale because the stable local tunnel port hides a dashboard↔gateway target flip behind it.
 
 ## Test specifications
