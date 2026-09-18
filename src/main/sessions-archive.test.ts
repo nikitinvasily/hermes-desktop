@@ -34,7 +34,7 @@ function fixtureDb(withArchivedColumn: boolean): void {
     CREATE TABLE sessions (
       id TEXT PRIMARY KEY, source TEXT, started_at INTEGER NOT NULL,
       ended_at INTEGER, message_count INTEGER NOT NULL DEFAULT 0,
-      model TEXT, title TEXT${archivedColumn}
+      model TEXT, title TEXT, cwd TEXT, git_repo_root TEXT${archivedColumn}
     );
   `);
   db.prepare(
@@ -96,5 +96,23 @@ describe("listArchivedSessions", () => {
   it("returns [] on databases without the archived column", () => {
     fixtureDb(false);
     expect(listArchivedSessions()).toEqual([]);
+  });
+
+  it("derives contextFolder as git_repo_root || cwd (issue #64)", () => {
+    fixtureDb(true);
+    const db = new Database(join(home, "state.db"));
+    db.prepare(
+      "UPDATE sessions SET cwd = ?, git_repo_root = ? WHERE id = 's_old'",
+    ).run("/Users/x/work/repo", "/Users/x/work/repo");
+    db.prepare(
+      "UPDATE sessions SET cwd = ?, git_repo_root = NULL WHERE id = 's_new'",
+    ).run("/Users/x/other");
+    db.close();
+    setSessionArchived("s_old", true);
+    setSessionArchived("s_new", true);
+    const rows = listArchivedSessions();
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    expect(byId.get("s_old")?.contextFolder).toBe("/Users/x/work/repo");
+    expect(byId.get("s_new")?.contextFolder).toBe("/Users/x/other");
   });
 });

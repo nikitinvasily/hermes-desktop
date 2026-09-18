@@ -18066,12 +18066,44 @@ body:has(.shell-vibrant),
   gap: 8px;
   padding: 7px 8px;
   border-radius: var(--radius-md);
-  cursor: pointer;
+  cursor: default;
   color: var(--text-primary);
+  /* Anchor the hover actions overlay that covers the date (issue #64). */
+  position: relative;
 }
 
 .archive-dialog-row:hover {
   background: var(--bg-tertiary);
+}
+
+/* Hover actions container: pinned to the row's right edge, painted with the
+   row's hover background so it fully covers the date beneath it when the
+   icons appear (user decision, 2026-09-18). */
+.archive-dialog-row-actions {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  display: none;
+  align-items: center;
+  gap: 2px;
+  padding: 0 4px 0 10px;
+  background: var(--bg-tertiary);
+}
+
+.archive-dialog-row:hover .archive-dialog-row-actions,
+.archive-dialog-row:focus-within .archive-dialog-row-actions {
+  display: flex;
+}
+
+/* The buttons inside the actions overlay reuse the sidebar's option-button
+   class (absolute, right: 4px, opacity 0); inside the overlay they must sit
+   in its flex flow and always be visible while the overlay is shown. */
+.archive-dialog-row-actions .sidebar-recent-session-options {
+  position: static;
+  transform: none;
+  opacity: 1;
+  flex-shrink: 0;
 }
 
 .archive-dialog-row-icon {

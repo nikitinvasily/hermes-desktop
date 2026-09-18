@@ -7,18 +7,33 @@ export interface ArchivedSession {
   id: string;
   title: string | null;
   startedAt: number;
+  /** Sidebar grouping folder (issue #64); null/undefined = unbound (Chats). */
+  contextFolder?: string | null;
 }
 
 /**
+ * Which archived chats the dialog shows (issue #64): all of them, only one
+ * project's, or only the unbound ones (what the Chats-section icon means).
+ */
+export type ArchiveFilter =
+  | { kind: "all" }
+  | { kind: "project"; folder: string }
+  | { kind: "unbound" };
+
+/**
  * Modal listing the current connection's archived chats (issue #34). Opened
- * from the Archive button in the sidebar's Chats header. Restore and open are
- * DELIBERATELY separate actions: Restore returns the chat to the sidebar list
- * without switching the view; clicking the row restores AND opens it — that is
- * the explicit "I want to look at this chat" intent, not a side effect.
+ * from the Archive button in the sidebar's Chats header, or with a project
+ * filter from a project row's archive icon (issue #64). The row itself is
+ * display-only (user decision, 2026-09-18): restoring happens ONLY through
+ * the hover icon, which restores the chat AND opens it as the active chat
+ * (then the dialog closes). Delete goes through the shared confirmation
+ * dialog.
  */
 function ArchiveDialog({
   connectionId,
   activeProfile,
+  filter = { kind: "all" },
+  projectName,
   onRestored,
   onOpen,
   onDeleteRequest,
@@ -28,9 +43,13 @@ function ArchiveDialog({
   connectionId: string;
   /** Active profile — the archived list is per-profile. */
   activeProfile: string;
+  /** Restrict the list: all chats, one project's chats, or unbound only. */
+  filter?: ArchiveFilter;
+  /** Display name for the project heading when filtering by a project. */
+  projectName?: string;
   /** Notify the parent after a successful restore so it refreshes the list. */
   onRestored: () => void;
-  /** Open the session in the chat view (row click = restore AND open). */
+  /** Open the restored session as the active chat (Restore icon click). */
   onOpen: (sessionId: string) => void;
   /** Surface deletion through the parent's shared confirmation dialog. */
   onDeleteRequest: (sessionId: string) => void;
@@ -59,6 +78,19 @@ function ArchiveDialog({
     };
   }, [connectionId, activeProfile]);
 
+  // Project-scoped / unbound views (issue #64) are a client-side filter of the
+  // loaded list — the folder semantics are computed main-side, the dialog only
+  // selects rows. Note the remote path clamps the fetch to 100 rows, so a very
+  // large archive's tail may fall outside a filtered view.
+  const visible =
+    sessions === null
+      ? null
+      : filter.kind === "project"
+        ? sessions.filter((s) => (s.contextFolder ?? null) === filter.folder)
+        : filter.kind === "unbound"
+          ? sessions.filter((s) => !(s.contextFolder ?? null))
+          : sessions;
+
   // Focus the close button so Escape has an obvious target; the overlay
   // itself handles Escape below.
   useEffect(() => {
@@ -73,19 +105,6 @@ function ArchiveDialog({
         next.delete(id);
         return next;
       });
-    });
-  };
-
-  const restore = (id: string): void => {
-    withBusy(id, async () => {
-      await window.hermesAPI.setSessionArchived(
-        id,
-        false,
-        connectionId,
-        activeProfile,
-      );
-      setSessions((prev) => (prev ? prev.filter((s) => s.id !== id) : prev));
-      onRestored();
     });
   };
 
@@ -123,7 +142,15 @@ function ArchiveDialog({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="sidebar-session-delete-header">
-          <h3 id="archive-dialog-title">{t("navigation.archiveSection")}</h3>
+          <h3 id="archive-dialog-title">
+            {filter.kind === "project"
+              ? t("navigation.archiveProjectTitle", {
+                  project: projectName || filter.folder,
+                })
+              : filter.kind === "unbound"
+                ? t("navigation.archiveUnboundTitle")
+                : t("navigation.archiveSection")}
+          </h3>
           <button
             ref={closeRef}
             type="button"
@@ -134,30 +161,20 @@ function ArchiveDialog({
             <X size={16} />
           </button>
         </div>
-        {sessions === null ? (
+        {visible === null ? (
           <div className="sidebar-recent-empty">{t("common.loadingShort")}</div>
-        ) : sessions.length === 0 ? (
+        ) : visible.length === 0 ? (
           <div className="sidebar-recent-empty">
             {t("navigation.archiveEmpty")}
           </div>
         ) : (
           <div className="archive-dialog-list">
-            {sessions.map((s) => {
+            {visible.map((s) => {
               const busy = busyIds.has(s.id);
               return (
                 <div
                   key={s.id}
-                  role="button"
-                  tabIndex={busy ? -1 : 0}
                   className="archive-dialog-row"
-                  onClick={() => !busy && restoreAndOpen(s.id)}
-                  onKeyDown={(e) => {
-                    if (busy) return;
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      restoreAndOpen(s.id);
-                    }
-                  }}
                   title={s.title || t("sessions.newConversation")}
                 >
                   <ArchiveBox size={13} className="archive-dialog-row-icon" />
@@ -167,34 +184,36 @@ function ArchiveDialog({
                   <span className="archive-dialog-row-date">
                     {formatArchiveDate(s.startedAt)}
                   </span>
-                  <button
-                    type="button"
-                    className="sidebar-recent-session-options"
-                    disabled={busy}
-                    aria-label={t("navigation.archiveRestore")}
-                    title={t("navigation.archiveRestore")}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      restore(s.id);
-                    }}
-                    onKeyDown={(e) => e.stopPropagation()}
-                  >
-                    <ArchiveRestore size={15} />
-                  </button>
-                  <button
-                    type="button"
-                    className="sidebar-recent-session-options"
-                    disabled={busy}
-                    aria-label={t("navigation.sessionMenu.delete")}
-                    title={t("navigation.sessionMenu.delete")}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDeleteRequest(s.id);
-                    }}
-                    onKeyDown={(e) => e.stopPropagation()}
-                  >
-                    <Trash size={15} />
-                  </button>
+                  <div className="archive-dialog-row-actions">
+                    <button
+                      type="button"
+                      className="sidebar-recent-session-options"
+                      disabled={busy}
+                      aria-label={t("navigation.archiveRestore")}
+                      title={t("navigation.archiveRestore")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        restoreAndOpen(s.id);
+                      }}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
+                      <ArchiveRestore size={15} />
+                    </button>
+                    <button
+                      type="button"
+                      className="sidebar-recent-session-options"
+                      disabled={busy}
+                      aria-label={t("navigation.sessionMenu.delete")}
+                      title={t("navigation.sessionMenu.delete")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteRequest(s.id);
+                      }}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
+                      <Trash size={15} />
+                    </button>
+                  </div>
                 </div>
               );
             })}

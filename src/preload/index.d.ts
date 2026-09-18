@@ -948,7 +948,15 @@ interface HermesAPI {
     offset?: number,
     connectionId?: string,
     profile?: string,
-  ) => Promise<Array<{ id: string; title: string | null; startedAt: number }>>;
+  ) => Promise<
+    Array<{
+      id: string;
+      title: string | null;
+      startedAt: number;
+      /** Sidebar grouping folder of the archived chat (issue #64); null = unbound (Chats). */
+      contextFolder?: string | null;
+    }>
+  >;
 
   // Session search
   searchSessions: (

@@ -337,11 +337,22 @@ export function setSessionArchived(
  * Sessions with `archived = 1`, newest first — the sidebar's Archive section
  * (issue #34). Same row shape as `listSessions`, minus the preview.
  */
+export interface ArchivedSessionRow extends SessionSummary {
+  /**
+   * Raw derived workspace folder (git_repo_root || cwd) for the archived row
+   * (issue #64). The IPC layer applies the full sidebar precedence (explicit
+   * desktop binding > empty sentinel > derived + junk-workspace filter) before
+   * the row reaches the renderer, so the archive dialog filters by exactly the
+   * same folder a non-archived session would group under.
+   */
+  contextFolder: string | null;
+}
+
 export function listArchivedSessions(
   limit = 50,
   offset = 0,
   profile?: unknown,
-): SessionSummary[] {
+): ArchivedSessionRow[] {
   const db = getDb(true, profile);
   if (!db) return [];
   if (!hasArchivedColumn(db)) return [];
@@ -354,7 +365,9 @@ export function listArchivedSessions(
         s.ended_at,
         s.message_count,
         s.model,
-        s.title
+        s.title,
+        s.cwd,
+        s.git_repo_root
       FROM sessions s
       WHERE s.archived = 1
       ORDER BY s.started_at DESC
@@ -368,17 +381,23 @@ export function listArchivedSessions(
     message_count: number;
     model: string;
     title: string | null;
+    cwd: string | null;
+    git_repo_root: string | null;
   }>;
-  return rows.map((r) => ({
-    id: r.id,
-    source: r.source,
-    startedAt: r.started_at,
-    endedAt: r.ended_at,
-    messageCount: r.message_count,
-    model: r.model || "",
-    title: r.title,
-    preview: "",
-  }));
+  return rows.map((r) => {
+    const repoRoot = r.git_repo_root?.trim();
+    return {
+      id: r.id,
+      source: r.source,
+      startedAt: r.started_at,
+      endedAt: r.ended_at,
+      messageCount: r.message_count,
+      model: r.model || "",
+      title: r.title,
+      preview: "",
+      contextFolder: repoRoot || r.cwd?.trim() || null,
+    };
+  });
 }
 
 export function searchSessions(

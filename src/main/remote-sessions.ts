@@ -431,12 +431,16 @@ export async function remoteSetSessionArchived(
   );
 }
 
-/** Archived-only session listing for the sidebar's Archive section (issue #34). */
+/**
+ * Archived-only session listing for the sidebar's Archive section (issue #34).
+ * Rows carry the derived workspace folder (issue #64) so the archive dialog
+ * can filter by project with the same grouping semantics as the sidebar.
+ */
 export async function remoteListArchivedSessions(
   config: RemoteSessionConfig,
   limit = 50,
   offset = 0,
-): Promise<SessionSummary[]> {
+): Promise<Array<SessionSummary & { contextFolder: string | null }>> {
   // `/api/sessions` caps `limit` at 100 (422 above that); the Archive dialog
   // asks for 200. Clamp here so the remote path returns rows instead of a
   // validation error that rendered as an empty archive window (issue #57).
@@ -446,7 +450,17 @@ export async function remoteListArchivedSessions(
     config,
     `/api/sessions?limit=${boundedLimit}&offset=${offset}&archived=only&order=recent`,
   );
-  return sessionsFromResponse(response).map(normalizeSessionSummary);
+  const rows = sessionsFromResponse(response);
+  const sessions = rows.map((row) => ({
+    ...normalizeSessionSummary(row),
+    // Derived folder (git_repo_root || cwd) mirroring the cached-session path
+    // (issue #15); desktop bindings are merged by the IPC caller afterwards.
+    contextFolder: workspaceFolder(row),
+  }));
+  // Same junk-workspace policy as remoteListCachedSessions (issue #47):
+  // derived folders equal to the agent home must not count as a project.
+  const homes = await remoteWorkspaceHomes(config, rows);
+  return filterDerivedWorkspaceFolders(sessions, homes);
 }
 
 export async function remoteListCachedSessions(
