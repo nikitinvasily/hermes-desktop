@@ -28,7 +28,7 @@ import SidebarSessionMenu, {
   type SidebarMenuProject,
   type SidebarMenuTarget,
 } from "./SidebarSessionMenu";
-import ArchiveDialog from "./ArchiveDialog";
+import ArchiveDialog, { type ArchiveFilter } from "./ArchiveDialog";
 import ProjectDialog, { type ProjectDialogState } from "./ProjectDialog";
 import type { ProjectInfo } from "../../../../shared/projects";
 
@@ -221,6 +221,21 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   // Archive modal (issue #34): opened from the Chats header Archive button;
   // the modal owns the archived list, the parent only supplies routing.
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
+  // Which archived chats the modal shows (issue #64): the Chats header icon
+  // means UNBOUND chats only, a project row's archive icon scopes to that
+  // project's folder.
+  const [archiveFilter, setArchiveFilter] = useState<ArchiveFilter>({
+    kind: "unbound",
+  });
+  const [archiveProjectName, setArchiveProjectName] = useState<
+    string | undefined
+  >(undefined);
+
+  const openArchive = (filter: ArchiveFilter, projectName?: string): void => {
+    setArchiveFilter(filter);
+    setArchiveProjectName(projectName);
+    setArchiveDialogOpen(true);
+  };
   // True when the shared delete-confirmation dialog was opened FROM the
   // archive modal — routes the confirm to the archive delete path.
   const [pendingDeleteIsArchived, setPendingDeleteIsArchived] = useState(false);
@@ -1272,6 +1287,26 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
                             <Plus size={13} />
                           </button>
                         )}
+                        <button
+                          type="button"
+                          className="sidebar-recent-new-chat"
+                          title={t("navigation.archiveProjectTooltip", {
+                            project: displayName(group.path),
+                          })}
+                          aria-label={t("navigation.archiveProjectTooltip", {
+                            project: displayName(group.path),
+                          })}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openArchive(
+                              { kind: "project", folder: group.path },
+                              displayName(group.path),
+                            );
+                          }}
+                          tabIndex={expanded && projectsOpen ? 0 : -1}
+                        >
+                          <ArchiveBox size={12} />
+                        </button>
                       </div>
                       <div
                         className={`sidebar-recent-collapse ${
@@ -1341,7 +1376,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
               aria-label={t("navigation.archiveSection")}
               onClick={(e) => {
                 e.stopPropagation();
-                setArchiveDialogOpen(true);
+                openArchive({ kind: "unbound" });
               }}
               tabIndex={expanded ? 0 : -1}
             >
@@ -1497,6 +1532,8 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
           <ArchiveDialog
             connectionId={connectionId}
             activeProfile={activeProfile}
+            filter={archiveFilter}
+            projectName={archiveProjectName}
             onRestored={() => void refresh(true)}
             onOpen={(sessionId) => onSelect(sessionId)}
             onDeleteRequest={(sessionId) => {

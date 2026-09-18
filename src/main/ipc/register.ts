@@ -48,6 +48,11 @@ import {
   type ProjectFolderNames,
 } from "../project-names";
 import {
+  filterDerivedWorkspaceFolders,
+  localWorkspaceHomes,
+  localKnownProjectFolders,
+} from "../workspace-folder";
+import {
   localListProjects,
   remoteListProjects,
   sshListProjects,
@@ -2726,7 +2731,7 @@ export function registerIpcHandlers(context: IpcContext): void {
 
   ipcMain.handle(
     "list-archived-sessions",
-    (
+    async (
       _event,
       limit?: number,
       offset?: number,
@@ -2735,21 +2740,48 @@ export function registerIpcHandlers(context: IpcContext): void {
     ) => {
       const conn = sessionConnection(connectionId);
       const scopedProfile = activeSshProfile(profile);
-      if (conn.mode === "remote")
-        return remoteListArchivedSessions(
+
+      // Sidebar grouping semantics for archived rows (issue #64). Remote/SSH
+      // rows arrive already junk-filtered against the AGENT's homes (inside
+      // remoteListArchivedSessions / sshListArchivedSessions), so they only
+      // need the desktop-binding merge. The local read derives the raw folder
+      // and gets the full pass here: explicit desktop binding > empty sentinel
+      // (deliberate unlink) > derived folder, then the junk-workspace filter
+      // with LOCAL homes and known project folders (order mirrors
+      // syncSessionCache).
+      const mergeBindings = <
+        T extends { id: string; contextFolder: string | null },
+      >(
+        rows: T[],
+      ): T[] =>
+        mergeDesktopBindingsIntoRemoteList(
+          rows,
+          getAllSessionContextFolders(scopedProfile),
+        );
+
+      if (conn.mode === "remote") {
+        const rows = await remoteListArchivedSessions(
           scopedRemoteSessionConfig(conn, scopedProfile),
           limit,
           offset,
         );
-      if (conn.mode === "ssh" && conn.ssh)
-        return withSshDashboardSessions(
+        return mergeBindings(rows);
+      }
+      if (conn.mode === "ssh" && conn.ssh) {
+        const rows = await withSshDashboardSessions(
           conn,
           (config) => remoteListArchivedSessions(config, limit, offset),
           () =>
             sshListArchivedSessions(conn.ssh!, limit, offset, scopedProfile),
           scopedProfile,
         );
-      return listArchivedSessions(limit, offset, scopedProfile);
+        return mergeBindings(rows);
+      }
+      return filterDerivedWorkspaceFolders(
+        mergeBindings(listArchivedSessions(limit, offset, scopedProfile)),
+        localWorkspaceHomes(scopedProfile),
+        localKnownProjectFolders(scopedProfile),
+      );
     },
   );
 

@@ -5,7 +5,6 @@ import Database from "better-sqlite3";
 import { profileHome } from "./utils";
 import { remoteRequestJson, type RemoteSessionConfig } from "./remote-sessions";
 import { freshDashboardWebSocketUrl } from "./dashboard";
-import type { CachedSession } from "./session-cache";
 
 /**
  * Folder path → human project name mapping (issue #23).
@@ -78,11 +77,13 @@ export function localProjectFolderNames(profile?: unknown): ProjectFolderNames {
  * merge a manual Move-to-project over SSH silently reverts on the next sync
  * (issue #23). Precedence mirrors the Local sync: explicit binding wins,
  * empty sentinel = deliberate unlink, absent = keep the derived folder.
+ *
+ * Generic over any row carrying an id + contextFolder so the archived list
+ * (issue #64) reuses the exact same precedence.
  */
-export function mergeDesktopBindingsIntoRemoteList(
-  sessions: CachedSession[],
-  bindings: Map<string, string>,
-): CachedSession[] {
+export function mergeDesktopBindingsIntoRemoteList<
+  T extends { id: string; contextFolder: string | null },
+>(sessions: T[], bindings: Map<string, string>): T[] {
   if (bindings.size === 0) return sessions;
   return sessions.map((session) => {
     if (!bindings.has(session.id)) return session;

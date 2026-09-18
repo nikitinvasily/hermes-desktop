@@ -1482,13 +1482,18 @@ conn.close()
   }
 }
 
-/** Archived-only session listing over SSH (issue #34), newest first. */
+/**
+ * Archived-only session listing over SSH (issue #34), newest first. Rows carry
+ * the derived workspace folder with the same junk-workspace policy as
+ * `sshListSessions` (issues #15/#47) so the archive dialog can filter by
+ * project (issue #64); desktop bindings are merged by the IPC caller.
+ */
 export async function sshListArchivedSessions(
   config: SshConfig,
   limit = 50,
   offset = 0,
   profile?: string,
-): Promise<SessionSummary[]> {
+): Promise<Array<SessionSummary & { contextFolder: string | null }>> {
   const script = `
 import sqlite3, json, os, sys
 payload = json.load(sys.stdin)
@@ -1504,17 +1509,32 @@ cols = [row[1] for row in conn.execute("PRAGMA table_info(sessions)")]
 if "archived" not in cols:
     print("[]"); sys.exit(0)
 rows = conn.execute(
-    "SELECT id, source, started_at, ended_at, message_count, model, title "
+    "SELECT id, source, started_at, ended_at, message_count, model, title, cwd, git_repo_root "
     "FROM sessions WHERE archived = 1 ORDER BY started_at DESC LIMIT ? OFFSET ?",
     (limit, offset)
 ).fetchall()
 result = []
 for r in rows:
+    # Workspace grouping key mirroring sshListSessions (issue #15) with the
+    # same never-a-workspace junk filter (issue #47).
+    repo_root = (r["git_repo_root"] or "").strip()
+    cwd = (r["cwd"] or "").strip()
+    folder = repo_root or cwd or None
+    if folder:
+        def _norm(p):
+            real = os.path.realpath(os.path.expanduser(p))
+            return os.path.normcase(real)
+        hermes_home = _norm(db[: -len("/state.db")] if db.endswith("/state.db") else db)
+        folder_n = _norm(folder)
+        home = _norm("~")
+        junk = {os.path.normcase(os.sep), os.path.normcase("/home"), os.path.normcase("/Users"), home, os.path.dirname(home)}
+        if folder_n in junk or folder_n == hermes_home:
+            folder = None
     result.append({
         "id": r["id"], "source": r["source"] or "cli",
         "startedAt": r["started_at"], "endedAt": r["ended_at"],
         "messageCount": r["message_count"] or 0, "model": r["model"] or "",
-        "title": r["title"], "preview": ""
+        "title": r["title"], "preview": "", "contextFolder": folder
     })
 print(json.dumps(result))
 conn.close()
