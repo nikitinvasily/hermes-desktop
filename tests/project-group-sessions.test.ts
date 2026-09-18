@@ -88,7 +88,8 @@ describe("remoteProjectGroupSessions", () => {
     expect(trading.map((s) => s.id)).toEqual(["s1", "s2"]);
     expect(trading[0]).toMatchObject({
       title: "First",
-      startedAt: 300,
+      startedAt: 100,
+      lastActivityAt: 300,
       source: "telegram",
       messageCount: 4,
       contextFolder: "/home/hermes/.hermes/workspace/trading",

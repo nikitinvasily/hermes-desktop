@@ -724,6 +724,8 @@ interface HermesAPI {
         id: string;
         title: string;
         startedAt: number;
+        /** By-modification ordering key (issue #74); startedAt fallback. */
+        lastActivityAt: number;
         source: string;
         messageCount: number;
         model: string;
@@ -901,6 +903,8 @@ interface HermesAPI {
       id: string;
       title: string;
       startedAt: number;
+      /** By-modification ordering key (issue #74); startedAt fallback. */
+      lastActivityAt: number;
       source: string;
       messageCount: number;
       model: string;
@@ -915,6 +919,8 @@ interface HermesAPI {
       id: string;
       title: string;
       startedAt: number;
+      /** By-modification ordering key (issue #74); startedAt fallback. */
+      lastActivityAt: number;
       source: string;
       messageCount: number;
       model: string;
@@ -953,6 +959,8 @@ interface HermesAPI {
       id: string;
       title: string | null;
       startedAt: number;
+      /** By-modification ordering key (issue #74); startedAt fallback. */
+      lastActivityAt?: number | null;
       /** Sidebar grouping folder of the archived chat (issue #64); null = unbound (Chats). */
       contextFolder?: string | null;
     }>

@@ -64,10 +64,13 @@ function rowTitle(row: TreeSessionRow, id: string): string {
 function normalizeTreeSession(row: TreeSessionRow): CachedSession | null {
   const id = stringValue(row.id);
   if (!id) return null;
+  const startedAt = numberValue(row.started_at);
+  const lastActive = numberValue(row.last_active, startedAt);
   return {
     id,
     title: rowTitle(row, id),
-    startedAt: numberValue(row.last_active, numberValue(row.started_at)),
+    startedAt,
+    lastActivityAt: lastActive,
     source: stringValue(row.source, "chat"),
     messageCount: numberValue(row.message_count),
     model: stringValue(row.model),
@@ -111,7 +114,7 @@ export function regroupTreeSessionsByBindings(
     (out[folder] ??= []).push(row);
   }
   for (const list of Object.values(out)) {
-    list.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
+    list.sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0));
   }
   return out;
 }

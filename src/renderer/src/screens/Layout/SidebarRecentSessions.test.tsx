@@ -276,3 +276,171 @@ describe("SidebarRecentSessions projects-only groups (issue #68)", () => {
     ).toBeTruthy();
   });
 });
+
+describe("SidebarRecentSessions ordering (issue #74)", () => {
+  function seedProjects(): void {
+    Object.defineProperty(window, "hermesAPI", {
+      configurable: true,
+      writable: true,
+      value: {
+        ...(window.hermesAPI as unknown as Record<string, unknown>),
+        listProjects: vi.fn(async () => [
+          {
+            id: "p1",
+            slug: "proj",
+            name: "Zeta",
+            primaryPath: "/tmp/zeta",
+            folders: [{ path: "/tmp/zeta" }],
+          },
+          {
+            id: "p2",
+            slug: "alpha",
+            name: "Alpha",
+            primaryPath: "/tmp/alpha",
+            folders: [{ path: "/tmp/alpha" }],
+          },
+          {
+            id: "p3",
+            slug: "mid",
+            name: "Mid",
+            primaryPath: "/tmp/mid",
+            folders: [{ path: "/tmp/mid" }],
+          },
+        ]),
+      },
+    });
+  }
+
+  function renderForOrdering(): ReturnType<typeof render> {
+    return render(
+      <SidebarRecentSessions
+        open
+        connectionId="connection-main"
+        activeProfile="default"
+        currentSessionId={null}
+        loadingSessionIds={new Set()}
+        resumingSessionId={null}
+        onSelect={vi.fn()}
+        onNewChatInProject={vi.fn()}
+        onSessionDeleted={vi.fn()}
+        scrollRootRef={{ current: null }}
+      />,
+    );
+  }
+
+  function headingOrder(): string[] {
+    return Array.from(
+      document.querySelectorAll(".sidebar-recent-project-heading span"),
+    ).map((el) => el.textContent?.trim() ?? "");
+  }
+
+  function groupRowTitles(headingText: string): string[] {
+    const heading = Array.from(
+      document.querySelectorAll(".sidebar-recent-project-heading"),
+    ).find((el) => el.textContent?.includes(headingText));
+    if (!heading) return [];
+    const project = heading.closest(".sidebar-recent-project");
+    if (!project) return [];
+    return Array.from(project.querySelectorAll(".sidebar-recent-session")).map(
+      (el) => el.textContent?.trim().slice(0, 12) ?? "",
+    );
+  }
+
+  it("orders project groups alphabetically, independent of session recency", async () => {
+    seedProjects();
+    // Freshest session sits in /tmp/zeta — before issue #74 that made Zeta
+    // the FIRST group; alphabetical order must ignore session recency.
+    const rows = [
+      {
+        id: "s-zeta-fresh",
+        title: "Zeta fresh",
+        contextFolder: "/tmp/zeta",
+        startedAt: 3000,
+        lastActivityAt: 3000,
+      },
+      {
+        id: "s-alpha-old",
+        title: "Alpha old",
+        contextFolder: "/tmp/alpha",
+        startedAt: 1000,
+        lastActivityAt: 1000,
+      },
+      {
+        id: "s-mid",
+        title: "Mid chat",
+        contextFolder: "/tmp/mid",
+        startedAt: 2000,
+        lastActivityAt: 2000,
+      },
+    ];
+    listCachedSessions.mockImplementation(async () => rows);
+    syncSessionCache.mockImplementation(async () => rows);
+    renderForOrdering();
+
+    await screen.findByText("Zeta fresh");
+    expect(headingOrder()).toEqual(["Alpha", "Mid", "Zeta"]);
+  });
+
+  it("keeps the alphabetical order after the freshest project's chats vanish", async () => {
+    seedProjects();
+    const withZeta = [
+      {
+        id: "s-zeta-fresh",
+        title: "Zeta fresh",
+        contextFolder: "/tmp/zeta",
+        startedAt: 3000,
+        lastActivityAt: 3000,
+      },
+      {
+        id: "s-alpha-old",
+        title: "Alpha old",
+        contextFolder: "/tmp/alpha",
+        startedAt: 1000,
+        lastActivityAt: 1000,
+      },
+    ];
+    listCachedSessions.mockImplementation(async () => withZeta);
+    syncSessionCache.mockImplementation(async () => withZeta);
+    const { unmount } = renderForOrdering();
+    await screen.findByText("Zeta fresh");
+    expect(headingOrder()).toEqual(["Alpha", "Mid", "Zeta"]);
+    unmount();
+
+    // Simulate archiving every Zeta chat: the group stays in place.
+    const withoutZeta = [withZeta[1]];
+    listCachedSessions.mockImplementation(async () => withoutZeta);
+    syncSessionCache.mockImplementation(async () => withoutZeta);
+    renderForOrdering();
+    await screen.findByText("Alpha old");
+    expect(headingOrder()).toEqual(["Alpha", "Mid", "Zeta"]);
+    expect(screen.queryByText("Zeta fresh")).toBeNull();
+  });
+
+  it("sorts chats inside a group by last activity, not startedAt", async () => {
+    seedProjects();
+    const rows = [
+      {
+        id: "s-zeta-created-late",
+        title: "Created late",
+        contextFolder: "/tmp/zeta",
+        startedAt: 5000,
+        lastActivityAt: 1000,
+      },
+      {
+        id: "s-zeta-touched",
+        title: "Touched old",
+        contextFolder: "/tmp/zeta",
+        startedAt: 1000,
+        lastActivityAt: 9000,
+      },
+    ];
+    listCachedSessions.mockImplementation(async () => rows);
+    syncSessionCache.mockImplementation(async () => rows);
+    renderForOrdering();
+
+    await screen.findByText("Touched old");
+    const titles = groupRowTitles("Zeta");
+    expect(titles[0]).toContain("Touched old");
+    expect(titles[1]).toContain("Created late");
+  });
+});

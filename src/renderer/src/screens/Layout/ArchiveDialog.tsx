@@ -7,6 +7,8 @@ export interface ArchivedSession {
   id: string;
   title: string | null;
   startedAt: number;
+  /** By-modification ordering key (issue #74); startedAt fallback. */
+  lastActivityAt?: number | null;
   /** Sidebar grouping folder (issue #64); null/undefined = unbound (Chats). */
   contextFolder?: string | null;
 }
@@ -81,15 +83,21 @@ function ArchiveDialog({
   // Project-scoped / unbound views (issue #64) are a client-side filter of the
   // loaded list — the folder semantics are computed main-side, the dialog only
   // selects rows. Note the remote path clamps the fetch to 100 rows, so a very
-  // large archive's tail may fall outside a filtered view.
+  // large archive's tail may fall outside a filtered view. Rows order by last
+  // activity descending (issue #74), startedAt fallback.
   const visible =
     sessions === null
       ? null
-      : filter.kind === "project"
-        ? sessions.filter((s) => (s.contextFolder ?? null) === filter.folder)
-        : filter.kind === "unbound"
-          ? sessions.filter((s) => !(s.contextFolder ?? null))
-          : sessions;
+      : (filter.kind === "project"
+          ? sessions.filter((s) => (s.contextFolder ?? null) === filter.folder)
+          : filter.kind === "unbound"
+            ? sessions.filter((s) => !(s.contextFolder ?? null))
+            : sessions
+        ).sort(
+          (a, b) =>
+            (b.lastActivityAt ?? b.startedAt ?? 0) -
+            (a.lastActivityAt ?? a.startedAt ?? 0),
+        );
 
   // Focus the close button so Escape has an obvious target; the overlay
   // itself handles Escape below.
@@ -182,7 +190,7 @@ function ArchiveDialog({
                     {s.title || t("sessions.newConversation")}
                   </span>
                   <span className="archive-dialog-row-date">
-                    {formatArchiveDate(s.startedAt)}
+                    {formatArchiveDate(s.lastActivityAt ?? s.startedAt)}
                   </span>
                   <div className="archive-dialog-row-actions">
                     <button
