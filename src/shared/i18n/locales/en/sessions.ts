@@ -22,7 +22,6 @@ export default {
   thisWeek: "This Week",
   earlier: "Earlier",
   emptyHint: "Start chatting to create your first session",
-  newChatPending: "New chat",
   messages: "msg",
   messageSingular: "msg",
   delete: "Delete conversation",
