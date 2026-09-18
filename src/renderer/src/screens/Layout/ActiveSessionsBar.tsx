@@ -57,14 +57,14 @@ export const ActiveSessionsBar = memo(function ActiveSessionsBar({
               className="active-session-chip-avatar active-session-chip-orb"
               aria-label={run.profile}
             >
-              <OrbLoader state="composing" size={20} />
+              <OrbLoader state="composing" size={22} />
             </span>
           ) : (
             <ProfileAvatar
               name={run.profile}
               color={getAppearance?.(run.profile)?.color}
               avatar={getAppearance?.(run.profile)?.avatar}
-              size={18}
+              size={20}
             />
           )}
           <span className="active-session-chip-title">
@@ -77,7 +77,7 @@ export const ActiveSessionsBar = memo(function ActiveSessionsBar({
             aria-label={t("sessions.closeTab")}
             onClick={() => onClose(run.runId)}
           >
-            <X size={12} />
+            <X size={13} />
           </button>
         </div>
       )}

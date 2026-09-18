@@ -38,7 +38,7 @@ A native system strip pinned full-width beneath the sidebar+content row surfaces
 
 - The bar itself is `-webkit-app-region: drag` with `position: relative; z-index: 1001`, so it stacks above the global `.drag-region` (z 1000) and is the drag handle for the content column.
 - Each `.active-session-chip` opts back out with `-webkit-app-region: no-drag`, keeping select/close clickable above the drag layer — the same priority model browsers use for tabs over a draggable tab strip.
-- `min-height: 34px` (= the 34px global drag strip) means content rendered after the bar clears the fixed drag layer, so the old `.is-mac .content { padding-top: 28px }` offset is no longer needed.
+- `min-height: 42px` — taller than the 34px global drag strip, so content rendered after the bar clears the fixed drag layer and the single tab gets extra presence (13px type, 20px avatar). The old `.is-mac .content { padding-top: 28px }` offset is no longer needed.
 
 Visually the strip is a Safari-style tab bar: the strip uses the darker `--bg-secondary` toolbar shade; tabs are flat (no border/fill) and separated by thin vertical dividers drawn with an `::before` on each non-first chip. The active tab fills with `--bg-primary` — the same colour as the transparent content area below it — and rounds its top corners, so it docks into the page; the dividers flanking the active tab are hidden for a seamless join.
 
