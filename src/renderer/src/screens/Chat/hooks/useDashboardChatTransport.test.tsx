@@ -1212,6 +1212,51 @@ describe("useDashboardChatTransport unavailable fallback (issue #667)", () => {
     expect(startDashboard).toHaveBeenCalledTimes(2);
   });
 
+  // @lat: [[dashboard-detach#Teardown retires a running turn]]
+  it("retires a running turn when the transport is torn down (issue #76)", async () => {
+    const api: HarnessApi = {};
+    const { rerender } = render(
+      <Harness api={api} connectionId="connection-a" connectionRevision={0} />,
+    );
+
+    // A running turn: activeTurnRef holds a running turn (the harness seeds
+    // one) — a revision bump is the connection-switch teardown.
+    expect(api.activeTurnRef?.current?.status).toBe("running");
+    expect(api.isLoading).toBe(false);
+
+    rerender(
+      <Harness api={api} connectionId="connection-a" connectionRevision={1} />,
+    );
+
+    // The turn is retired: no dangling active turn, spinner cleared, and a
+    // user-facing marker explains the agent keeps running server-side.
+    expect(api.activeTurnRef?.current).toBeNull();
+    const marker = api.messages?.find(
+      (m) => "content" in m && m.content.includes("continues on the agent"),
+    );
+    expect(marker).toBeDefined();
+  });
+
+  it("leaves the transcript alone when no turn is running at teardown", async () => {
+    const api: HarnessApi = {};
+    const { rerender } = render(
+      <Harness api={api} connectionId="connection-a" connectionRevision={0} />,
+    );
+
+    api.activeTurnRef!.current = null;
+    const before = api.messages?.length ?? 0;
+    rerender(
+      <Harness api={api} connectionId="connection-a" connectionRevision={1} />,
+    );
+
+    expect(api.messages?.length ?? 0).toBe(before);
+    expect(
+      api.messages?.some(
+        (m) => "content" in m && m.content.includes("continues on the agent"),
+      ),
+    ).toBe(false);
+  });
+
   it("keeps retrying on local (does not latch)", async () => {
     const startDashboard = mockStartDashboard();
     const api: HarnessApi = {};
