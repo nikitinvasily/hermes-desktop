@@ -41,7 +41,6 @@ import {
   Brain,
   Workflow,
   Signal,
-  Building,
   KeyRound,
   Timer,
   Kanban as KanbanIcon,
@@ -71,7 +70,8 @@ const PINNED_NAV_ITEMS: { view: View; icon: LucideIcon; labelKey: string }[] = [
   { view: "discover", icon: Compass, labelKey: "navigation.discover" },
   // "agents" (Profiles) is reached from the sidebar-footer ProfileSwitcher's
   // "Manage profiles" action rather than a top-level nav item.
-  { view: "office", icon: Building, labelKey: "navigation.office" },
+  // "office" is hidden at the fork level (issue #82): the 3D Office screen
+  // stays in the repo but has no nav entry.
   { view: "kanban", icon: KanbanIcon, labelKey: "navigation.kanban" },
   // "skills" lives under the Discover tab (installed + community), so it's no
   // longer a top-level nav item.
