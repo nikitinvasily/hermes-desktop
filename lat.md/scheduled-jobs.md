@@ -2,6 +2,8 @@
 
 The Schedules screen presents Hermes cron jobs consistently across local files, the remote API, and named SSH profiles.
 
+Cron jobs are per-connection data, so the screen reloads its list when the active connection actually changes ([[src/renderer/src/screens/Schedules/Schedules.tsx]] subscribes to `connection-config-changed` and refetches on a mode/URL signature change — re-activating the same connection does not reload).
+
 Jobs explicitly marked `completed` keep that terminal state even though Hermes also disables them. Other disabled jobs are normalized as paused by [[src/main/cronjobs.ts#listCronJobs]]. Named-profile SSH lists use [[src/main/cronjobs.ts#parseCronListOutput]] and mark completed jobs disabled too, so active-only lists exclude terminal jobs across transports.
 
 ## Remote endpoint flavors
