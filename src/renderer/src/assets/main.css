@@ -2912,7 +2912,7 @@ body:has(.shell-vibrant),
   cursor: pointer;
   text-align: left;
   font-family: var(--font-sans);
-  font-size: 12px;
+  font-size: 13px;
 
   transition: all var(--transition);
 }
@@ -2927,7 +2927,7 @@ body:has(.shell-vibrant),
 }
 
 .sidebar-recent-session-dot--loading {
-  color: var(--accent-text, var(--accent));
+  /* Neutral spinner: the base dot's muted color, no accent tint. */
   animation: spin 0.8s linear infinite;
 }
 
