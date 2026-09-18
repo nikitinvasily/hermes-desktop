@@ -108,6 +108,15 @@ export function normalizeRemoteChatTransport(
   return value === "dashboard" || value === "legacy" ? value : "auto";
 }
 
+// Remote connections are dashboard-only (issue #59): the legacy remote chat
+// transport and its auto fallback are gone. The field stays in
+// ConnectionConfig so old desktop.json files keep parsing, but every read
+// and write now pins it to "dashboard" — stored "auto"/"legacy" values
+// migrate transparently on the next config load/save.
+export function normalizeRemoteChatTransportDashboard(): "dashboard" {
+  return "dashboard";
+}
+
 export function normalizeRemoteAuthMode(value: unknown): RemoteAuthMode {
   return value === "token" || value === "oauth" ? value : "auto";
 }
@@ -158,9 +167,7 @@ function normalizeConnectionConfig(
     remoteUrl: typeof value.remoteUrl === "string" ? value.remoteUrl : "",
     apiKey: typeof value.apiKey === "string" ? value.apiKey : "",
     remoteAuthMode: normalizeRemoteAuthMode(value.remoteAuthMode),
-    remoteChatTransport: normalizeRemoteChatTransport(
-      value.remoteChatTransport,
-    ),
+    remoteChatTransport: normalizeRemoteChatTransportDashboard(),
     sshChatTransport: normalizeRemoteChatTransport(value.sshChatTransport),
     ssh: {
       host: typeof ssh.host === "string" ? ssh.host : "",

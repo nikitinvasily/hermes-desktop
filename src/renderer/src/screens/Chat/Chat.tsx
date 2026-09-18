@@ -338,17 +338,17 @@ function Chat({
     const loadConnectionConfig = async (): Promise<void> => {
       try {
         const conn = await window.hermesAPI.getConnectionConfig(connectionId);
-        let remoteAuthMode = conn.remoteAuthMode ?? "auto";
         if (conn.mode === "remote" && conn.remoteUrl.trim()) {
           try {
-            remoteAuthMode = (
-              await window.hermesAPI.probeRemoteAuthMode(
-                conn.remoteUrl,
-                connectionId,
-              )
-            ).authMode;
+            // Probe keeps the remote auth mode cache warm for the settings
+            // pane; the chat transport itself is pinned to "dashboard"
+            // (issue #59) and no longer depends on the result.
+            await window.hermesAPI.probeRemoteAuthMode(
+              conn.remoteUrl,
+              connectionId,
+            );
           } catch {
-            // Keep stored transport choice when public status is unreachable.
+            // Keep the stored auth mode when public status is unreachable.
           }
         }
         if (!cancelled) {
@@ -359,9 +359,7 @@ function Chat({
               ? "auto"
               : conn.mode === "ssh"
                 ? (conn.sshChatTransport ?? "auto")
-                : remoteAuthMode === "oauth"
-                  ? "dashboard"
-                  : (conn.remoteChatTransport ?? "auto"),
+                : "dashboard",
           );
         }
       } catch {
@@ -386,9 +384,7 @@ function Chat({
           ? "auto"
           : conn.mode === "ssh"
             ? (conn.sshChatTransport ?? "auto")
-            : conn.remoteAuthMode === "oauth"
-              ? "dashboard"
-              : (conn.remoteChatTransport ?? "auto"),
+            : "dashboard",
       );
     });
     return (): void => {

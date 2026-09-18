@@ -207,7 +207,7 @@ export function useSettingsData(profile?: string) {
     setConnRemoteUrl(conn.remoteUrl);
     setConnHasApiKey(conn.hasApiKey);
     setRemoteAuthMode(conn.remoteAuthMode ?? "auto");
-    setRemoteChatTransport(conn.remoteChatTransport ?? "auto");
+    setRemoteChatTransport("dashboard");
     setSshChatTransport(conn.sshChatTransport ?? "auto");
     const mask = conn.hasApiKey ? makeApiKeyMask(conn.apiKeyLength) : "";
     setConnApiKeyMask(mask);
@@ -461,15 +461,12 @@ export function useSettingsData(profile?: string) {
       setTransportProbe(null);
       return;
     }
-    const preference =
-      connMode === "ssh" ? sshChatTransport : remoteChatTransport;
+    const preference: RemoteChatTransport =
+      connMode === "ssh" ? sshChatTransport : "dashboard";
     if (preference === "legacy") {
       setTransportProbe({
         label: "Active: Legacy",
-        detail:
-          connMode === "ssh"
-            ? "Dashboard over SSH is disabled."
-            : "Dashboard WebSocket is disabled.",
+        detail: "Dashboard over SSH is disabled.",
         kind: "muted",
         loading: false,
       });
@@ -487,10 +484,7 @@ export function useSettingsData(profile?: string) {
       const status = await window.hermesAPI.dashboardStatus(profile);
       if (status.running && status.connection?.baseUrl) {
         setTransportProbe({
-          label:
-            preference === "dashboard"
-              ? "Active: Dashboard"
-              : "Auto active: Dashboard",
+          label: "Active: Dashboard",
           detail: status.connection.baseUrl,
           kind: "ok",
           loading: false,
@@ -507,26 +501,20 @@ export function useSettingsData(profile?: string) {
         return;
       }
       setTransportProbe({
-        label:
-          preference === "dashboard"
-            ? "Dashboard unavailable"
-            : "Auto active: Legacy fallback",
+        label: "Dashboard unavailable",
         detail: status.error || "Dashboard transport is not available.",
         kind: "warn",
         loading: false,
       });
     } catch (err) {
       setTransportProbe({
-        label:
-          preference === "dashboard"
-            ? "Dashboard unavailable"
-            : "Auto active: Legacy fallback",
+        label: "Dashboard unavailable",
         detail: err instanceof Error ? err.message : String(err),
         kind: "warn",
         loading: false,
       });
     }
-  }, [connMode, profile, remoteChatTransport, sshChatTransport]);
+  }, [connMode, profile, sshChatTransport]);
 
   useEffect(() => {
     void refreshTransportProbe();
