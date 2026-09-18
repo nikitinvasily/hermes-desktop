@@ -18068,30 +18068,41 @@ body:has(.shell-vibrant),
   border-radius: var(--radius-md);
   cursor: default;
   color: var(--text-primary);
+  /* Anchor the hover actions overlay that covers the date (issue #64). */
+  position: relative;
 }
 
 .archive-dialog-row:hover {
   background: var(--bg-tertiary);
 }
 
-/* The dialog rows reuse the sidebar's hover-reveal option buttons (Restore /
-   Trash); the sidebar reveals them via `.sidebar-recent-session:hover`, so the
-   archive rows need their own reveal rules or the buttons stay invisible
-   (opacity 0) even though they are clickable (issue #64). */
-.archive-dialog-row:hover .sidebar-recent-session-options,
-.archive-dialog-row:focus-within .sidebar-recent-session-options {
-  opacity: 1;
+/* Hover actions container: pinned to the row's right edge, painted with the
+   row's hover background so it fully covers the date beneath it when the
+   icons appear (user decision, 2026-09-18). */
+.archive-dialog-row-actions {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  display: none;
+  align-items: center;
+  gap: 2px;
+  padding: 0 4px 0 10px;
+  background: var(--bg-tertiary);
 }
 
-/* The sidebar positions its SINGLE options button absolutely at right: 4px;
-   the archive rows have TWO (Restore + Trash), which would stack on top of
-   each other in that one slot — only the topmost (Trash) was visible. Lay
-   them out in the row's flex flow instead, side by side (the opacity reveal
-   above keeps them hidden until hover; the reserved space avoids layout
-   shift while hovering). */
-.archive-dialog-row .sidebar-recent-session-options {
+.archive-dialog-row:hover .archive-dialog-row-actions,
+.archive-dialog-row:focus-within .archive-dialog-row-actions {
+  display: flex;
+}
+
+/* The buttons inside the actions overlay reuse the sidebar's option-button
+   class (absolute, right: 4px, opacity 0); inside the overlay they must sit
+   in its flex flow and always be visible while the overlay is shown. */
+.archive-dialog-row-actions .sidebar-recent-session-options {
   position: static;
   transform: none;
+  opacity: 1;
   flex-shrink: 0;
 }
 

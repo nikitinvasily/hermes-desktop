@@ -184,34 +184,36 @@ function ArchiveDialog({
                   <span className="archive-dialog-row-date">
                     {formatArchiveDate(s.startedAt)}
                   </span>
-                  <button
-                    type="button"
-                    className="sidebar-recent-session-options"
-                    disabled={busy}
-                    aria-label={t("navigation.archiveRestore")}
-                    title={t("navigation.archiveRestore")}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      restoreAndOpen(s.id);
-                    }}
-                    onKeyDown={(e) => e.stopPropagation()}
-                  >
-                    <ArchiveRestore size={15} />
-                  </button>
-                  <button
-                    type="button"
-                    className="sidebar-recent-session-options"
-                    disabled={busy}
-                    aria-label={t("navigation.sessionMenu.delete")}
-                    title={t("navigation.sessionMenu.delete")}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDeleteRequest(s.id);
-                    }}
-                    onKeyDown={(e) => e.stopPropagation()}
-                  >
-                    <Trash size={15} />
-                  </button>
+                  <div className="archive-dialog-row-actions">
+                    <button
+                      type="button"
+                      className="sidebar-recent-session-options"
+                      disabled={busy}
+                      aria-label={t("navigation.archiveRestore")}
+                      title={t("navigation.archiveRestore")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        restoreAndOpen(s.id);
+                      }}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
+                      <ArchiveRestore size={15} />
+                    </button>
+                    <button
+                      type="button"
+                      className="sidebar-recent-session-options"
+                      disabled={busy}
+                      aria-label={t("navigation.sessionMenu.delete")}
+                      title={t("navigation.sessionMenu.delete")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteRequest(s.id);
+                      }}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
+                      <Trash size={15} />
+                    </button>
+                  </div>
                 </div>
               );
             })}
