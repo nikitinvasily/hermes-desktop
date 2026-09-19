@@ -16,6 +16,7 @@ Changes in this fork that are **not** in upstream.
 - **Per-chat approval toggle** — a shield button in the chat toolbar disables dangerous-command approvals for the current chat only; the global approval setting is never touched.
 - **Approval cards show their outcome** — after you approve or deny a command, the card turns green or red accordingly (muted grey when answered elsewhere), and scanner boilerplate like "Security scan — [HIGH] …" is stripped so only the command (and a real description, when there is one) remains.
 - **Discover and Skills over remote connections** — the marketplace works in remote mode: "Installed" markers reflect the server's state, and installs (skills, workflows, MCP servers, agents) land on the server.
+- **Kanban board over remote connections** — the board screen works in remote (HTTP) mode too: boards, cards, drag-drop moves, comments, and dispatch go through the agent dashboard's kanban API. Older agents without that API show an "update the agent" hint instead of a dead screen.
 - **Status-bar connection switcher** — switch between saved connections right from the status bar; each switch also activates a run on the target connection.
 - **Connection switch returns you to your chat** — switching connections reopens the conversation you left open there, and a first new chat starts in the same project when one matches.
 - **New-chat buttons in the sidebar** — quick actions on project headings and on the Chats header.
