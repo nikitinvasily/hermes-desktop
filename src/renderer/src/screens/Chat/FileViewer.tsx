@@ -7,6 +7,9 @@ import { useI18n } from "../../components/useI18n";
 interface FileViewerProps {
   filePath: string;
   onClose: () => void;
+  /** Remote connection: content comes from the server, local-only affordances
+   *  (Open in editor) are hidden because the path does not exist on this Mac. */
+  remoteMode?: boolean;
 }
 
 // Map file extensions to highlight.js language names
@@ -164,6 +167,7 @@ function isBinaryFile(filename: string): boolean {
 export const FileViewer = memo(function FileViewer({
   filePath,
   onClose,
+  remoteMode = false,
 }: FileViewerProps): React.JSX.Element {
   const { t } = useI18n();
   const [content, setContent] = useState<string | null>(null);
@@ -171,6 +175,7 @@ export const FileViewer = memo(function FileViewer({
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [isBinary, setIsBinary] = useState<boolean>(false);
   const codeRef = useRef<HTMLElement>(null);
 
   const fileName = getFileName(filePath);
@@ -180,6 +185,7 @@ export const FileViewer = memo(function FileViewer({
     setIsLoading(true);
     setError(null);
     setImageUrl(null);
+    setIsBinary(false);
 
     const loadFile = async (): Promise<void> => {
       // If image file, load as data URL
@@ -203,6 +209,11 @@ export const FileViewer = memo(function FileViewer({
       } else {
         setContent(result.content);
         setTruncated(result.truncated);
+        // Remote mode: the server reports binary content (no reliable
+        // extension locally); local mode falls back to the extension check.
+        setIsBinary(
+          remoteMode ? result.binary === true : isBinaryFile(fileName),
+        );
       }
       setIsLoading(false);
     };
@@ -211,7 +222,7 @@ export const FileViewer = memo(function FileViewer({
     return () => {
       cancelled = true;
     };
-  }, [filePath, t]);
+  }, [filePath, fileName, remoteMode, t]);
 
   // Apply syntax highlighting after content loads
   useEffect(() => {
@@ -254,14 +265,16 @@ export const FileViewer = memo(function FileViewer({
             )}
           </div>
           <div className="file-viewer-actions">
-            <button
-              className="btn-ghost file-viewer-open"
-              onClick={() => window.hermesAPI.openFileInEditor(filePath)}
-              title={t("worktree.openInEditor")}
-            >
-              <ExternalLink size={14} />
-              <span className="file-viewer-open-text">Open</span>
-            </button>
+            {!remoteMode && (
+              <button
+                className="btn-ghost file-viewer-open"
+                onClick={() => window.hermesAPI.openFileInEditor(filePath)}
+                title={t("worktree.openInEditor")}
+              >
+                <ExternalLink size={14} />
+                <span className="file-viewer-open-text">Open</span>
+              </button>
+            )}
             <button
               className="btn-ghost file-viewer-close"
               onClick={onClose}
@@ -291,7 +304,7 @@ export const FileViewer = memo(function FileViewer({
             <div className="file-viewer-error">
               {t("worktree.errorLoading")}
             </div>
-          ) : isBinaryFile(fileName) ? (
+          ) : isBinary ? (
             <div className="file-viewer-binary">
               <div className="file-viewer-binary-icon">📄</div>
               <div className="file-viewer-binary-text">

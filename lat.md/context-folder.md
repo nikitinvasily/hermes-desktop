@@ -30,7 +30,13 @@ The context-folder tree panel uses a compact header and can be resized from its 
 
 Remote and SSH folder pickers (e.g. the project dialogs' SSH browser) list directories through an IPC channel rather than local filesystem calls.
 
-`read-directory` is routed by [[src/main/ipc/register.ts#registerIpcHandlers]] to [[src/main/ssh-remote.ts#sshReadDirectory]] for SSH connections and returns no listing for pure Remote Gateway mode until the backend exposes a directory-list endpoint, so pickers still allow typed remote paths.
+`read-directory` is routed by [[src/main/ipc/register.ts#registerIpcHandlers]] to [[src/main/ssh-remote.ts#sshReadDirectory]] for SSH connections and to [[src/main/remote-files.ts#remoteReadDirectory]] for direct Remote connections (dashboard `GET /api/fs/list`), so the tree panel and pickers list real server directories in every mode.
+
+## Remote file viewing
+
+The tree panel's file viewer serves server content on Remote connections instead of silently reading the local filesystem.
+
+`read-file` and `read-image-file` route Remote connections through [[src/main/remote-files.ts#remoteReadTextFile]] and [[src/main/remote-files.ts#remoteReadImageFile]] (dashboard `GET /api/fs/read-text` and `GET /api/fs/read-data-url`), all via the authenticated boundary [[src/main/remote-api.ts#remoteDashboardRequestJson]] — token or OAuth cookie per connection, never a hand-rolled fetch. The server's `binary` and `truncated` flags flow to [[src/renderer/src/screens/Chat/FileViewer.tsx#FileViewer]] through the `readFile` payload, so binary server files render the "cannot be previewed" card even without a known extension. Local-only affordances (Open in editor, Open in terminal) hide behind the `remoteMode` prop because the path does not exist on this Mac; `open-file-in-editor` also refuses in remote-only mode in the main process. Tests: [[tests/remote-files.test.ts]].
 
 ## Muted tree icons
 

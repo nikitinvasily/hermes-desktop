@@ -1240,7 +1240,11 @@ interface HermesAPI {
   readFile: (
     filePath: string,
     maxBytes?: number,
-  ) => Promise<{ content: string; truncated: boolean } | null>;
+  ) => Promise<{
+    content: string;
+    truncated: boolean;
+    binary?: boolean;
+  } | null>;
   openFileInEditor: (filePath: string) => Promise<boolean>;
   openTerminal: (dirPath: string) => Promise<boolean>;
   readImageFile: (filePath: string) => Promise<string | null>;
