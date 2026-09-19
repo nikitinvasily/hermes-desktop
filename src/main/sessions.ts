@@ -6,6 +6,7 @@ import { removeSessionFromCache } from "./session-cache";
 import {
   getDbConnection,
   hasArchivedColumn,
+  sessionSubagentPredicate,
   sessionVisibilityPredicate,
 } from "./db";
 import {
@@ -348,6 +349,7 @@ export function listSessions(
         s.title
       FROM sessions s
       WHERE ${sessionVisibilityPredicate(db)}
+        AND ${sessionSubagentPredicate(db)}
       ${lastActivityOrder(db)}
       LIMIT ? OFFSET ?`,
     )
@@ -453,6 +455,7 @@ export function listArchivedSessions(
         s.git_repo_root
       FROM sessions s
       WHERE s.archived = 1
+        AND ${sessionSubagentPredicate(db)}
       ${lastActivityOrder(db)}
       LIMIT ? OFFSET ?`,
     )

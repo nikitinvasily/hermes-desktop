@@ -1386,8 +1386,16 @@ conn.row_factory = sqlite3.Row
 # dashboard route (archived=exclude): archived sessions must not surface in
 # the SSH fallback list (issue #57). Older databases without the column keep
 # the legacy unfiltered behavior.
+# Subagent parity (issue #95): the core's lists hide delegate-subagent child
+# rows (parent_session_id + _delegate_from marker in model_config); mirror
+# that here so the SSH fallback matches the dashboard REST output.
 cols = [row[1] for row in conn.execute("PRAGMA table_info(sessions)")]
 vis = "WHERE archived = 0" if "archived" in cols else ""
+if "parent_session_id" in cols and "model_config" in cols:
+    sub = ("NOT (parent_session_id IS NOT NULL AND json_extract("
+           "CASE WHEN json_valid(model_config) THEN model_config ELSE '{}' END, "
+           "'$._delegate_from') IS NOT NULL)")
+    vis = (vis + " AND " + sub) if vis else "WHERE " + sub
 order = "COALESCE(last_activity_at, started_at)" if "last_activity_at" in cols else "started_at"
 sel = ", last_activity_at" if "last_activity_at" in cols else ""
 sel += ", last_read_at" if "last_read_at" in cols else ""
@@ -1560,9 +1568,16 @@ if "archived" not in cols:
 order = "COALESCE(last_activity_at, started_at)" if "last_activity_at" in cols else "started_at"
 sel = ", last_activity_at" if "last_activity_at" in cols else ""
 sel += ", last_read_at" if "last_read_at" in cols else ""
+# Subagent parity (issue #95): archived delegate-subagent rows stay hidden,
+# mirroring the active-list fallback and the dashboard REST output.
+vis = "archived = 1"
+if "parent_session_id" in cols and "model_config" in cols:
+    vis += (" AND NOT (parent_session_id IS NOT NULL AND json_extract("
+            "CASE WHEN json_valid(model_config) THEN model_config ELSE '{}' END, "
+            "'$._delegate_from') IS NOT NULL)")
 rows = conn.execute(
     f"SELECT id, source, started_at{sel}, ended_at, message_count, model, title, cwd, git_repo_root "
-    f"FROM sessions WHERE archived = 1 ORDER BY {order} DESC LIMIT ? OFFSET ?",
+    f"FROM sessions WHERE {vis} ORDER BY {order} DESC LIMIT ? OFFSET ?",
     (limit, offset)
 ).fetchall()
 result = []
