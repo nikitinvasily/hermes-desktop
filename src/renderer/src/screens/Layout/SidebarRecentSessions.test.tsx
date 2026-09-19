@@ -541,7 +541,11 @@ describe("SidebarRecentSessions delete vs the tree-derived groups (issue #80)", 
 describe("SidebarRecentSessions state bullets", () => {
   function bulletFor(title: string): SVGSVGElement | null {
     const row = screen.getByText(title).closest(".sidebar-recent-session");
-    return row?.querySelector(".sidebar-recent-session-dot") ?? null;
+    return (
+      row?.querySelector(
+        ".sidebar-recent-session-dot, .sidebar-recent-session-spinner",
+      ) ?? null
+    );
   }
 
   it("renders an unread (filled accent) dot that clears on open", async () => {
@@ -671,7 +675,7 @@ describe("SidebarRecentSessions state bullets", () => {
     await screen.findByText("Running chat");
     const dot = bulletFor("Running chat");
     expect(dot?.getAttribute("class")).toContain(
-      "sidebar-recent-session-dot--loading",
+      "sidebar-recent-session-spinner",
     );
     expect(dot?.getAttribute("class")).not.toContain(
       "sidebar-recent-session-dot--unread",
@@ -718,7 +722,7 @@ describe("SidebarRecentSessions state bullets", () => {
       "sidebar-recent-session-dot--approval",
     );
     expect(dot?.getAttribute("class")).not.toContain(
-      "sidebar-recent-session-dot--loading",
+      "sidebar-recent-session-spinner",
     );
   });
 });

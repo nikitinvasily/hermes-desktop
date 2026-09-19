@@ -15,7 +15,6 @@ import {
   ChevronRight,
   Circle,
   Folder,
-  Loader,
   MoreHorizontal,
   Pencil,
   Pin,
@@ -1257,9 +1256,10 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
             strokeWidth={0}
           />
         ) : loading ? (
-          <Loader
-            className="sidebar-recent-session-dot sidebar-recent-session-dot--loading"
-            size={13}
+          <span
+            className="sidebar-recent-session-spinner"
+            aria-label={t("sessions.newConversation")}
+            role="img"
           />
         ) : unread ? (
           <Circle
@@ -1574,9 +1574,9 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         </div>
         {loadingMore && (
           <div className="sidebar-recent-loading" aria-live="polite">
-            <Loader
-              className="sidebar-recent-session-dot sidebar-recent-session-dot--loading"
-              size={11}
+            <span
+              className="sidebar-recent-session-spinner"
+              aria-hidden="true"
             />
             <span>{t("common.loadingShort")}</span>
           </div>
