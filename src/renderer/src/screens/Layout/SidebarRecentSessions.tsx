@@ -53,6 +53,9 @@ interface RecentSession {
    *  the turn is being set up); used to drop the pending row when the real
    *  synced row arrives. */
   pendingSessionId?: string | null;
+  /** Whether the run's turn is actually generating (spinner truth); a dead
+   *  send (never created a session, not loading) shows the neutral dot. */
+  pendingLoading?: boolean;
 }
 
 /** Recency key for sidebar ordering (issue #74): last activity, startedAt fallback. */
@@ -1213,8 +1216,9 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   ): React.JSX.Element => {
     const title = s.title || t("sessions.newConversation");
     const isPending = s.pendingRunId !== undefined;
-    const loading =
-      isPending || resumingSessionId === s.id || loadingSessionIds.has(s.id);
+    const loading = isPending
+      ? (s.pendingLoading ?? true)
+      : resumingSessionId === s.id || loadingSessionIds.has(s.id);
     const awaitingApproval = approvalSessionIds.has(s.id);
     const unread = s.unread === true && !loading && !awaitingApproval;
     // The active highlight persists while the agent works (loading) — the
