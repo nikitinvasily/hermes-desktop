@@ -24,6 +24,7 @@ Changes in this fork that are **not** in upstream.
 
 ### Fixes
 
+- **Subagent sessions stay out of the sidebar** — when the agent spawns subagents, their internal sessions no longer clutter the chat list, project groups, or the archive (local and SSH connections; the remote dashboard already filtered them).
 - **Damaged chat streams no longer corrupt messages** — when the agent core delivers a lossy stream (lost chunks, stray characters), the text is reconciled against the final result instead of gluing garbage into the bubble.
 - **Schedules work over remote connections** — over SSH tunnels and OAuth-gated remote dashboards the Schedules tab used to render empty (every operation silently failed); it now uses the dashboard API with correct auth and refreshes when you switch connections.
 - **Remote Settings manage the server, not the Mac** — while a remote connection is active, Settings screens (Memory, Soul, Toolsets, Logs, Profiles, Config, gateway start/stop) read and write the server through the dashboard API instead of silently mutating local `~/.hermes`. Works against password/OAuth-protected dashboards, and remote is dashboard-only: no silent fallback to the legacy transport when the dashboard is unreachable.
