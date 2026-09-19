@@ -176,10 +176,7 @@ function attachContextFolders(
 // Reconcile visible session metadata; archive changes do not update started_at.
 export function syncSessionCache(profile?: unknown): CachedSession[] {
   const cache = readCache(profile);
-  const db = getDb(profile);
-  if (!db) return cache.sessions;
-
-  try {
+  if (!cache.readBaselineDone) {
     // One-time read-state baseline (issue #90): the agent treats
     // `last_read_at` NULL as "read", so on an existing install where nothing
     // ever wrote the watermark, no session can ever light up as unread.
@@ -187,13 +184,29 @@ export function syncSessionCache(profile?: unknown): CachedSession[] {
     // desktop cache file (per profile) so it never runs again. New sessions
     // minted after this point start NULL and only get a watermark when the
     // user actually opens them or views their finished turn.
-    if (!cache.readBaselineDone && hasLastReadColumn(db)) {
-      db.prepare(
-        `UPDATE sessions SET last_read_at = COALESCE(last_activity_at, started_at)
-         WHERE last_read_at IS NULL`,
-      ).run();
+    //
+    // Runs on a WRITER connection BEFORE the read-only listing connection is
+    // taken: getDbConnection caches one connection, so doing this inside the
+    // reader's scope would throw SQLITE_READONLY (silently swallowed by the
+    // sync's catch, freezing the whole cache — the shipped fork.1535 bug).
+    try {
+      const writer = getDbConnection(false, profile);
+      if (writer && hasLastReadColumn(writer)) {
+        writer
+          .prepare(
+            `UPDATE sessions SET last_read_at = COALESCE(last_activity_at, started_at)
+             WHERE last_read_at IS NULL`,
+          )
+          .run();
+      }
+    } catch {
+      // Baseline is best-effort; a locked DB retries on the next sync.
     }
+  }
+  const db = getDb(profile);
+  if (!db) return cache.sessions;
 
+  try {
     // Read the complete visible set so old sessions can disappear on archive
     // and reappear on unarchive. Reuse cached titles to avoid rereading messages.
     const rows = db
