@@ -1390,6 +1390,7 @@ cols = [row[1] for row in conn.execute("PRAGMA table_info(sessions)")]
 vis = "WHERE archived = 0" if "archived" in cols else ""
 order = "COALESCE(last_activity_at, started_at)" if "last_activity_at" in cols else "started_at"
 sel = ", last_activity_at" if "last_activity_at" in cols else ""
+sel += ", last_read_at" if "last_read_at" in cols else ""
 rows = conn.execute(
     f"SELECT id, source, started_at{sel}, ended_at, message_count, model, title, cwd, git_repo_root "
     f"FROM sessions {vis} ORDER BY {order} DESC LIMIT ? OFFSET ?",
@@ -1422,6 +1423,8 @@ for r in rows:
         "id": r["id"], "source": r["source"] or "cli",
         "startedAt": r["started_at"],
         "lastActivityAt": r["last_activity_at"] if "last_activity_at" in r.keys() else (r["started_at"] or 0),
+        "unread": ("last_read_at" in r.keys() and r["last_read_at"] is not None
+                   and ((r["last_activity_at"] if "last_activity_at" in r.keys() else 0) or (r["started_at"] or 0)) > r["last_read_at"]),
         "endedAt": r["ended_at"],
         "messageCount": r["message_count"] or 0, "model": r["model"] or "",
         "title": r["title"], "preview": "", "contextFolder": folder
@@ -1487,6 +1490,48 @@ conn.close()
 }
 
 /**
+ * Mark a session read on the remote host's state.db (issue #90): stamp the
+ * agent's `last_read_at` watermark to now, mirroring the dashboard's
+ * `set_session_read`. Older databases without the column report
+ * unsupported rather than failing silently.
+ */
+export async function sshMarkSessionRead(
+  config: SshConfig,
+  sessionId: string,
+  profile?: string,
+): Promise<void> {
+  const script = `
+import sqlite3, json, os, sys, time
+payload = json.load(sys.stdin)
+profile = payload.get("profile")
+session_id = payload.get("sessionId") or ""
+db = os.path.expanduser(f"~/.hermes/profiles/{profile}/state.db" if profile and profile != "default" else "~/.hermes/state.db")
+if not os.path.exists(db):
+    print(json.dumps({"ok": False, "error": "state db not found"})); sys.exit(0)
+conn = sqlite3.connect(db)
+cols = [row[1] for row in conn.execute("PRAGMA table_info(sessions)")]
+if "last_read_at" not in cols:
+    print(json.dumps({"ok": False, "error": "last_read_at column missing"})); sys.exit(0)
+cur = conn.execute("UPDATE sessions SET last_read_at = ? WHERE id = ?", (time.time(), session_id))
+conn.commit()
+print(json.dumps({"ok": cur.rowcount > 0}))
+conn.close()
+`;
+  const out = await sshPython(
+    config,
+    script,
+    pythonJsonInput({ profile, sessionId }),
+  );
+  const parsed = JSON.parse(out.trim() || "{}") as {
+    ok?: boolean;
+    error?: string;
+  };
+  if (!parsed.ok) {
+    throw new Error(parsed.error || "Failed to mark session read");
+  }
+}
+
+/**
  * Archived-only session listing over SSH (issue #34), newest first. Rows carry
  * the derived workspace folder with the same junk-workspace policy as
  * `sshListSessions` (issues #15/#47) so the archive dialog can filter by
@@ -1514,6 +1559,7 @@ if "archived" not in cols:
     print("[]"); sys.exit(0)
 order = "COALESCE(last_activity_at, started_at)" if "last_activity_at" in cols else "started_at"
 sel = ", last_activity_at" if "last_activity_at" in cols else ""
+sel += ", last_read_at" if "last_read_at" in cols else ""
 rows = conn.execute(
     f"SELECT id, source, started_at{sel}, ended_at, message_count, model, title, cwd, git_repo_root "
     f"FROM sessions WHERE archived = 1 ORDER BY {order} DESC LIMIT ? OFFSET ?",
@@ -1540,6 +1586,8 @@ for r in rows:
         "id": r["id"], "source": r["source"] or "cli",
         "startedAt": r["started_at"],
         "lastActivityAt": r["last_activity_at"] if "last_activity_at" in r.keys() else (r["started_at"] or 0),
+        "unread": ("last_read_at" in r.keys() and r["last_read_at"] is not None
+                   and ((r["last_activity_at"] if "last_activity_at" in r.keys() else 0) or (r["started_at"] or 0)) > r["last_read_at"]),
         "endedAt": r["ended_at"],
         "messageCount": r["message_count"] or 0, "model": r["model"] or "",
         "title": r["title"], "preview": "", "contextFolder": folder
@@ -3416,6 +3464,7 @@ export async function sshListCachedSessions(
     title: s.title || s.id,
     startedAt: s.startedAt,
     lastActivityAt: s.lastActivityAt ?? s.startedAt,
+    unread: s.unread === true,
     source: s.source,
     messageCount: s.messageCount,
     model: s.model,

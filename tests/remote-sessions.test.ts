@@ -310,6 +310,8 @@ describe("remote session REST bridge", () => {
         source: "chat",
         startedAt: 1700000000,
         lastActivityAt: 1700000000,
+        // No last_read_at in the dashboard row → treated as read (issue #90).
+        unread: false,
         endedAt: null,
         messageCount: 4,
         model: "codex-cli/gpt-5.5",
@@ -433,6 +435,7 @@ describe("remote session REST bridge", () => {
         title: "Cached remote preview",
         startedAt: 1700000002,
         lastActivityAt: 1700000002,
+        unread: false,
         source: "chat",
         messageCount: 2,
         model: "custom/deepseek-v4-pro",

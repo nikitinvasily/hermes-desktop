@@ -124,6 +124,8 @@ interface UseDashboardChatTransportResult {
   /** True while a turn was retired as "continues on the agent" after a
    *  transport teardown (issue #76) and no resync has caught up yet. */
   hasDetachedTurn: boolean;
+  /** True while this chat holds a pending command approval (issue #90). */
+  hasPendingApproval: boolean;
   /** Catch the chat up after its transport was torn down mid-turn (issue
    *  #76): reconnect, resume the stored session (re-attaching the event
    *  stream of a still-running agent), and reconcile the transcript with
@@ -1001,6 +1003,17 @@ export function useDashboardChatTransport({
     activeTurn: ActiveTurn | null;
   } | null>(null);
   const pendingApprovalsRef = useRef<PendingDashboardApproval[]>([]);
+  // Sidebar bullet state (issue #90): true while this chat holds a pending
+  // command approval. Backed by the ref (kept in sync at every mutation) so
+  // Layout can lift it onto the ChatRun without touching the transcript.
+  const [hasPendingApproval, setHasPendingApproval] = useState(false);
+  const setPendingApprovals = useCallback(
+    (next: PendingDashboardApproval[]): void => {
+      pendingApprovalsRef.current = next;
+      setHasPendingApproval(next.length > 0);
+    },
+    [],
+  );
   const approvalNonceRef = useRef(0);
   const pendingRecoveredContinuationRef = useRef<
     DesktopSessionContinuationItem[]
@@ -1090,7 +1103,7 @@ export function useDashboardChatTransport({
     const pendingIds = new Set(
       pendingApprovalsRef.current.map(({ requestId }) => requestId),
     );
-    pendingApprovalsRef.current = [];
+    setPendingApprovals([]);
     setMessages((current) => {
       const unavailable = current.map((message) =>
         message.kind === "approval" &&
@@ -1121,7 +1134,7 @@ export function useDashboardChatTransport({
     // Clearing the transcript invalidates pending cards without copying a
     // potentially stale React snapshot back over coalesced stream deltas.
     if (messagesRef.current.length === 0) {
-      pendingApprovalsRef.current = [];
+      setPendingApprovals([]);
       pendingClarifyRef.current = null;
     }
   });
@@ -1297,7 +1310,7 @@ export function useDashboardChatTransport({
               (pending) => pending.requestId === approvalRequestId,
             )
           ) {
-            pendingApprovalsRef.current = [
+            setPendingApprovals([
               ...pendingApprovalsRef.current,
               {
                 requestId: approvalRequestId,
@@ -1309,7 +1322,7 @@ export function useDashboardChatTransport({
                   approvalRequestId,
                 ).choices,
               },
-            ];
+            ]);
           }
         }
       }
@@ -1490,6 +1503,7 @@ export function useDashboardChatTransport({
       connectionId,
       connectionMode,
       flushDeltasNow,
+      setPendingApprovals,
       messagesRef,
       scheduleDeltaFlush,
       profile,
@@ -1722,7 +1736,7 @@ export function useDashboardChatTransport({
           .request("session.close", { session_id: targetSessionId })
           .catch(() => undefined);
         runtimeSessionIdRef.current = null;
-        pendingApprovalsRef.current = [];
+        setPendingApprovals([]);
         storedSessionIdRef.current = storedSessionId;
         reasoningSegmentClosedRef.current = false;
         appliedModelRef.current = null;
@@ -1833,7 +1847,7 @@ export function useDashboardChatTransport({
         return switchAndValidate(freshSessionId);
       }
     },
-    [ensureRuntimeSession, model, modelBaseUrl, provider],
+    [ensureRuntimeSession, model, modelBaseUrl, provider, setPendingApprovals],
   );
 
   const syncDashboardAttachments = useCallback(
@@ -2075,7 +2089,7 @@ export function useDashboardChatTransport({
               .catch(() => undefined);
           }
           runtimeSessionIdRef.current = null;
-          pendingApprovalsRef.current = [];
+          setPendingApprovals([]);
           reasoningSegmentClosedRef.current = false;
           appliedModelRef.current = null;
         }
@@ -2137,6 +2151,7 @@ export function useDashboardChatTransport({
       respondClarify,
       connectionMode,
       enabled,
+      setPendingApprovals,
       fallbackOnUnavailable,
       ensureClient,
       ensureRuntimeSession,
@@ -2187,7 +2202,7 @@ export function useDashboardChatTransport({
             .catch(() => undefined);
           return false;
         }
-        pendingApprovalsRef.current = pendingApprovalsRef.current.slice(1);
+        setPendingApprovals(pendingApprovalsRef.current.slice(1));
         return true;
       } catch {
         return false;
@@ -2197,7 +2212,7 @@ export function useDashboardChatTransport({
         }
       }
     },
-    [enabled],
+    [enabled, setPendingApprovals],
   );
 
   const execSlash = useCallback(
@@ -2376,6 +2391,7 @@ export function useDashboardChatTransport({
     abort,
     enabled,
     hasDetachedTurn: detachedSessionId !== null,
+    hasPendingApproval,
     resyncAfterDetach,
     sessionYolo,
     toggleSessionYolo,

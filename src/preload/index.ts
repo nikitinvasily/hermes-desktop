@@ -1238,6 +1238,8 @@ const hermesAPI = {
       startedAt: number;
       /** By-modification ordering key (issue #74); startedAt fallback. */
       lastActivityAt: number;
+      /** True when activity postdates the last_read_at watermark (issue #90). */
+      unread?: boolean;
       source: string;
       messageCount: number;
       model: string;
@@ -1262,6 +1264,8 @@ const hermesAPI = {
       startedAt: number;
       /** By-modification ordering key (issue #74); startedAt fallback. */
       lastActivityAt: number;
+      /** True when activity postdates the last_read_at watermark (issue #90). */
+      unread?: boolean;
       source: string;
       messageCount: number;
       model: string;
@@ -1307,6 +1311,12 @@ const hermesAPI = {
       connectionId,
       profile,
     ),
+  markSessionRead: (
+    sessionId: string,
+    connectionId?: string,
+    profile?: string,
+  ): Promise<boolean | void> =>
+    ipcRenderer.invoke("mark-session-read", sessionId, connectionId, profile),
   listArchivedSessions: (
     limit?: number,
     offset?: number,

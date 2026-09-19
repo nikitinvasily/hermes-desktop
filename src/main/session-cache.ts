@@ -11,7 +11,11 @@ import {
 } from "../shared/session-title";
 import { getAppLocale } from "./locale";
 import { getDbConnection, sessionVisibilityPredicate } from "./db";
-import { hasLastActivityColumn } from "./sessions";
+import {
+  hasLastActivityColumn,
+  hasLastReadColumn,
+  sessionUnread,
+} from "./sessions";
 import { getSessionContextFolders } from "./session-context-folder-store";
 import {
   filterDerivedWorkspaceFolders,
@@ -42,6 +46,8 @@ export interface CachedSession {
   startedAt: number;
   /** By-modification ordering key (issue #74): last activity, startedAt fallback. */
   lastActivityAt: number;
+  /** True when activity postdates the `last_read_at` watermark (issue #90). */
+  unread?: boolean;
   source: string;
   messageCount: number;
   model: string;
@@ -51,6 +57,8 @@ export interface CachedSession {
 interface CacheData {
   sessions: CachedSession[];
   lastSync: number;
+  /** True after the one-time read-state baseline ran (issue #90). */
+  readBaselineDone?: boolean;
 }
 
 // Generate a short, readable title from the first user message (like ChatGPT/Claude)
@@ -91,6 +99,7 @@ function readCache(profile?: unknown): CacheData {
     const parsed = JSON.parse(readFileSync(file, "utf-8")) as CacheData;
     return {
       lastSync: typeof parsed.lastSync === "number" ? parsed.lastSync : 0,
+      readBaselineDone: parsed.readBaselineDone === true,
       sessions: Array.isArray(parsed.sessions)
         ? parsed.sessions.map((s) => ({
             ...s,
@@ -103,6 +112,7 @@ function readCache(profile?: unknown): CacheData {
                 : typeof s.startedAt === "number"
                   ? s.startedAt
                   : 0,
+            unread: s.unread === true,
             contextFolder:
               typeof s.contextFolder === "string" ? s.contextFolder : null,
           }))
@@ -166,6 +176,33 @@ function attachContextFolders(
 // Reconcile visible session metadata; archive changes do not update started_at.
 export function syncSessionCache(profile?: unknown): CachedSession[] {
   const cache = readCache(profile);
+  if (!cache.readBaselineDone) {
+    // One-time read-state baseline (issue #90): the agent treats
+    // `last_read_at` NULL as "read", so on an existing install where nothing
+    // ever wrote the watermark, no session can ever light up as unread.
+    // Stamp NULL rows with their own last activity once, recorded in the
+    // desktop cache file (per profile) so it never runs again. New sessions
+    // minted after this point start NULL and only get a watermark when the
+    // user actually opens them or views their finished turn.
+    //
+    // Runs on a WRITER connection BEFORE the read-only listing connection is
+    // taken: getDbConnection caches one connection, so doing this inside the
+    // reader's scope would throw SQLITE_READONLY (silently swallowed by the
+    // sync's catch, freezing the whole cache — the shipped fork.1535 bug).
+    try {
+      const writer = getDbConnection(false, profile);
+      if (writer && hasLastReadColumn(writer)) {
+        writer
+          .prepare(
+            `UPDATE sessions SET last_read_at = COALESCE(last_activity_at, started_at)
+             WHERE last_read_at IS NULL`,
+          )
+          .run();
+      }
+    } catch {
+      // Baseline is best-effort; a locked DB retries on the next sync.
+    }
+  }
   const db = getDb(profile);
   if (!db) return cache.sessions;
 
@@ -177,6 +214,7 @@ export function syncSessionCache(profile?: unknown): CachedSession[] {
         `SELECT s.id, s.started_at, s.source, s.message_count, s.model, s.title,
                 s.cwd, s.git_repo_root
                 ${hasLastActivityColumn(db) ? ", s.last_activity_at" : ""}
+                ${hasLastReadColumn(db) ? ", s.last_read_at" : ""}
          FROM sessions s
          WHERE ${sessionVisibilityPredicate(db)}
          ORDER BY ${
@@ -195,6 +233,7 @@ export function syncSessionCache(profile?: unknown): CachedSession[] {
       cwd: string | null;
       git_repo_root: string | null;
       last_activity_at?: number | null;
+      last_read_at?: number | null;
     }>;
 
     // Index existing sessions by id once so the per-row update below is
@@ -214,6 +253,10 @@ export function syncSessionCache(profile?: unknown): CachedSession[] {
           model: row.model || existing.model,
           title: row.title || existing.title,
           lastActivityAt: row.last_activity_at ?? row.started_at,
+          unread: sessionUnread(
+            row.last_read_at,
+            row.last_activity_at ?? row.started_at ?? 0,
+          ),
         });
         continue;
       }
@@ -241,6 +284,10 @@ export function syncSessionCache(profile?: unknown): CachedSession[] {
         title,
         startedAt: row.started_at,
         lastActivityAt: row.last_activity_at ?? row.started_at,
+        unread: sessionUnread(
+          row.last_read_at,
+          row.last_activity_at ?? row.started_at ?? 0,
+        ),
         source: row.source,
         messageCount: row.message_count,
         model: row.model || "",
@@ -274,6 +321,7 @@ export function syncSessionCache(profile?: unknown): CachedSession[] {
     const updated: CacheData = {
       sessions: allSessions,
       lastSync: Math.floor(Date.now() / 1000),
+      readBaselineDone: true,
     };
     writeCache(updated, profile);
     return updated.sessions;

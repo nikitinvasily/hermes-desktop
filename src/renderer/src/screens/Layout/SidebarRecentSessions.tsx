@@ -15,7 +15,6 @@ import {
   ChevronRight,
   Circle,
   Folder,
-  Loader,
   MoreHorizontal,
   Pencil,
   Pin,
@@ -40,6 +39,9 @@ interface RecentSession {
   startedAt?: number;
   /** By-modification ordering key (issue #74); startedAt fallback. */
   lastActivityAt?: number;
+  /** Finished-but-not-viewed bullet (issue #90): activity postdates the
+   *  agent's last_read_at watermark. */
+  unread?: boolean;
 }
 
 /** Recency key for sidebar ordering (issue #74): last activity, startedAt fallback. */
@@ -117,7 +119,8 @@ function sameSessions(a: RecentSession[], b: RecentSession[]): boolean {
     if (
       a[i].id !== b[i].id ||
       a[i].title !== b[i].title ||
-      (a[i].contextFolder ?? null) !== (b[i].contextFolder ?? null)
+      (a[i].contextFolder ?? null) !== (b[i].contextFolder ?? null) ||
+      a[i].unread !== b[i].unread
     ) {
       return false;
     }
@@ -185,6 +188,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   activeProfile,
   currentSessionId,
   loadingSessionIds,
+  approvalSessionIds,
   resumingSessionId,
   onSelect,
   onNewChatInProject,
@@ -199,6 +203,8 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   currentSessionId: string | null;
   /** Session ids of every run currently generating (multiple run at once). */
   loadingSessionIds: Set<string>;
+  /** Session ids with a pending command approval (issue #90 bullets). */
+  approvalSessionIds: Set<string>;
   /** A session whose history is being fetched for resume (transient spinner). */
   resumingSessionId: string | null;
   onSelect: (sessionId: string) => void;
@@ -328,18 +334,29 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         contextFolder?: string | null;
         startedAt?: number;
         lastActivityAt?: number;
+        unread?: boolean;
       }>,
       limit = RECENT_SESSIONS_PAGE_SIZE,
     ): RecentSession[] =>
       list
         .slice(0, limit)
-        .map(({ id, title, contextFolder, startedAt, lastActivityAt }) => ({
-          id,
-          title,
-          contextFolder: contextFolder ?? null,
-          startedAt,
-          lastActivityAt: lastActivityAt ?? startedAt,
-        })),
+        .map(
+          ({
+            id,
+            title,
+            contextFolder,
+            startedAt,
+            lastActivityAt,
+            unread,
+          }) => ({
+            id,
+            title,
+            contextFolder: contextFolder ?? null,
+            startedAt,
+            lastActivityAt: lastActivityAt ?? startedAt,
+            unread: unread === true,
+          }),
+        ),
     [],
   );
 
@@ -501,9 +518,13 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
       "hermes-session-context-folder-changed",
       onContextFolderChanged,
     );
+    // A turn finished somewhere (issue #90): the session may now be unread —
+    // refresh past the throttle so the sidebar bullet appears immediately.
+    window.addEventListener("hermes-sessions-maybe-changed", onFocus);
     return () => {
       clearInterval(timer);
       window.removeEventListener("focus", onFocus);
+      window.removeEventListener("hermes-sessions-maybe-changed", onFocus);
       window.removeEventListener(
         "hermes-session-context-folder-changed",
         onContextFolderChanged,
@@ -1149,6 +1170,8 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   ): React.JSX.Element => {
     const title = s.title || t("sessions.newConversation");
     const loading = resumingSessionId === s.id || loadingSessionIds.has(s.id);
+    const awaitingApproval = approvalSessionIds.has(s.id);
+    const unread = s.unread === true && !loading && !awaitingApproval;
     // The active highlight persists while the agent works (loading) — the
     // spinner already signals activity, dropping the highlight made the
     // current chat look unfocused on every command run (issue #72).
@@ -1198,7 +1221,21 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         className={`sidebar-recent-session ${project ? "project-child" : ""} ${
           active ? "active" : ""
         } ${menuOpen ? "menu-open" : ""}`}
-        onClick={() => onSelect(s.id)}
+        onClick={() => {
+          // Read-state bullet (issue #90): opening a session marks it read —
+          // optimistic local clear plus the durable watermark write.
+          if (s.unread) {
+            setSessions((prev) =>
+              prev.map((row) =>
+                row.id === s.id ? { ...row, unread: false } : row,
+              ),
+            );
+            void window.hermesAPI
+              .markSessionRead(s.id, connectionId, activeProfile)
+              .catch(() => undefined);
+          }
+          onSelect(s.id);
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
@@ -1211,10 +1248,25 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         }}
         title={title}
       >
-        {loading ? (
-          <Loader
-            className="sidebar-recent-session-dot sidebar-recent-session-dot--loading"
-            size={11}
+        {awaitingApproval ? (
+          <Circle
+            className="sidebar-recent-session-dot sidebar-recent-session-dot--approval"
+            size={7}
+            fill="currentColor"
+            strokeWidth={0}
+          />
+        ) : loading ? (
+          <span
+            className="sidebar-recent-session-spinner"
+            aria-label={t("sessions.newConversation")}
+            role="img"
+          />
+        ) : unread ? (
+          <Circle
+            className="sidebar-recent-session-dot sidebar-recent-session-dot--unread"
+            size={7}
+            fill="currentColor"
+            strokeWidth={0}
           />
         ) : pinned ? (
           <Pin className="sidebar-recent-session-dot" size={11} />
@@ -1522,9 +1574,9 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         </div>
         {loadingMore && (
           <div className="sidebar-recent-loading" aria-live="polite">
-            <Loader
-              className="sidebar-recent-session-dot sidebar-recent-session-dot--loading"
-              size={11}
+            <span
+              className="sidebar-recent-session-spinner"
+              aria-hidden="true"
             />
             <span>{t("common.loadingShort")}</span>
           </div>

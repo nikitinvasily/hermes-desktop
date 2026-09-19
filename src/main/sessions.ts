@@ -40,6 +40,13 @@ export interface SessionSummary {
    * surfaces that do not care keep compiling.
    */
   lastActivityAt?: number | null;
+  /**
+   * True when the session has activity newer than the agent's native
+   * `last_read_at` watermark (NULL = read, 0 = unread marker) — the
+   * sidebar's "finished but not viewed" bullet (issue #90). Optional so
+   * surfaces that do not care keep compiling.
+   */
+  unread?: boolean;
   endedAt: number | null;
   messageCount: number;
   model: string;
@@ -287,6 +294,26 @@ export function hasLastActivityColumn(db: Database.Database): boolean {
   return columns.some((column) => column.name === "last_activity_at");
 }
 
+/** Read-state watermark column guard (issue #90); older DBs read as "read". */
+export function hasLastReadColumn(db: Database.Database): boolean {
+  const columns = db.prepare("PRAGMA table_info(sessions)").all() as Array<{
+    name: string;
+  }>;
+  return columns.some((column) => column.name === "last_read_at");
+}
+
+/**
+ * Unread flag mirroring hermes-agent's `SessionDB.session_unread`:
+ * `last_read_at` is a watermark — NULL = never tracked = read, and a row is
+ * unread when its last activity postdates the watermark (issue #90).
+ */
+export function sessionUnread(
+  lastReadAt: number | null | undefined,
+  lastActivityAt: number,
+): boolean {
+  return lastReadAt != null && lastActivityAt > lastReadAt;
+}
+
 /**
  * ORDER BY expression for by-modification ordering (issue #74): last
  * activity when the column exists, else plain started_at. The paired SELECT
@@ -314,6 +341,7 @@ export function listSessions(
         s.source,
         s.started_at,
         ${hasLastActivityColumn(db) ? "s.last_activity_at," : ""}
+        ${hasLastReadColumn(db) ? "s.last_read_at," : ""}
         s.ended_at,
         s.message_count,
         s.model,
@@ -328,6 +356,7 @@ export function listSessions(
     source: string;
     started_at: number;
     last_activity_at?: number | null;
+    last_read_at?: number | null;
     ended_at: number | null;
     message_count: number;
     model: string;
@@ -339,6 +368,10 @@ export function listSessions(
     source: r.source,
     startedAt: r.started_at,
     lastActivityAt: r.last_activity_at ?? r.started_at,
+    unread: sessionUnread(
+      r.last_read_at,
+      r.last_activity_at ?? r.started_at ?? 0,
+    ),
     endedAt: r.ended_at,
     messageCount: r.message_count,
     model: r.model || "",
@@ -363,6 +396,22 @@ export function setSessionArchived(
   const result = db
     .prepare("UPDATE sessions SET archived = ? WHERE id = ?")
     .run(archived ? 1 : 0, sessionId);
+  return result.changes > 0;
+}
+
+/**
+ * Mark a session read: stamp the agent's native `last_read_at` watermark to
+ * now (mirrors `SessionDB.set_session_read`, issue #90). Single-row write —
+ * like the fork's archived/pinned wrappers, no compression-lineage fan-out.
+ * Returns false when the DB (or its schema) can't serve the request.
+ */
+export function markSessionRead(sessionId: string, profile?: unknown): boolean {
+  const db = getDb(false, profile);
+  if (!db) return false;
+  if (!hasLastReadColumn(db)) return false;
+  const result = db
+    .prepare("UPDATE sessions SET last_read_at = ? WHERE id = ?")
+    .run(Date.now() / 1000, sessionId);
   return result.changes > 0;
 }
 
