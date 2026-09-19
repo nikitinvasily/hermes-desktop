@@ -760,15 +760,33 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     () => sessions.filter((s) => pinnedIds.has(s.id)),
     [sessions, pinnedIds],
   );
+  // Irreversible handoff (issue #99 follow-up): once a pending row's real
+  // session has landed in the synced list, the optimistic row is retired
+  // FOREVER — recording the id here means a later DELETE of that session can
+  // never resurrect the pending row (the run still holds the title, so the
+  // dedupe filter alone would keep the deleted chat visible). The id is
+  // recorded only when it is actually SEEN in the synced list: the transport
+  // reports sessionId before the row lands in sync, and recording it early
+  // would drop the pending row before the real one exists.
+  const handedOffSessionIdsRef = useRef<Set<string>>(new Set());
   const { projectGroups, chats } = useMemo(() => {
+    const syncedIds = new Set(sessions.map((s) => s.id));
+    for (const p of pendingSessions) {
+      if (p.pendingSessionId && syncedIds.has(p.pendingSessionId)) {
+        handedOffSessionIdsRef.current.add(p.pendingSessionId);
+      }
+    }
+    const handedOff = handedOffSessionIdsRef.current;
     // Pending send-time rows (issue #99) participate in grouping so a
     // project-bound run shows inside its project while the agent works.
     // A pending row whose session has ALREADY landed in the synced list is
     // dropped here (dedupe by session id) — that is the handoff from the
     // optimistic row to the real one. Rows without an id yet always stay.
-    const syncedIds = new Set(sessions.map((s) => s.id));
     const livePending = pendingSessions.filter(
-      (p) => !p.pendingSessionId || !syncedIds.has(p.pendingSessionId),
+      (p) =>
+        !p.pendingSessionId ||
+        (!syncedIds.has(p.pendingSessionId) &&
+          !handedOff.has(p.pendingSessionId)),
     );
     const withPending = [
       ...sessions.filter((s) => !pinnedIds.has(s.id)),
