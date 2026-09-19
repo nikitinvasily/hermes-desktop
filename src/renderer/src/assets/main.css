@@ -5516,18 +5516,14 @@ body:has(.shell-vibrant),
 
 .chat-bubble-user {
   /* Same surface treatment as the chat input row (issue #92 follow-up):
-     --bg-secondary background with a --border-bright stroke that transitions
-     to the input's focused accent tint on hover — same color mix and timing
-     as .chat-input-wrapper:focus-within, no glow, no animation. */
+     --bg-secondary background; the stroke is PERMANENTLY the input's
+     focused accent tint (color-mix accent 45%) — no hover state, no
+     transition, it always reads as focused. */
   background: var(--bg-secondary);
   color: var(--text-primary);
-  border: 1px solid var(--border-bright);
-  transition: border-color var(--transition);
+  border: 1px solid
+    color-mix(in srgb, var(--accent) 45%, var(--border-bright));
   border-bottom-right-radius: 4px;
-}
-
-.chat-bubble-user:hover {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-bright));
 }
 
 /* Sent prompts use the same sanitized Markdown pipeline as agent responses.
