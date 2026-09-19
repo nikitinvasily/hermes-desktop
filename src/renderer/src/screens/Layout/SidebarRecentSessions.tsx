@@ -1172,7 +1172,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     const title = s.title || t("sessions.newConversation");
     const loading = resumingSessionId === s.id || loadingSessionIds.has(s.id);
     const awaitingApproval = approvalSessionIds.has(s.id);
-    const unread = s.unread === true && !loading;
+    const unread = s.unread === true && !loading && !awaitingApproval;
     // The active highlight persists while the agent works (loading) — the
     // spinner already signals activity, dropping the highlight made the
     // current chat look unfocused on every command run (issue #72).
@@ -1249,17 +1249,17 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         }}
         title={title}
       >
-        {loading ? (
-          <Loader
-            className="sidebar-recent-session-dot sidebar-recent-session-dot--loading"
-            size={13}
-          />
-        ) : awaitingApproval ? (
+        {awaitingApproval ? (
           <Circle
             className="sidebar-recent-session-dot sidebar-recent-session-dot--approval"
             size={7}
             fill="currentColor"
             strokeWidth={0}
+          />
+        ) : loading ? (
+          <Loader
+            className="sidebar-recent-session-dot sidebar-recent-session-dot--loading"
+            size={13}
           />
         ) : unread ? (
           <Circle

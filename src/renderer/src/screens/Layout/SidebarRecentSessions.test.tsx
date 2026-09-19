@@ -677,4 +677,48 @@ describe("SidebarRecentSessions state bullets", () => {
       "sidebar-recent-session-dot--unread",
     );
   });
+
+  it("shows the approval dot over the spinner while a loaded run awaits approval", async () => {
+    // A chat waiting on a command approval keeps run.loading true (the turn
+    // has not completed) — the approval bullet must still win (issue #90).
+    listCachedSessions.mockImplementation(async () => [
+      {
+        id: "session-approval-running",
+        title: "Approval running chat",
+        contextFolder: null,
+        unread: false,
+      },
+    ]);
+    syncSessionCache.mockImplementation(async () => [
+      {
+        id: "session-approval-running",
+        title: "Approval running chat",
+        contextFolder: null,
+        unread: false,
+      },
+    ]);
+    render(
+      <SidebarRecentSessions
+        open
+        connectionId="connection-main"
+        activeProfile="default"
+        currentSessionId={null}
+        loadingSessionIds={new Set(["session-approval-running"])}
+        approvalSessionIds={new Set(["session-approval-running"])}
+        resumingSessionId={null}
+        onSelect={vi.fn()}
+        onSessionDeleted={vi.fn()}
+        scrollRootRef={{ current: null }}
+      />,
+    );
+
+    await screen.findByText("Approval running chat");
+    const dot = bulletFor("Approval running chat");
+    expect(dot?.getAttribute("class")).toContain(
+      "sidebar-recent-session-dot--approval",
+    );
+    expect(dot?.getAttribute("class")).not.toContain(
+      "sidebar-recent-session-dot--loading",
+    );
+  });
 });

@@ -284,6 +284,11 @@ function Layout({
   // otherwise mount two tabs for the same session (the live check straddles an
   // await, so it can't rely on `runs` state alone).
   const resumingRef = useRef<Set<string>>(new Set());
+  // Latest runs/activeRunId for stable callbacks (issue #90 read-marking).
+  const runsRef = useRef(runs);
+  runsRef.current = runs;
+  const activeRunIdRef = useRef(activeRunId);
+  activeRunIdRef.current = activeRunId;
   const sidebarChatScrollRef = useRef<HTMLDivElement | null>(null);
   const sidebarScrollbarHideRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -412,12 +417,21 @@ function Layout({
   // Per-run reporters wired into each <Chat>.
   const handleRunLoading = useCallback((runId: string, loading: boolean) => {
     setRuns((prev) => patchRun(prev, runId, { loading }));
-    // Read-state bullet (issue #90): a finished turn may leave its session
-    // unread (or newly active) — nudge the sidebar to re-sync instead of
-    // waiting for its 60s interval.
-    if (!loading) {
-      window.dispatchEvent(new CustomEvent("hermes-sessions-maybe-changed"));
+    if (loading) return;
+    // Read-state bullet (issue #90): a finished turn in the VISIBLE chat means
+    // the user just saw the result — stamp the read watermark so the session
+    // does not light up as unread behind their back. Background runs keep
+    // their unread signal (the whole point of the bullet).
+    const run = runsRef.current.find((r) => r.runId === runId);
+    if (run?.sessionId && run.runId === activeRunIdRef.current) {
+      void window.hermesAPI
+        .markSessionRead(run.sessionId, run.connectionId, run.profile)
+        .catch(() => undefined);
     }
+    // A finished turn may also leave its session unread (background) or
+    // newly active — nudge the sidebar to re-sync instead of waiting for
+    // its 60s interval.
+    window.dispatchEvent(new CustomEvent("hermes-sessions-maybe-changed"));
   }, []);
   // Sidebar approval bullet (issue #90): lift the transport's pending
   // approval flag onto the run; guard so an unchanged flag doesn't re-render.

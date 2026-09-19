@@ -57,6 +57,8 @@ export interface CachedSession {
 interface CacheData {
   sessions: CachedSession[];
   lastSync: number;
+  /** True after the one-time read-state baseline ran (issue #90). */
+  readBaselineDone?: boolean;
 }
 
 // Generate a short, readable title from the first user message (like ChatGPT/Claude)
@@ -97,6 +99,7 @@ function readCache(profile?: unknown): CacheData {
     const parsed = JSON.parse(readFileSync(file, "utf-8")) as CacheData;
     return {
       lastSync: typeof parsed.lastSync === "number" ? parsed.lastSync : 0,
+      readBaselineDone: parsed.readBaselineDone === true,
       sessions: Array.isArray(parsed.sessions)
         ? parsed.sessions.map((s) => ({
             ...s,
@@ -177,6 +180,20 @@ export function syncSessionCache(profile?: unknown): CachedSession[] {
   if (!db) return cache.sessions;
 
   try {
+    // One-time read-state baseline (issue #90): the agent treats
+    // `last_read_at` NULL as "read", so on an existing install where nothing
+    // ever wrote the watermark, no session can ever light up as unread.
+    // Stamp NULL rows with their own last activity once, recorded in the
+    // desktop cache file (per profile) so it never runs again. New sessions
+    // minted after this point start NULL and only get a watermark when the
+    // user actually opens them or views their finished turn.
+    if (!cache.readBaselineDone && hasLastReadColumn(db)) {
+      db.prepare(
+        `UPDATE sessions SET last_read_at = COALESCE(last_activity_at, started_at)
+         WHERE last_read_at IS NULL`,
+      ).run();
+    }
+
     // Read the complete visible set so old sessions can disappear on archive
     // and reappear on unarchive. Reuse cached titles to avoid rereading messages.
     const rows = db
@@ -291,6 +308,7 @@ export function syncSessionCache(profile?: unknown): CachedSession[] {
     const updated: CacheData = {
       sessions: allSessions,
       lastSync: Math.floor(Date.now() / 1000),
+      readBaselineDone: true,
     };
     writeCache(updated, profile);
     return updated.sessions;
