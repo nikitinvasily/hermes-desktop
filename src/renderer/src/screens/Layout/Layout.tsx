@@ -303,6 +303,35 @@ function Layout({
   const currentSessionId =
     runs.find((r) => r.runId === activeRunId)?.sessionId ?? null;
 
+  // Optimistic send-time sidebar rows (issue #99, stage 2): a run that has
+  // SENT its first message (title reported from Chat) shows in the sidebar
+  // immediately — from the moment of sending, not the first agent reply.
+  // Blank scratch runs are excluded (the #63 revert decision stands). The
+  // run may already carry a session id (the transport reports it early)
+  // while state.db only gains the visible sessions row later in the turn —
+  // so the row carries the id along and the SIDEBAR drops it only when the
+  // real synced row has actually landed (dedupe by session id).
+  const pendingSidebarRows = useMemo(
+    () =>
+      runs
+        .filter(
+          (r) =>
+            r.title &&
+            r.connectionId === connectionId &&
+            r.profile === activeProfile,
+        )
+        .map((r) => ({
+          id: `pending-${r.runId}`,
+          title: r.title!,
+          contextFolder: r.initialContextFolder ?? null,
+          pendingRunId: r.runId,
+          pendingSessionId: r.sessionId,
+          pendingLoading: r.loading,
+          lastActivityAt: Date.now(),
+        })),
+    [runs, connectionId, activeProfile],
+  );
+
   const loadingSessionIds = useMemo(
     () => deriveLoadingSessionIds(runs),
     [runs],
@@ -1117,6 +1146,9 @@ function Layout({
                     // so the user isn't left viewing a now-gone conversation.
                     if (id === currentSessionId) handleNewChat();
                   }}
+                  pendingSessions={pendingSidebarRows}
+                  onActivatePending={handleActivateRun}
+                  activePendingRunId={activeRunId}
                   scrollRootRef={sidebarChatScrollRef}
                 />
               </div>

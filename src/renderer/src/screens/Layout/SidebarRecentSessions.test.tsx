@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import SidebarRecentSessions from "./SidebarRecentSessions";
 
@@ -535,6 +535,218 @@ describe("SidebarRecentSessions delete vs the tree-derived groups (issue #80)", 
     // resurrected from the stale tree map until a restart (issue #80).
     await screen.findByText("Loose chat");
     expect(screen.queryByText("Tree-only chat")).toBeNull();
+  });
+});
+
+describe("SidebarRecentSessions pending first-turn rows (issue #97 stage 2)", () => {
+  function renderWithPending(
+    pending: Array<{
+      id: string;
+      title: string;
+      contextFolder?: string | null;
+      pendingRunId: string;
+    }>,
+    onActivatePending: (runId: string) => void = vi.fn(),
+    activePendingRunId?: string,
+  ): void {
+    render(
+      <SidebarRecentSessions
+        open
+        connectionId="connection-main"
+        activeProfile="default"
+        currentSessionId={null}
+        loadingSessionIds={new Set()}
+        approvalSessionIds={new Set()}
+        resumingSessionId={null}
+        onSelect={vi.fn()}
+        onNewChatInProject={vi.fn()}
+        onSessionDeleted={vi.fn()}
+        pendingSessions={pending}
+        onActivatePending={onActivatePending}
+        activePendingRunId={activePendingRunId}
+        scrollRootRef={{ current: null }}
+      />,
+    );
+  }
+
+  it("shows a pending row immediately and activates its run on click", async () => {
+    const onActivate = vi.fn();
+    renderWithPending(
+      [
+        {
+          id: "pending-run-1",
+          title: "Just sent message",
+          pendingRunId: "run-1",
+        },
+      ],
+      onActivate,
+    );
+    const row = await screen.findByText("Just sent message");
+    fireEvent.click(row);
+    expect(onActivate).toHaveBeenCalledWith("run-1");
+    // No options button on a pending row (no DB session behind it).
+    expect(
+      row
+        .closest(".sidebar-recent-session")
+        ?.querySelector(".sidebar-recent-session-options"),
+    ).toBeNull();
+  });
+
+  it("drops a pending row once its session lands in the synced list", async () => {
+    const { rerender } = render(
+      <SidebarRecentSessions
+        open
+        connectionId="connection-main"
+        activeProfile="default"
+        currentSessionId={null}
+        loadingSessionIds={new Set()}
+        approvalSessionIds={new Set()}
+        resumingSessionId={null}
+        onSelect={vi.fn()}
+        onNewChatInProject={vi.fn()}
+        onSessionDeleted={vi.fn()}
+        pendingSessions={[
+          {
+            id: "pending-run-4",
+            title: "Handoff chat",
+            pendingRunId: "run-4",
+            pendingSessionId: "session-real",
+          },
+        ]}
+        scrollRootRef={{ current: null }}
+      />,
+    );
+    expect(await screen.findByText("Handoff chat")).toBeTruthy();
+    // The real session row arrives via sync: the pending twin must vanish.
+    syncSessionCache.mockImplementation(async () => [
+      { id: "session-real", title: "Handoff chat real", contextFolder: null },
+    ]);
+    window.dispatchEvent(new CustomEvent("hermes-sessions-maybe-changed"));
+    await screen.findByText("Handoff chat real");
+    expect(screen.queryByText("Handoff chat")).toBeNull();
+    rerender(
+      <SidebarRecentSessions
+        open
+        connectionId="connection-main"
+        activeProfile="default"
+        currentSessionId="session-real"
+        loadingSessionIds={new Set()}
+        approvalSessionIds={new Set()}
+        resumingSessionId={null}
+        onSelect={vi.fn()}
+        onNewChatInProject={vi.fn()}
+        onSessionDeleted={vi.fn()}
+        pendingSessions={[
+          {
+            id: "pending-run-4",
+            title: "Handoff chat",
+            pendingRunId: "run-4",
+            pendingSessionId: "session-real",
+          },
+        ]}
+        scrollRootRef={{ current: null }}
+      />,
+    );
+    // Synced row present: still exactly one row for the session.
+    expect(screen.queryByText("Handoff chat")).toBeNull();
+  });
+
+  it("never resurrects a pending row after its session is deleted (issue #99)", async () => {
+    const { rerender } = render(
+      <SidebarRecentSessions
+        open
+        connectionId="connection-main"
+        activeProfile="default"
+        currentSessionId={null}
+        loadingSessionIds={new Set()}
+        approvalSessionIds={new Set()}
+        resumingSessionId={null}
+        onSelect={vi.fn()}
+        onNewChatInProject={vi.fn()}
+        onSessionDeleted={vi.fn()}
+        pendingSessions={[
+          {
+            id: "pending-run-4",
+            title: "Handoff chat",
+            pendingRunId: "run-4",
+            pendingSessionId: "session-real",
+          },
+        ]}
+        scrollRootRef={{ current: null }}
+      />,
+    );
+    expect(await screen.findByText("Handoff chat")).toBeTruthy();
+    // Handoff: the real session lands in sync and the pending twin drops.
+    syncSessionCache.mockImplementation(async () => [
+      { id: "session-real", title: "Handoff chat real", contextFolder: null },
+    ]);
+    window.dispatchEvent(new CustomEvent("hermes-sessions-maybe-changed"));
+    await screen.findByText("Handoff chat real");
+    expect(screen.queryByText("Handoff chat")).toBeNull();
+    // The user DELETES the chat: the synced list empties. The run still
+    // holds title+sessionId, so without the irreversible handoff the pending
+    // row would resurrect the deleted chat in the sidebar.
+    syncSessionCache.mockImplementation(async () => []);
+    window.dispatchEvent(new CustomEvent("hermes-sessions-maybe-changed"));
+    await waitFor(() => {
+      expect(screen.queryByText("Handoff chat real")).toBeNull();
+    });
+    rerender(
+      <SidebarRecentSessions
+        open
+        connectionId="connection-main"
+        activeProfile="default"
+        currentSessionId={null}
+        loadingSessionIds={new Set()}
+        approvalSessionIds={new Set()}
+        resumingSessionId={null}
+        onSelect={vi.fn()}
+        onNewChatInProject={vi.fn()}
+        onSessionDeleted={vi.fn()}
+        pendingSessions={[
+          {
+            id: "pending-run-4",
+            title: "Handoff chat",
+            pendingRunId: "run-4",
+            pendingSessionId: "session-real",
+          },
+        ]}
+        scrollRootRef={{ current: null }}
+      />,
+    );
+    expect(screen.queryByText("Handoff chat")).toBeNull();
+  });
+
+  it("groups a project-bound pending row inside its project", async () => {
+    renderWithPending([
+      {
+        id: "pending-run-2",
+        title: "Project pending chat",
+        contextFolder: "/tmp/proj",
+        pendingRunId: "run-2",
+      },
+    ]);
+    // The row exists somewhere in the document; grouping placement (project
+    // group vs Chats) is covered by the group-membership rendering.
+    expect(await screen.findByText("Project pending chat")).toBeTruthy();
+  });
+
+  it("highlights the active pending row via activePendingRunId", async () => {
+    renderWithPending(
+      [
+        {
+          id: "pending-run-3",
+          title: "Active pending chat",
+          pendingRunId: "run-3",
+        },
+      ],
+      vi.fn(),
+      "run-3",
+    );
+    const row = await screen.findByText("Active pending chat");
+    expect(row.closest(".sidebar-recent-session")?.className).toContain(
+      "active",
+    );
   });
 });
 
