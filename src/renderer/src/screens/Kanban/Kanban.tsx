@@ -12,6 +12,7 @@ import {
   Wand,
 } from "../../assets/icons";
 import { useI18n } from "../../components/useI18n";
+import { useConnectionChangeReload } from "../../hooks/useConnectionChangeReload";
 import { OrbLoader } from "../../components/OrbLoader";
 
 interface KanbanProps {
@@ -360,6 +361,17 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
   useEffect(() => {
     loadAll();
   }, [loadAll]);
+
+  // Boards and tasks are per-connection data (local kanban.db vs the remote
+  // dashboard plugin / SSH CLI), so a local/remote switch must refetch or the
+  // board keeps showing the previous connection's data (issue #105). The
+  // user's board choice survives the switch; if that slug does not exist on
+  // the new source, currentBoard falls back to the boards list's is_current.
+  useConnectionChangeReload(() => {
+    setError("");
+    setRemoteUnsupported(false);
+    loadAll();
+  });
 
   // Refresh when the user returns to the app/tab. The gateway dispatcher
   // mutates kanban.db out-of-band, so a board left open in the background

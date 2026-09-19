@@ -26,6 +26,8 @@ The board stays current without a live event stream, using three refresh trigger
 
 A 6-second poll (`POLL_INTERVAL_MS`) runs while the tab is visible, a `focus` / `visibilitychange` listener refetches whenever the user returns to the app, and every mutation handler calls `loadAll(true)` so a UI action reflects immediately rather than waiting for the next tick.
 
+Boards and tasks are per-connection data, so a fourth trigger comes from [[src/renderer/src/hooks/useConnectionChangeReload.ts#useConnectionChangeReload]]: switching the active connection (local ↔ remote/ssh) reloads the board, keeping the user's board choice; a slug missing on the new source falls back to the boards list's `is_current` entry.
+
 ## Detail drawer
 
 Clicking a card opens a right-docked issue drawer (`kanban-detail-drawer`) fed by `kanbanGetTask` ([[src/main/kanban.ts#getTask]]).

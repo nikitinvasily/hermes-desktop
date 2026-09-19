@@ -16,6 +16,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { AgentMarkdown } from "../../components/AgentMarkdown";
 import { useI18n } from "../../components/useI18n";
+import { useConnectionChangeReload } from "../../hooks/useConnectionChangeReload";
 import { OrbLoader } from "../../components/OrbLoader";
 import type {
   RegistryKind,
@@ -162,6 +163,16 @@ export default function Discover({
   useEffect(() => {
     if (visible) loadInstalled();
   }, [visible, loadInstalled]);
+
+  // Installed skills/registry are per-connection data (remote/ssh branches in
+  // the main process), so a local/remote switch must refetch or the screen
+  // keeps showing the previous connection's installed set (issue #105). The
+  // catalog itself is global, but reload() re-runs the whole load anyway.
+  useConnectionChangeReload(() => {
+    setError(null);
+    setLoading(true);
+    load();
+  });
 
   // Close the detail modal on Escape.
   useEffect(() => {
