@@ -5515,8 +5515,14 @@ body:has(.shell-vibrant),
 }
 
 .chat-bubble-user {
-  background: var(--user-bubble);
-  color: var(--user-bubble-text);
+  /* Same surface treatment as the chat input row (issue #92 follow-up):
+     --bg-secondary background; the stroke is PERMANENTLY the input's
+     focused accent tint (color-mix accent 45%) — no hover state, no
+     transition, it always reads as focused. */
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid
+    color-mix(in srgb, var(--accent) 45%, var(--border-bright));
   border-bottom-right-radius: 4px;
 }
 
@@ -17111,14 +17117,6 @@ body:has(.shell-vibrant),
 ::selection {
   background: var(--selection);
   color: var(--text-primary);
-}
-
-/* User bubbles have a blue background (#2563eb dark / #1558cc light default) — the theme's
-   --selection color is also blue-toned and composites to nearly the same
-   shade on top of the user bubble.  Use a brighter sky-blue so the
-   selection highlight remains clearly visible on user messages. */
-.chat-bubble-user ::selection {
-  background: rgba(120, 190, 255, 0.7);
 }
 
 /* ========================================================================
