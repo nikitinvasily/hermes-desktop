@@ -50,9 +50,11 @@ The native sidebar scrollbar is hidden to avoid layout shifts. [[src/renderer/sr
 
 ## First-turn sidebar visibility
 
-A chat becomes visible in the sidebar the moment its first message creates the session, not after the first turn ends.
+A chat becomes visible in the sidebar the MOMENT its first message is sent, not when the agent first replies or the turn ends.
 
 [[src/renderer/src/screens/Layout/Layout.tsx#Layout]]'s `handleRunSessionId` watches for a run's session id transitioning null → value (guarded on the previous value via a ref, outside the state updater) and dispatches `hermes-sessions-maybe-changed`. [[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx]] handles that event with a forced refresh that bypasses the 5s throttle, so the new row paints while the agent is still generating; the backend had already inserted the `sessions` row at turn start. The same event also fires when any run's turn finishes (unread bullets).
+
+Optimistic send-time rows (issue #99, stage 2) cover the remaining gap before the first reply: [[src/renderer/src/screens/Layout/Layout.tsx#Layout]] derives `pendingSidebarRows` from runs of the active connection+profile that have a title (first user message reported) but no session id yet, and passes them into [[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx]] alongside `onActivatePending` and `activePendingRunId`. A pending row joins the normal grouping pass (its run's `initialContextFolder` decides project group vs Chats), renders with the spinner and no options button, and clicking it re-activates the run. Blank scratch chats stay invisible (the #63 revert stands); the row is dropped as soon as the run reports its session id, replaced by the synced row from the force refresh above.
 
 ## Native archive visibility
 

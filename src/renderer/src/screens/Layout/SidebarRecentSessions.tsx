@@ -42,6 +42,11 @@ interface RecentSession {
   /** Finished-but-not-viewed bullet (issue #90): activity postdates the
    *  agent's last_read_at watermark. */
   unread?: boolean;
+  /** Optimistic first-turn row (issue #97, stage 2): the run has sent its
+   *  first message (title known) but the agent has not answered yet, so no
+   *  session id exists. Rendered like a normal row minus the session menu;
+   *  replaced by the real synced session once the turn reports its id. */
+  pendingRunId?: string;
 }
 
 /** Recency key for sidebar ordering (issue #74): last activity, startedAt fallback. */
@@ -193,6 +198,9 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   onSelect,
   onNewChatInProject,
   onSessionDeleted,
+  pendingSessions = [],
+  onActivatePending,
+  activePendingRunId,
   scrollRootRef,
 }: {
   open: boolean;
@@ -213,6 +221,14 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   onNewChatInProject?: (folder: string | null) => void;
   /** Notifies Layout when a row is deleted so it can leave a stale active chat. */
   onSessionDeleted?: (sessionId: string) => void;
+  /** Optimistic first-turn rows (issue #97 stage 2): runs that sent their
+   *  first message but have no session id yet. Prepended above the synced
+   *  rows; clicking activates the run. */
+  pendingSessions?: RecentSession[];
+  /** Activate a pending row's run (switches the visible chat). */
+  onActivatePending?: (runId: string) => void;
+  /** The run currently visible in the chat pane; highlights its pending row. */
+  activePendingRunId?: string;
   /** Scroll container owned by Layout; nearing its bottom loads the next page. */
   scrollRootRef: RefObject<HTMLDivElement | null>;
 }): React.JSX.Element | null {
@@ -736,9 +752,16 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     [sessions, pinnedIds],
   );
   const { projectGroups, chats } = useMemo(() => {
-    const base = groupSessionsByWorkspace(
-      sessions.filter((s) => !pinnedIds.has(s.id)),
-    );
+    // Pending first-turn rows (issue #97 stage 2) participate in grouping so
+    // a project-bound run shows inside its project while the agent works.
+    // Deduped against synced rows is unnecessary: a pending row has no real
+    // session id, and it is dropped the moment the run reports one (Layout
+    // stops listing it), while the synced row arrives via the force refresh.
+    const withPending = [
+      ...sessions.filter((s) => !pinnedIds.has(s.id)),
+      ...pendingSessions,
+    ];
+    const base = groupSessionsByWorkspace(withPending);
     // Inside-group order is by-modification (issue #74): the main side sorts
     // its lists, but re-sorting here keeps groups correct even when a window
     // arrives unsorted (remote fallback paths).
@@ -838,7 +861,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     // Flat Chats list: by-modification order (issue #74).
     base.chats.sort((a, b) => activityKey(b) - activityKey(a));
     return { projectGroups: groups, chats: base.chats };
-  }, [sessions, pinnedIds, projects, projectGroupSessions]);
+  }, [sessions, pinnedIds, projects, projectGroupSessions, pendingSessions]);
   // Resolve each group's display name: the agent project's human name when
   // projects.db/the dashboard tree knows this folder, else the path's last
   // segment (issue #23). The projects list is a second name source so a
@@ -1179,15 +1202,20 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     pinned = false,
   ): React.JSX.Element => {
     const title = s.title || t("sessions.newConversation");
-    const loading = resumingSessionId === s.id || loadingSessionIds.has(s.id);
+    const isPending = s.pendingRunId !== undefined;
+    const loading =
+      isPending || resumingSessionId === s.id || loadingSessionIds.has(s.id);
     const awaitingApproval = approvalSessionIds.has(s.id);
     const unread = s.unread === true && !loading && !awaitingApproval;
     // The active highlight persists while the agent works (loading) — the
     // spinner already signals activity, dropping the highlight made the
     // current chat look unfocused on every command run (issue #72).
-    const active = currentSessionId === s.id;
-    const editing = editingId === s.id;
-    const menuOpen = menuTarget?.id === s.id;
+    const active =
+      isPending && activePendingRunId !== undefined
+        ? s.pendingRunId === activePendingRunId
+        : currentSessionId === s.id;
+    const editing = !isPending && editingId === s.id;
+    const menuOpen = !isPending && menuTarget?.id === s.id;
 
     if (editing) {
       return (
@@ -1232,6 +1260,10 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
           active ? "active" : ""
         } ${menuOpen ? "menu-open" : ""}`}
         onClick={() => {
+          if (isPending) {
+            onActivatePending?.(s.pendingRunId!);
+            return;
+          }
           // Read-state bullet (issue #90): opening a session marks it read —
           // optimistic local clear plus the durable watermark write.
           if (s.unread) {
@@ -1249,11 +1281,16 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            onSelect(s.id);
+            if (isPending) {
+              onActivatePending?.(s.pendingRunId!);
+            } else {
+              onSelect(s.id);
+            }
           }
         }}
         onContextMenu={(e) => {
           e.preventDefault();
+          if (isPending) return;
           openMenuForSession(s, e.clientX, e.clientY);
         }}
         title={title}
@@ -1284,21 +1321,23 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
           <Circle className="sidebar-recent-session-dot" size={7} fill="none" />
         )}
         <span className="sidebar-recent-session-title">{title}</span>
-        <button
-          type="button"
-          className="sidebar-recent-session-options"
-          tabIndex={visible ? 0 : -1}
-          aria-label={t("navigation.sessionMenu.options")}
-          title={t("navigation.sessionMenu.options")}
-          onClick={(e) => {
-            e.stopPropagation();
-            const rect = e.currentTarget.getBoundingClientRect();
-            openMenuForSession(s, rect.right, rect.bottom + 4);
-          }}
-          onKeyDown={(e) => e.stopPropagation()}
-        >
-          <MoreHorizontal size={15} />
-        </button>
+        {!isPending && (
+          <button
+            type="button"
+            className="sidebar-recent-session-options"
+            tabIndex={visible ? 0 : -1}
+            aria-label={t("navigation.sessionMenu.options")}
+            title={t("navigation.sessionMenu.options")}
+            onClick={(e) => {
+              e.stopPropagation();
+              const rect = e.currentTarget.getBoundingClientRect();
+              openMenuForSession(s, rect.right, rect.bottom + 4);
+            }}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            <MoreHorizontal size={15} />
+          </button>
+        )}
       </div>
     );
   };

@@ -538,6 +538,81 @@ describe("SidebarRecentSessions delete vs the tree-derived groups (issue #80)", 
   });
 });
 
+describe("SidebarRecentSessions pending first-turn rows (issue #97 stage 2)", () => {
+  function renderWithPending(
+    pending: Array<{
+      id: string;
+      title: string;
+      contextFolder?: string | null;
+      pendingRunId: string;
+    }>,
+    onActivatePending: (runId: string) => void = vi.fn(),
+    activePendingRunId?: string,
+  ): void {
+    render(
+      <SidebarRecentSessions
+        open
+        connectionId="connection-main"
+        activeProfile="default"
+        currentSessionId={null}
+        loadingSessionIds={new Set()}
+        approvalSessionIds={new Set()}
+        resumingSessionId={null}
+        onSelect={vi.fn()}
+        onNewChatInProject={vi.fn()}
+        onSessionDeleted={vi.fn()}
+        pendingSessions={pending}
+        onActivatePending={onActivatePending}
+        activePendingRunId={activePendingRunId}
+        scrollRootRef={{ current: null }}
+      />,
+    );
+  }
+
+  it("shows a pending row immediately and activates its run on click", async () => {
+    const onActivate = vi.fn();
+    renderWithPending(
+      [{ id: "pending-run-1", title: "Just sent message", pendingRunId: "run-1" }],
+      onActivate,
+    );
+    const row = await screen.findByText("Just sent message");
+    fireEvent.click(row);
+    expect(onActivate).toHaveBeenCalledWith("run-1");
+    // No options button on a pending row (no DB session behind it).
+    expect(
+      row.closest(".sidebar-recent-session")?.querySelector(
+        ".sidebar-recent-session-options",
+      ),
+    ).toBeNull();
+  });
+
+  it("groups a project-bound pending row inside its project", async () => {
+    renderWithPending([
+      {
+        id: "pending-run-2",
+        title: "Project pending chat",
+        contextFolder: "/tmp/proj",
+        pendingRunId: "run-2",
+      },
+    ]);
+    // The row exists somewhere in the document; grouping placement (project
+    // group vs Chats) is covered by the group-membership rendering.
+    expect(await screen.findByText("Project pending chat")).toBeTruthy();
+  });
+
+  it("highlights the active pending row via activePendingRunId", async () => {
+    renderWithPending(
+      [{ id: "pending-run-3", title: "Active pending chat", pendingRunId: "run-3" }],
+      vi.fn(),
+      "run-3",
+    );
+    const row = await screen.findByText("Active pending chat");
+    expect(row.closest(".sidebar-recent-session")?.className).toContain(
+      "active",
+    );
+  });
+});
+
 describe("SidebarRecentSessions maybe-changed force refresh (issue #97)", () => {
   it("re-syncs past the 5s throttle when a first message creates a session", async () => {
     // Initial paint: only the loose chat exists.

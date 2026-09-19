@@ -303,6 +303,32 @@ function Layout({
   const currentSessionId =
     runs.find((r) => r.runId === activeRunId)?.sessionId ?? null;
 
+  // Optimistic first-turn sidebar rows (issue #97, stage 2): a run that has
+  // SENT its first message (title reported from Chat) but not yet received a
+  // session id shows in the sidebar immediately — from the moment of sending,
+  // not the first agent reply. Blank scratch runs are excluded (the #63
+  // revert decision stands), and the row disappears as soon as the real
+  // session lands via the #97 force refresh.
+  const pendingSidebarRows = useMemo(
+    () =>
+      runs
+        .filter(
+          (r) =>
+            !r.sessionId &&
+            r.title &&
+            r.connectionId === connectionId &&
+            r.profile === activeProfile,
+        )
+        .map((r) => ({
+          id: `pending-${r.runId}`,
+          title: r.title!,
+          contextFolder: r.initialContextFolder ?? null,
+          pendingRunId: r.runId,
+          lastActivityAt: Date.now(),
+        })),
+    [runs, connectionId, activeProfile],
+  );
+
   const loadingSessionIds = useMemo(
     () => deriveLoadingSessionIds(runs),
     [runs],
@@ -1117,6 +1143,11 @@ function Layout({
                     // so the user isn't left viewing a now-gone conversation.
                     if (id === currentSessionId) handleNewChat();
                   }}
+                  pendingSessions={pendingSidebarRows}
+                  onActivatePending={handleActivateRun}
+                  activePendingRunId={
+                    currentSessionId === null ? activeRunId : undefined
+                  }
                   scrollRootRef={sidebarChatScrollRef}
                 />
               </div>
