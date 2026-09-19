@@ -17,6 +17,9 @@ export interface ChatRun {
   sessionId: string | null;
   /** True while the agent is generating for this run. */
   loading: boolean;
+  /** True while this run's chat holds a pending command approval (issue #90);
+   *  drives the sidebar's warning bullet and lifts out of the transport. */
+  pendingApproval?: boolean;
   /** Best-effort title (first user message) for the active-sessions bar. */
   title?: string;
   /** Seed transcript when the run was opened from history. */
@@ -219,6 +222,15 @@ export function loadingSessionIds(runs: ChatRun[]): Set<string> {
   const ids = new Set<string>();
   for (const r of runs) {
     if (r.loading && r.sessionId) ids.add(r.sessionId);
+  }
+  return ids;
+}
+
+/** Session ids of every run blocked on a command approval (issue #90). */
+export function approvalPendingSessionIds(runs: ChatRun[]): Set<string> {
+  const ids = new Set<string>();
+  for (const r of runs) {
+    if (r.pendingApproval && r.sessionId) ids.add(r.sessionId);
   }
   return ids;
 }

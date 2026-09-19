@@ -12,7 +12,19 @@ The current chat row carries a persistent quiet background fill (`--bg-tertiary`
 
 There is no filled bullet or accent text color for the active row: the row looks identical whether the pointer is over it or not; only the background presence distinguishes it at rest. The highlight also persists while the agent is working in that chat (`run.loading`): the spinner already signals activity, so the `active` flag is `currentSessionId === s.id` without a `!loading` guard — previously every command run visually unfocused the current chat.
 
-Row titles render at 13px (one step up from the 12px chrome text), and the working-chat spinner uses the bullet's neutral muted color — no accent tint anywhere in the row. Project group headings render in the same `--text-muted` grey as the Projects/Chats section labels (one palette, no extra greys), lifting to `--text-secondary` on hover.
+Row titles render at 13px (one step up from the 12px chrome text). Project group headings render in the same `--text-muted` grey as the Projects/Chats section labels (one palette, no extra greys), lifting to `--text-secondary` on hover.
+
+## Session state bullets
+
+The bullet left of each session title encodes the session's live state, so parallel chats are distinguishable at a glance (issue #90).
+
+Priority order in [[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx]]'s `renderSessionButton`: a pending command approval renders a filled dot in `--warning`; a generating run renders the spinner (now 13px, theme accent); an unread session renders a filled dot in the theme accent; pinned falls back to the Pin icon; everything else keeps the neutral outline dot in `--text-muted`. The accent spinner/dot are a deliberate user-requested exception to the otherwise-neutral row styling of issue #72.
+
+Unread comes from the agent's native read-state watermark (`sessions.last_read_at`, NULL = read; unread when activity postdates it — the same semantics as `SessionDB.session_unread`). All three list paths surface a boolean `unread` on each row: local sqlite selects `last_read_at` behind a `PRAGMA table_info` guard ([[src/main/sessions.ts#sessionUnread]], used by `listSessions` and [[src/main/session-cache.ts#syncSessionCache]]), the remote bridge reads the dashboard row's `last_read_at` ([[src/main/remote-sessions.ts#normalizeSessionSummary]]), and the SSH inline-python selects the column when present. Opening a row marks it read: the sidebar clears the dot optimistically and stamps the watermark through the `mark-session-read` IPC (local UPDATE, remote `PATCH /api/sessions/{id}` with `unread: false`, inline-python SSH fallback) — the same per-connection routing as `set-session-archived`, without the compression-lineage fan-out.
+
+Approval state lifts out of the chat transport: [[src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts]] tracks pending approvals in a ref and mirrors a `hasPendingApproval` boolean, [[src/renderer/src/screens/Chat/Chat.tsx]] reports it upward via `onApprovalChange`, and [[src/renderer/src/screens/Layout/Layout.tsx]] stores it on the `ChatRun` ([[src/renderer/src/screens/Layout/chatRuns.ts#approvalPendingSessionIds]] derives the sidebar's id set). Because background runs keep their transports alive, the yellow dot shows even when another chat is active.
+
+A finished turn may flip its session to unread on the agent, so `handleRunLoading` fires a `hermes-sessions-maybe-changed` renderer event on the true→false loading edge; the sidebar listens for it and refreshes past its throttle instead of waiting for the 60s interval.
 
 ## Collapse toggle brand mark
 

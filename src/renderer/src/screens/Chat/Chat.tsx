@@ -120,6 +120,9 @@ interface ChatProps {
   /** Reports the agent generating state so the sidebar / active-sessions bar
    *  can show a spinner on each running session. */
   onLoadingChange?: (runId: string, loading: boolean) => void;
+  /** Sidebar approval bullet (issue #90): reports whether this chat currently
+   *  holds a pending command approval so Layout can lift it onto the run. */
+  onApprovalChange?: (runId: string, pending: boolean) => void;
   /** Reports the gateway session id once known, so the parent can map
    *  runId ↔ sessionId (live re-attach, spinners, titles). */
   onSessionIdChange?: (runId: string, sessionId: string | null) => void;
@@ -145,6 +148,7 @@ function Chat({
   onNewChat,
   onOpenDiagnose,
   onLoadingChange,
+  onApprovalChange,
   onSessionIdChange,
   onTitleChange,
   onContextFolderChange,
@@ -780,6 +784,7 @@ function Chat({
   const toggleSessionYolo = dashboardTransport.toggleSessionYolo;
   const resyncAfterDetach = dashboardTransport.resyncAfterDetach;
   const hasDetachedTurn = dashboardTransport.hasDetachedTurn;
+  const hasPendingApproval = dashboardTransport.hasPendingApproval;
   // When this chat becomes visible again after its transport was torn down
   // mid-turn (connection switch, issue #76), catch up: reconnect, resume the
   // session (a still-running agent re-attaches its event stream) and
@@ -789,6 +794,11 @@ function Chat({
     if (!active || !hasDetachedTurn) return;
     void resyncAfterDetach();
   }, [active, hasDetachedTurn, resyncAfterDetach]);
+  // Sidebar approval bullet (issue #90): mirror the transport's pending
+  // approval flag onto the run whenever it flips.
+  useEffect(() => {
+    onApprovalChange?.(runId, hasPendingApproval);
+  }, [runId, hasPendingApproval, onApprovalChange]);
   const handleClarifyRespond = useCallback(
     (msg: ClarifyMessage, answer: string): Promise<boolean> =>
       msg.responsePath === "dashboard"

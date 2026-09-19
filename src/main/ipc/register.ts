@@ -239,6 +239,7 @@ import {
   applySessionLocalOverlays,
   listSessions,
   setSessionArchived,
+  markSessionRead,
   listArchivedSessions,
   getSessionMessages,
   searchSessions,
@@ -254,6 +255,7 @@ import {
 import {
   remoteDeleteSession,
   remoteSetSessionArchived,
+  remoteMarkSessionRead,
   remoteListArchivedSessions,
   remoteDeleteSessions,
   remoteGetSessionMessages,
@@ -459,6 +461,7 @@ import {
   sshSetModelConfig,
   sshListSessions,
   sshSetSessionArchived,
+  sshMarkSessionRead,
   sshListArchivedSessions,
   sshGetSessionMessages,
   sshSearchSessions,
@@ -2728,6 +2731,30 @@ export function registerIpcHandlers(context: IpcContext): void {
           scopedProfile,
         );
       return setSessionArchived(sessionId, archived, scopedProfile);
+    },
+  );
+
+  // Read-state watermark (issue #90): marking a session read stamps the
+  // agent's native `last_read_at`; routed per connection mode exactly like
+  // set-session-archived above.
+  ipcMain.handle(
+    "mark-session-read",
+    (_event, sessionId: string, connectionId?: string, profile?: string) => {
+      const conn = sessionConnection(connectionId);
+      const scopedProfile = activeSshProfile(profile);
+      if (conn.mode === "remote")
+        return remoteMarkSessionRead(
+          scopedRemoteSessionConfig(conn, scopedProfile),
+          sessionId,
+        );
+      if (conn.mode === "ssh" && conn.ssh)
+        return withSshDashboardSessions(
+          conn,
+          (config) => remoteMarkSessionRead(config, sessionId),
+          () => sshMarkSessionRead(conn.ssh!, sessionId, scopedProfile),
+          scopedProfile,
+        );
+      return markSessionRead(sessionId, scopedProfile);
     },
   );
 

@@ -269,6 +269,11 @@ function normalizeSessionSummary(row: RemoteRecord): SessionSummary {
     // By-modification ordering key (issue #74): the dashboard surfaces
     // `last_active`; fall back to startedAt when the row lacks it.
     lastActivityAt: numberValue(row.last_active, startedAt),
+    // Read-state bullet (issue #90): unread when activity postdates the
+    // dashboard row's `last_read_at` watermark (NULL = read).
+    unread:
+      row.last_read_at != null &&
+      numberValue(row.last_active, startedAt) > numberValue(row.last_read_at),
     endedAt: nullableNumber(row.ended_at),
     messageCount: numberValue(row.message_count),
     model: stringValue(row.model),
@@ -297,6 +302,7 @@ function normalizeCachedSession(row: RemoteRecord): CachedSession {
     title: summary.title ?? sessionTitle(row, summary.id),
     startedAt: summary.startedAt,
     lastActivityAt: summary.lastActivityAt ?? summary.startedAt,
+    unread: summary.unread === true,
     source: summary.source,
     messageCount: summary.messageCount,
     model: summary.model,
@@ -432,6 +438,24 @@ export async function remoteSetSessionArchived(
     {
       method: "PATCH",
       body: { archived },
+    },
+  );
+}
+
+/**
+ * Mark a session read on the agent: the dashboard's existing PATCH flag
+ * (`unread: false` → `SessionDB.set_session_read`, issue #90).
+ */
+export async function remoteMarkSessionRead(
+  config: RemoteSessionConfig,
+  sessionId: string,
+): Promise<void> {
+  await remoteRequestJson(
+    config,
+    `/api/sessions/${encodeURIComponent(sessionId)}`,
+    {
+      method: "PATCH",
+      body: { unread: false },
     },
   );
 }

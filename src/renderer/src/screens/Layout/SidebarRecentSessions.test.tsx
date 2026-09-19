@@ -79,6 +79,7 @@ beforeEach(() => {
       })),
       setSessionContextFolder: vi.fn(async () => undefined),
       getSessionContextFolder: vi.fn(async () => null),
+      markSessionRead: vi.fn(async () => true),
       updateSessionTitle: vi.fn(async () => undefined),
       deleteSession: vi.fn(async () => undefined),
       selectFolder: vi.fn(async () => null),
@@ -116,6 +117,7 @@ function renderSidebar(
       activeProfile="default"
       currentSessionId={null}
       loadingSessionIds={new Set()}
+      approvalSessionIds={new Set()}
       resumingSessionId={null}
       onSelect={vi.fn()}
       onNewChatInProject={onNewChatInProject}
@@ -183,6 +185,7 @@ describe("SidebarRecentSessions projects-only groups (issue #68)", () => {
         activeProfile="default"
         currentSessionId={null}
         loadingSessionIds={new Set()}
+        approvalSessionIds={new Set()}
         resumingSessionId={null}
         onSelect={vi.fn()}
         onNewChatInProject={vi.fn()}
@@ -210,6 +213,7 @@ describe("SidebarRecentSessions projects-only groups (issue #68)", () => {
         activeProfile="default"
         currentSessionId={null}
         loadingSessionIds={new Set()}
+        approvalSessionIds={new Set()}
         resumingSessionId={null}
         onSelect={vi.fn()}
         onNewChatInProject={vi.fn()}
@@ -319,6 +323,7 @@ describe("SidebarRecentSessions ordering (issue #74)", () => {
         activeProfile="default"
         currentSessionId={null}
         loadingSessionIds={new Set()}
+        approvalSessionIds={new Set()}
         resumingSessionId={null}
         onSelect={vi.fn()}
         onNewChatInProject={vi.fn()}
@@ -482,6 +487,7 @@ describe("SidebarRecentSessions delete vs the tree-derived groups (issue #80)", 
         activeProfile="default"
         currentSessionId={null}
         loadingSessionIds={new Set()}
+        approvalSessionIds={new Set()}
         resumingSessionId={null}
         onSelect={vi.fn()}
         onNewChatInProject={vi.fn()}
@@ -529,5 +535,146 @@ describe("SidebarRecentSessions delete vs the tree-derived groups (issue #80)", 
     // resurrected from the stale tree map until a restart (issue #80).
     await screen.findByText("Loose chat");
     expect(screen.queryByText("Tree-only chat")).toBeNull();
+  });
+});
+
+describe("SidebarRecentSessions state bullets", () => {
+  function bulletFor(title: string): SVGSVGElement | null {
+    const row = screen.getByText(title).closest(".sidebar-recent-session");
+    return row?.querySelector(".sidebar-recent-session-dot") ?? null;
+  }
+
+  it("renders an unread (filled accent) dot that clears on open", async () => {
+    listCachedSessions.mockImplementation(async () => [
+      {
+        id: "session-unread",
+        title: "Unread chat",
+        contextFolder: null,
+        unread: true,
+      },
+    ]);
+    syncSessionCache.mockImplementation(async () => [
+      {
+        id: "session-unread",
+        title: "Unread chat",
+        contextFolder: null,
+        unread: true,
+      },
+    ]);
+    const onSelect = vi.fn();
+    render(
+      <SidebarRecentSessions
+        open
+        connectionId="connection-main"
+        activeProfile="default"
+        currentSessionId={null}
+        loadingSessionIds={new Set()}
+        approvalSessionIds={new Set()}
+        resumingSessionId={null}
+        onSelect={onSelect}
+        onSessionDeleted={vi.fn()}
+        scrollRootRef={{ current: null }}
+      />,
+    );
+
+    const row = await screen.findByText("Unread chat");
+    const dot = bulletFor("Unread chat");
+    expect(dot?.getAttribute("class")).toContain(
+      "sidebar-recent-session-dot--unread",
+    );
+    expect(dot?.getAttribute("fill")).toBe("currentColor");
+
+    fireEvent.click(row);
+    expect(onSelect).toHaveBeenCalledWith("session-unread");
+    // Optimistic clear: the dot loses its unread modifier without a re-sync.
+    await screen.findByText("Unread chat");
+    expect(bulletFor("Unread chat")?.getAttribute("class")).not.toContain(
+      "sidebar-recent-session-dot--unread",
+    );
+  });
+
+  it("renders the approval (warning) dot for a session with a pending approval", async () => {
+    listCachedSessions.mockImplementation(async () => [
+      {
+        id: "session-approval",
+        title: "Approval chat",
+        contextFolder: null,
+        unread: true,
+      },
+    ]);
+    syncSessionCache.mockImplementation(async () => [
+      {
+        id: "session-approval",
+        title: "Approval chat",
+        contextFolder: null,
+        unread: true,
+      },
+    ]);
+    render(
+      <SidebarRecentSessions
+        open
+        connectionId="connection-main"
+        activeProfile="default"
+        currentSessionId={null}
+        loadingSessionIds={new Set()}
+        approvalSessionIds={new Set(["session-approval"])}
+        resumingSessionId={null}
+        onSelect={vi.fn()}
+        onSessionDeleted={vi.fn()}
+        scrollRootRef={{ current: null }}
+      />,
+    );
+
+    await screen.findByText("Approval chat");
+    // Approval wins over unread (checked before the unread branch).
+    const dot = bulletFor("Approval chat");
+    expect(dot?.getAttribute("class")).toContain(
+      "sidebar-recent-session-dot--approval",
+    );
+    expect(dot?.getAttribute("class")).not.toContain(
+      "sidebar-recent-session-dot--unread",
+    );
+  });
+
+  it("keeps the spinner over the unread dot for a loading session", async () => {
+    listCachedSessions.mockImplementation(async () => [
+      {
+        id: "session-running",
+        title: "Running chat",
+        contextFolder: null,
+        unread: true,
+      },
+    ]);
+    syncSessionCache.mockImplementation(async () => [
+      {
+        id: "session-running",
+        title: "Running chat",
+        contextFolder: null,
+        unread: true,
+      },
+    ]);
+    render(
+      <SidebarRecentSessions
+        open
+        connectionId="connection-main"
+        activeProfile="default"
+        currentSessionId={null}
+        loadingSessionIds={new Set(["session-running"])}
+        approvalSessionIds={new Set()}
+        resumingSessionId={null}
+        onSelect={vi.fn()}
+        onSessionDeleted={vi.fn()}
+        scrollRootRef={{ current: null }}
+      />,
+    );
+
+    await screen.findByText("Running chat");
+    const dot = bulletFor("Running chat");
+    expect(dot?.getAttribute("class")).toContain(
+      "sidebar-recent-session-dot--loading",
+    );
+    expect(dot?.getAttribute("class")).not.toContain(
+      "sidebar-recent-session-dot--unread",
+    );
   });
 });

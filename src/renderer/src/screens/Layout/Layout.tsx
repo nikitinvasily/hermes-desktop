@@ -16,6 +16,7 @@ import {
   cycleRunId,
   runIdAtOrdinal,
   loadingSessionIds as deriveLoadingSessionIds,
+  approvalPendingSessionIds,
 } from "./chatRuns";
 import { ActiveSessionsBar } from "./ActiveSessionsBar";
 import { StatusBar } from "./StatusBar";
@@ -302,6 +303,11 @@ function Layout({
     [runs],
   );
 
+  const approvalSessionIds = useMemo(
+    () => approvalPendingSessionIds(runs),
+    [runs],
+  );
+
   const updateSidebarScrollbar = useCallback((visible: boolean) => {
     const root = sidebarChatScrollRef.current;
     if (!root) {
@@ -406,6 +412,22 @@ function Layout({
   // Per-run reporters wired into each <Chat>.
   const handleRunLoading = useCallback((runId: string, loading: boolean) => {
     setRuns((prev) => patchRun(prev, runId, { loading }));
+    // Read-state bullet (issue #90): a finished turn may leave its session
+    // unread (or newly active) — nudge the sidebar to re-sync instead of
+    // waiting for its 60s interval.
+    if (!loading) {
+      window.dispatchEvent(new CustomEvent("hermes-sessions-maybe-changed"));
+    }
+  }, []);
+  // Sidebar approval bullet (issue #90): lift the transport's pending
+  // approval flag onto the run; guard so an unchanged flag doesn't re-render.
+  const handleRunApproval = useCallback((runId: string, pending: boolean) => {
+    setRuns((prev) => {
+      const current = prev.find((r) => r.runId === runId);
+      if (!current || (current.pendingApproval ?? false) === pending)
+        return prev;
+      return patchRun(prev, runId, { pendingApproval: pending });
+    });
   }, []);
   const handleRunSessionId = useCallback(
     (runId: string, sessionId: string | null) => {
@@ -1061,6 +1083,7 @@ function Layout({
                   activeProfile={activeProfile}
                   currentSessionId={currentSessionId}
                   loadingSessionIds={loadingSessionIds}
+                  approvalSessionIds={approvalSessionIds}
                   resumingSessionId={resumingSessionId}
                   onSelect={handleResumeSession}
                   onNewChatInProject={handleNewChatInProject}
@@ -1216,6 +1239,7 @@ function Layout({
                     openSettings(section, { profile: run.profile })
                   }
                   onLoadingChange={handleRunLoading}
+                  onApprovalChange={handleRunApproval}
                   onSessionIdChange={handleRunSessionId}
                   onTitleChange={handleRunTitle}
                   onContextFolderChange={handleRunContextFolder}

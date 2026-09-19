@@ -949,6 +949,11 @@ interface HermesAPI {
     connectionId?: string,
     profile?: string,
   ) => Promise<boolean | void>;
+  markSessionRead: (
+    sessionId: string,
+    connectionId?: string,
+    profile?: string,
+  ) => Promise<boolean | void>;
   listArchivedSessions: (
     limit?: number,
     offset?: number,

@@ -11,7 +11,11 @@ import {
 } from "../shared/session-title";
 import { getAppLocale } from "./locale";
 import { getDbConnection, sessionVisibilityPredicate } from "./db";
-import { hasLastActivityColumn } from "./sessions";
+import {
+  hasLastActivityColumn,
+  hasLastReadColumn,
+  sessionUnread,
+} from "./sessions";
 import { getSessionContextFolders } from "./session-context-folder-store";
 import {
   filterDerivedWorkspaceFolders,
@@ -42,6 +46,8 @@ export interface CachedSession {
   startedAt: number;
   /** By-modification ordering key (issue #74): last activity, startedAt fallback. */
   lastActivityAt: number;
+  /** True when activity postdates the `last_read_at` watermark (issue #90). */
+  unread?: boolean;
   source: string;
   messageCount: number;
   model: string;
@@ -103,6 +109,7 @@ function readCache(profile?: unknown): CacheData {
                 : typeof s.startedAt === "number"
                   ? s.startedAt
                   : 0,
+            unread: s.unread === true,
             contextFolder:
               typeof s.contextFolder === "string" ? s.contextFolder : null,
           }))
@@ -177,6 +184,7 @@ export function syncSessionCache(profile?: unknown): CachedSession[] {
         `SELECT s.id, s.started_at, s.source, s.message_count, s.model, s.title,
                 s.cwd, s.git_repo_root
                 ${hasLastActivityColumn(db) ? ", s.last_activity_at" : ""}
+                ${hasLastReadColumn(db) ? ", s.last_read_at" : ""}
          FROM sessions s
          WHERE ${sessionVisibilityPredicate(db)}
          ORDER BY ${
@@ -195,6 +203,7 @@ export function syncSessionCache(profile?: unknown): CachedSession[] {
       cwd: string | null;
       git_repo_root: string | null;
       last_activity_at?: number | null;
+      last_read_at?: number | null;
     }>;
 
     // Index existing sessions by id once so the per-row update below is
@@ -214,6 +223,10 @@ export function syncSessionCache(profile?: unknown): CachedSession[] {
           model: row.model || existing.model,
           title: row.title || existing.title,
           lastActivityAt: row.last_activity_at ?? row.started_at,
+          unread: sessionUnread(
+            row.last_read_at,
+            row.last_activity_at ?? row.started_at ?? 0,
+          ),
         });
         continue;
       }
@@ -241,6 +254,10 @@ export function syncSessionCache(profile?: unknown): CachedSession[] {
         title,
         startedAt: row.started_at,
         lastActivityAt: row.last_activity_at ?? row.started_at,
+        unread: sessionUnread(
+          row.last_read_at,
+          row.last_activity_at ?? row.started_at ?? 0,
+        ),
         source: row.source,
         messageCount: row.message_count,
         model: row.model || "",
