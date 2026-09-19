@@ -303,18 +303,19 @@ function Layout({
   const currentSessionId =
     runs.find((r) => r.runId === activeRunId)?.sessionId ?? null;
 
-  // Optimistic first-turn sidebar rows (issue #97, stage 2): a run that has
-  // SENT its first message (title reported from Chat) but not yet received a
-  // session id shows in the sidebar immediately — from the moment of sending,
-  // not the first agent reply. Blank scratch runs are excluded (the #63
-  // revert decision stands), and the row disappears as soon as the real
-  // session lands via the #97 force refresh.
+  // Optimistic send-time sidebar rows (issue #99, stage 2): a run that has
+  // SENT its first message (title reported from Chat) shows in the sidebar
+  // immediately — from the moment of sending, not the first agent reply.
+  // Blank scratch runs are excluded (the #63 revert decision stands). The
+  // run may already carry a session id (the transport reports it early)
+  // while state.db only gains the visible sessions row later in the turn —
+  // so the row carries the id along and the SIDEBAR drops it only when the
+  // real synced row has actually landed (dedupe by session id).
   const pendingSidebarRows = useMemo(
     () =>
       runs
         .filter(
           (r) =>
-            !r.sessionId &&
             r.title &&
             r.connectionId === connectionId &&
             r.profile === activeProfile,
@@ -324,6 +325,7 @@ function Layout({
           title: r.title!,
           contextFolder: r.initialContextFolder ?? null,
           pendingRunId: r.runId,
+          sessionId: r.sessionId,
           lastActivityAt: Date.now(),
         })),
     [runs, connectionId, activeProfile],
@@ -1145,9 +1147,7 @@ function Layout({
                   }}
                   pendingSessions={pendingSidebarRows}
                   onActivatePending={handleActivateRun}
-                  activePendingRunId={
-                    currentSessionId === null ? activeRunId : undefined
-                  }
+                  activePendingRunId={activeRunId}
                   scrollRootRef={sidebarChatScrollRef}
                 />
               </div>

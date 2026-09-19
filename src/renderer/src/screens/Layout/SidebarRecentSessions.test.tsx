@@ -572,7 +572,13 @@ describe("SidebarRecentSessions pending first-turn rows (issue #97 stage 2)", ()
   it("shows a pending row immediately and activates its run on click", async () => {
     const onActivate = vi.fn();
     renderWithPending(
-      [{ id: "pending-run-1", title: "Just sent message", pendingRunId: "run-1" }],
+      [
+        {
+          id: "pending-run-1",
+          title: "Just sent message",
+          pendingRunId: "run-1",
+        },
+      ],
       onActivate,
     );
     const row = await screen.findByText("Just sent message");
@@ -584,6 +590,65 @@ describe("SidebarRecentSessions pending first-turn rows (issue #97 stage 2)", ()
         ".sidebar-recent-session-options",
       ),
     ).toBeNull();
+  });
+
+  it("drops a pending row once its session lands in the synced list", async () => {
+    const { rerender } = render(
+      <SidebarRecentSessions
+        open
+        connectionId="connection-main"
+        activeProfile="default"
+        currentSessionId={null}
+        loadingSessionIds={new Set()}
+        approvalSessionIds={new Set()}
+        resumingSessionId={null}
+        onSelect={vi.fn()}
+        onNewChatInProject={vi.fn()}
+        onSessionDeleted={vi.fn()}
+        pendingSessions={[
+          {
+            id: "pending-run-4",
+            title: "Handoff chat",
+            pendingRunId: "run-4",
+            pendingSessionId: "session-real",
+          },
+        ]}
+        scrollRootRef={{ current: null }}
+      />,
+    );
+    expect(await screen.findByText("Handoff chat")).toBeTruthy();
+    // The real session row arrives via sync: the pending twin must vanish.
+    syncSessionCache.mockImplementation(async () => [
+      { id: "session-real", title: "Handoff chat real", contextFolder: null },
+    ]);
+    window.dispatchEvent(new CustomEvent("hermes-sessions-maybe-changed"));
+    await screen.findByText("Handoff chat real");
+    expect(screen.queryByText("Handoff chat")).toBeNull();
+    rerender(
+      <SidebarRecentSessions
+        open
+        connectionId="connection-main"
+        activeProfile="default"
+        currentSessionId="session-real"
+        loadingSessionIds={new Set()}
+        approvalSessionIds={new Set()}
+        resumingSessionId={null}
+        onSelect={vi.fn()}
+        onNewChatInProject={vi.fn()}
+        onSessionDeleted={vi.fn()}
+        pendingSessions={[
+          {
+            id: "pending-run-4",
+            title: "Handoff chat",
+            pendingRunId: "run-4",
+            pendingSessionId: "session-real",
+          },
+        ]}
+        scrollRootRef={{ current: null }}
+      />,
+    );
+    // Synced row present: still exactly one row for the session.
+    expect(screen.queryByText("Handoff chat")).toBeNull();
   });
 
   it("groups a project-bound pending row inside its project", async () => {

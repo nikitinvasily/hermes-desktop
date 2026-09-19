@@ -42,11 +42,17 @@ interface RecentSession {
   /** Finished-but-not-viewed bullet (issue #90): activity postdates the
    *  agent's last_read_at watermark. */
   unread?: boolean;
-  /** Optimistic first-turn row (issue #97, stage 2): the run has sent its
-   *  first message (title known) but the agent has not answered yet, so no
-   *  session id exists. Rendered like a normal row minus the session menu;
-   *  replaced by the real synced session once the turn reports its id. */
+  /** Optimistic send-time row (issue #99): the run has sent its first
+   *  message (title known) but the real session has not landed in the
+   *  synced list yet — the run may already carry a session id from the
+   *  transport while state.db still lacks the visible row. Rendered like a
+   *  normal row minus the session menu; dropped once the synced list
+   *  contains the session (dedupe by id below). */
   pendingRunId?: string;
+  /** The run's session id once the transport reports it (may be null while
+   *  the turn is being set up); used to drop the pending row when the real
+   *  synced row arrives. */
+  pendingSessionId?: string | null;
 }
 
 /** Recency key for sidebar ordering (issue #74): last activity, startedAt fallback. */
@@ -752,14 +758,18 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     [sessions, pinnedIds],
   );
   const { projectGroups, chats } = useMemo(() => {
-    // Pending first-turn rows (issue #97 stage 2) participate in grouping so
-    // a project-bound run shows inside its project while the agent works.
-    // Deduped against synced rows is unnecessary: a pending row has no real
-    // session id, and it is dropped the moment the run reports one (Layout
-    // stops listing it), while the synced row arrives via the force refresh.
+    // Pending send-time rows (issue #99) participate in grouping so a
+    // project-bound run shows inside its project while the agent works.
+    // A pending row whose session has ALREADY landed in the synced list is
+    // dropped here (dedupe by session id) — that is the handoff from the
+    // optimistic row to the real one. Rows without an id yet always stay.
+    const syncedIds = new Set(sessions.map((s) => s.id));
+    const livePending = pendingSessions.filter(
+      (p) => !p.pendingSessionId || !syncedIds.has(p.pendingSessionId),
+    );
     const withPending = [
       ...sessions.filter((s) => !pinnedIds.has(s.id)),
-      ...pendingSessions,
+      ...livePending,
     ];
     const base = groupSessionsByWorkspace(withPending);
     // Inside-group order is by-modification (issue #74): the main side sorts
@@ -1212,7 +1222,11 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     // current chat look unfocused on every command run (issue #72).
     const active =
       isPending && activePendingRunId !== undefined
-        ? s.pendingRunId === activePendingRunId
+        ? // Pending rows highlight by RUN id; the real synced row (matched by
+          // currentSessionId) takes over the highlight once it lands.
+          s.pendingRunId === activePendingRunId && currentSessionId !== null
+          ? false
+          : s.pendingRunId === activePendingRunId
         : currentSessionId === s.id;
     const editing = !isPending && editingId === s.id;
     const menuOpen = !isPending && menuTarget?.id === s.id;
