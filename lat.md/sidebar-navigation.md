@@ -60,6 +60,12 @@ Project group MEMBERSHIP over Remote/SSH no longer derives from the truncated re
 
 [[src/main/session-cache.ts#syncSessionCache]] reconciles the complete visible metadata set rather than using `started_at` as a change cursor: archive and restore do not change creation time. Cached titles are reused, and message bodies are read only to generate missing titles for newly visible rows. Successful sync replaces the cached membership, including an empty set; unavailable databases or failed reads retain the last good cache until retry. [[src/main/session-cache.ts#listCachedSessions]] remains DB-free, so an initial cached paint can be stale until sync finishes. Message history and search are unchanged.
 
+## Subagent session visibility
+
+Delegate-subagent runs never appear in the sidebar or archive browser: every `delegate_task` child row carries `parent_session_id` plus a `_delegate_from` marker in `model_config`, and all local/SSH list paths filter both together (issue #95).
+
+[[src/main/db.ts#sessionSubagentPredicate]] builds the shared SQL predicate (the same `_delegate_from` JSON check the core's `list_sessions_rich(include_children=False)` applies behind every dashboard list), guarded by `PRAGMA table_info` so legacy schemas without the lineage columns keep the unfiltered behavior. [[src/main/sessions.ts#listSessions]], [[src/main/session-cache.ts#syncSessionCache]], and the local archived read apply it after the archive predicate; the SSH python fallbacks ([[src/main/ssh-remote.ts#sshListSessions]] and the archived-list script) inline the same predicate with the same column guard. Remote mode needs no change — the dashboard REST already excludes child rows. Branch children (`_branched_from`), untagged lineage rows, and malformed `model_config` JSON stay visible, and search still finds subagent transcripts (mirroring the core's `/api/sessions/search`). [[tests/session-subagent-visibility.test.ts]] executes the real SQL against seeded lineages.
+
 ## By-modification ordering and stable project order
 
 Chats order by last modification, not creation (issue #74), and the Projects section keeps a stable alphabetical order independent of session recency.

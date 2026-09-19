@@ -10,7 +10,11 @@ import {
   validateNormalizedSessionTitle,
 } from "../shared/session-title";
 import { getAppLocale } from "./locale";
-import { getDbConnection, sessionVisibilityPredicate } from "./db";
+import {
+  getDbConnection,
+  sessionSubagentPredicate,
+  sessionVisibilityPredicate,
+} from "./db";
 import {
   hasLastActivityColumn,
   hasLastReadColumn,
@@ -217,6 +221,7 @@ export function syncSessionCache(profile?: unknown): CachedSession[] {
                 ${hasLastReadColumn(db) ? ", s.last_read_at" : ""}
          FROM sessions s
          WHERE ${sessionVisibilityPredicate(db)}
+           AND ${sessionSubagentPredicate(db)}
          ORDER BY ${
            hasLastActivityColumn(db)
              ? "COALESCE(s.last_activity_at, s.started_at)"

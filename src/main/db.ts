@@ -6,9 +6,60 @@ let cachedDb: Database.Database | null = null;
 let cachedDbPath: string | null = null;
 let cachedDbReadonly: boolean | null = null;
 
+let cachedColumnsDb: Database.Database | null = null;
+let cachedColumns: Array<{ name: string }> | null = null;
+
+/** PRAGMA table_info(sessions), cached per database connection. */
+function sessionTableColumns(db: Database.Database): Array<{ name: string }> {
+  if (cachedColumnsDb !== db || !cachedColumns) {
+    cachedColumns = db.prepare("PRAGMA table_info(sessions)").all() as Array<{
+      name: string;
+    }>;
+    cachedColumnsDb = db;
+  }
+  return cachedColumns;
+}
+
 /** Older Agent databases predate native archiving; keep their lists readable. */
 export function sessionVisibilityPredicate(db: Database.Database): string {
   return hasArchivedColumn(db) ? "s.archived = 0" : "1 = 1";
+}
+
+/**
+ * Predicate hiding delegate-subagent runs from session lists: child rows carry
+ * parent_session_id plus the agent's `_delegate_from` marker in model_config.
+ * Mirrors the core's list_sessions_rich(include_children=False) so local and
+ * SSH lists match what the dashboard REST already returns (branch/reset/
+ * compression children are NOT hidden by this predicate). Older databases
+ * without either column keep the legacy unfiltered behavior.
+ */
+export function sessionSubagentPredicate(db: Database.Database): string {
+  if (!hasParentSessionColumn(db) || !hasModelConfigColumn(db)) return "1 = 1";
+  return (
+    "NOT (s.parent_session_id IS NOT NULL AND " +
+    "json_extract(CASE WHEN json_valid(s.model_config) THEN s.model_config ELSE '{}' END, " +
+    "'$._delegate_from') IS NOT NULL)"
+  );
+}
+
+/**
+ * True when the sessions table carries the lineage column the agent writes for
+ * subagent runs, branches, and compression continuations.
+ */
+export function hasParentSessionColumn(db: Database.Database): boolean {
+  return sessionTableColumns(db).some(
+    (column) => column.name === "parent_session_id",
+  );
+}
+
+/**
+ * True when the sessions table carries the model_config JSON blob holding the
+ * `_delegate_from` subagent marker.
+ */
+export function hasModelConfigColumn(db: Database.Database): boolean {
+  return sessionTableColumns(db).some(
+    (column) => column.name === "model_config",
+  );
 }
 
 /**
