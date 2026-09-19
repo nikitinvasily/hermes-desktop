@@ -518,13 +518,23 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
       "hermes-session-context-folder-changed",
       onContextFolderChanged,
     );
-    // A turn finished somewhere (issue #90): the session may now be unread —
-    // refresh past the throttle so the sidebar bullet appears immediately.
-    window.addEventListener("hermes-sessions-maybe-changed", onFocus);
+    // A turn finished somewhere (issue #90), or a first message just created
+    // a session (issue #97): refresh past the throttle so the sidebar bullet
+    // / new row appears immediately.
+    const onSessionsMaybeChanged = (): void => {
+      void refresh(true);
+    };
+    window.addEventListener(
+      "hermes-sessions-maybe-changed",
+      onSessionsMaybeChanged,
+    );
     return () => {
       clearInterval(timer);
       window.removeEventListener("focus", onFocus);
-      window.removeEventListener("hermes-sessions-maybe-changed", onFocus);
+      window.removeEventListener(
+        "hermes-sessions-maybe-changed",
+        onSessionsMaybeChanged,
+      );
       window.removeEventListener(
         "hermes-session-context-folder-changed",
         onContextFolderChanged,

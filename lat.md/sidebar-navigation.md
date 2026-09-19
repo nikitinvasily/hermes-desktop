@@ -48,6 +48,12 @@ Session titles in the inline list are constrained to the sidebar width and trunc
 
 The native sidebar scrollbar is hidden to avoid layout shifts. [[src/renderer/src/screens/Layout/Layout.tsx#Layout]] measures the chat scroll container and renders an absolutely positioned overlay thumb only while the user is scrolling, so showing or hiding the scrollbar never changes row width.
 
+## First-turn sidebar visibility
+
+A chat becomes visible in the sidebar the moment its first message creates the session, not after the first turn ends.
+
+[[src/renderer/src/screens/Layout/Layout.tsx#Layout]]'s `handleRunSessionId` watches for a run's session id transitioning null → value (guarded on the previous value via a ref, outside the state updater) and dispatches `hermes-sessions-maybe-changed`. [[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx]] handles that event with a forced refresh that bypasses the 5s throttle, so the new row paints while the agent is still generating; the backend had already inserted the `sessions` row at turn start. The same event also fires when any run's turn finishes (unread bullets).
+
 ## Native archive visibility
 
 Local lists follow the Agent's native archive flag. Archiving hides a conversation without deleting its messages or linked project folder; restoring it makes it visible on the next sync.

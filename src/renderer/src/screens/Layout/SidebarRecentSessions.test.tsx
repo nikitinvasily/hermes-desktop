@@ -538,6 +538,40 @@ describe("SidebarRecentSessions delete vs the tree-derived groups (issue #80)", 
   });
 });
 
+describe("SidebarRecentSessions maybe-changed force refresh (issue #97)", () => {
+  it("re-syncs past the 5s throttle when a first message creates a session", async () => {
+    // Initial paint: only the loose chat exists.
+    listCachedSessions.mockImplementation(async () => [
+      { id: "session-loose", title: "Loose chat", contextFolder: null },
+    ]);
+    syncSessionCache.mockImplementation(async () => [
+      { id: "session-loose", title: "Loose chat", contextFolder: null },
+    ]);
+    renderSidebar(vi.fn());
+    await screen.findByText("Loose chat");
+    const syncCallsAfterMount = syncSessionCache.mock.calls.length;
+    expect(syncCallsAfterMount).toBeGreaterThan(0);
+
+    // The first turn just materialized a NEW session: the next sync returns
+    // it. Dispatching hermes-sessions-maybe-changed must trigger a sync
+    // immediately even though the mount sync happened < 5s ago (throttle).
+    syncSessionCache.mockImplementation(async () => [
+      {
+        id: "session-new",
+        title: "New first-turn chat",
+        contextFolder: null,
+      },
+      { id: "session-loose", title: "Loose chat", contextFolder: null },
+    ]);
+    window.dispatchEvent(new CustomEvent("hermes-sessions-maybe-changed"));
+
+    await screen.findByText("New first-turn chat");
+    expect(syncSessionCache.mock.calls.length).toBeGreaterThan(
+      syncCallsAfterMount,
+    );
+  });
+});
+
 describe("SidebarRecentSessions state bullets", () => {
   function bulletFor(title: string): SVGSVGElement | null {
     const row = screen.getByText(title).closest(".sidebar-recent-session");
