@@ -5954,6 +5954,33 @@ body:has(.shell-vibrant),
   border-left-color: var(--warning, #d97706);
 }
 
+/* Outcome tints (issue #101): approved -> success, denied -> danger,
+   neutral keeps the pending warning hue only while awaiting a response. */
+.chat-approval-card--approved {
+  border-left-color: var(--success, #22c55e);
+}
+
+.chat-approval-card--approved .chat-approval-heading {
+  color: var(--success, #22c55e);
+}
+
+.chat-approval-card--denied {
+  border-left-color: var(--danger, #ef4444);
+}
+
+.chat-approval-card--denied .chat-approval-heading {
+  color: var(--danger, #ef4444);
+}
+
+/* Resolved elsewhere / card unavailable: muted, no warning emphasis. */
+.chat-approval-card--neutral {
+  border-left-color: var(--border);
+}
+
+.chat-approval-card--neutral .chat-approval-heading {
+  color: var(--text-secondary);
+}
+
 .chat-approval-heading {
   color: var(--text-primary);
   font-size: 12px;

@@ -52,6 +52,38 @@ function firstText(
   return "";
 }
 
+const SECURITY_SCAN_NOISE_RE = new RegExp(
+  [
+    // Whole wrapper sentences whose parenthesized payload is scanner output:
+    // "Command required approval (Security scan — …)" / "Command was flagged (Security scan — …)"
+    String.raw`Command (?:required approval|was flagged)\s*\((Security scan[^)]*)\)`,
+    // Trailing severity segments appended after the real description:
+    // "; [HIGH] Nested executable body …"
+    String.raw`;\s*\[(?:HIGH|MEDIUM|LOW|CRITICAL|INFO)\][^;]*`,
+    // A bare leading severity segment (when the wrapper was already
+    // stripped): consumes the scanner prose up to a ";" boundary or the end
+    String.raw`^\s*\[(?:HIGH|MEDIUM|LOW|CRITICAL|INFO)\][^;]*`,
+  ].join("|"),
+  "gi",
+);
+
+/**
+ * Strip server-side security-scanner boilerplate (Tirith "Security scan — …"
+ * wrappers and trailing severity segments) from an approval description.
+ * Genuine descriptions from other sources pass through untouched; an empty
+ * result means the row should be hidden entirely.
+ */
+export function stripSecurityScanNoise(description: string): string {
+  if (!description) return "";
+  let text = description;
+  let previous: string;
+  do {
+    previous = text;
+    text = text.replace(SECURITY_SCAN_NOISE_RE, " ");
+  } while (text !== previous);
+  return text.replace(/\s{2,}/g, " ").trim();
+}
+
 export function normalizeApprovalRequest(
   payload: unknown,
   requestId: string,
