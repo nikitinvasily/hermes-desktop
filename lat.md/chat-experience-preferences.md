@@ -10,6 +10,8 @@ User prompts use the same Markdown grammar as assistant text while keeping their
 
 [[src/renderer/src/screens/Chat/MessageRow.tsx#MessageRow]] renders user content through `AgentMarkdown`, including headings, lists, links, and tables. The user-bubble CSS preserves line breaks for ordinary prose, and the copy action still writes the untouched source string rather than rendered text. [[src/renderer/src/screens/Chat/MessageRow.test.tsx]] verifies rendered structure and raw-source copying together.
 
+Visually the user bubble shares the agent bubble's neutral surface (`--agent-bubble` / `--agent-bubble-text`) and is marked by a 1px `--accent` outline instead of a solid accent fill (issue #92, user preference after the Royal palette landed) — the special-case user-bubble `::selection` override became unnecessary with the neutral surface and was removed.
+
 ## Completion sound
 
 The completion chime is enabled by default and can be disabled globally from Settings → Notifications.
