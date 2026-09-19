@@ -326,6 +326,11 @@ import {
 } from "../remote-models";
 import { remoteGetOAuthProviderStatuses } from "../remote-provider-statuses";
 import {
+  remoteReadTextFile,
+  remoteReadImageFile,
+  remoteReadDirectory,
+} from "../remote-files";
+import {
   listModels,
   addModel,
   removeModel,
@@ -3719,7 +3724,7 @@ export function registerIpcHandlers(context: IpcContext): void {
         return sshReadDirectory(conn.ssh, dirPath);
       }
       if (conn.mode === "remote") {
-        return null;
+        return remoteReadDirectory(conn, dirPath);
       }
       try {
         const entries = await readdir(dirPath, { withFileTypes: true });
@@ -3747,6 +3752,10 @@ export function registerIpcHandlers(context: IpcContext): void {
       filePath: string,
       maxBytes?: number,
     ): Promise<{ content: string; truncated: boolean } | null> => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "remote") {
+        return remoteReadTextFile(conn, filePath);
+      }
       try {
         const limit = maxBytes ?? 102400; // Default 100KB
         const buffer = await readFile(filePath);
@@ -3763,6 +3772,7 @@ export function registerIpcHandlers(context: IpcContext): void {
 
   // Open file in default application
   ipcMain.handle("open-file-in-editor", async (_event, filePath: string) => {
+    if (isRemoteOnlyMode()) return false;
     try {
       await shell.openPath(filePath);
       return true;
@@ -3788,6 +3798,10 @@ export function registerIpcHandlers(context: IpcContext): void {
   ipcMain.handle(
     "read-image-file",
     async (_event, filePath: string): Promise<string | null> => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "remote") {
+        return remoteReadImageFile(conn, filePath);
+      }
       try {
         const buffer = await readFile(filePath);
         const ext = extname(filePath).toLowerCase().slice(1);

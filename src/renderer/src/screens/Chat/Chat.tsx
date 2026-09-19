@@ -1162,7 +1162,7 @@ function Chat({
         </div>
 
         {contextFolder && worktreeVisible && (
-          <WorktreePanel folderPath={contextFolder} />
+          <WorktreePanel folderPath={contextFolder} remoteMode={remoteMode} />
         )}
 
         {webPreviewVisible && (

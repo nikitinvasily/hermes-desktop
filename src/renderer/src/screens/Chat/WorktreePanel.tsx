@@ -21,6 +21,9 @@ interface FileEntry {
 
 interface WorktreePanelProps {
   folderPath: string;
+  /** Remote connection: tree and file contents come from the server via the
+   *  dashboard REST API; local-only affordances (open in terminal) hide. */
+  remoteMode?: boolean;
 }
 
 const MIN_PANEL_WIDTH = 220;
@@ -251,6 +254,7 @@ function TreeItem({
 
 export const WorktreePanel = memo(function WorktreePanel({
   folderPath,
+  remoteMode = false,
 }: WorktreePanelProps): React.JSX.Element {
   const { t } = useI18n();
   const [entries, setEntries] = useState<FileEntry[] | null>(null);
@@ -348,15 +352,17 @@ export const WorktreePanel = memo(function WorktreePanel({
         <span className="worktree-header-title" title={folderPath}>
           {folderName}
         </span>
-        <button
-          type="button"
-          className="btn-ghost worktree-header-action"
-          onClick={() => void handleOpenTerminal()}
-          aria-label={t("chat.worktree.openTerminal")}
-          title={t("chat.worktree.openTerminal")}
-        >
-          <SquareTerminal size={20} />
-        </button>
+        {!remoteMode && (
+          <button
+            type="button"
+            className="btn-ghost worktree-header-action"
+            onClick={() => void handleOpenTerminal()}
+            aria-label={t("chat.worktree.openTerminal")}
+            title={t("chat.worktree.openTerminal")}
+          >
+            <SquareTerminal size={20} />
+          </button>
+        )}
       </div>
       {terminalError && (
         <div className="worktree-terminal-error">{terminalError}</div>
@@ -386,6 +392,7 @@ export const WorktreePanel = memo(function WorktreePanel({
         <FileViewer
           filePath={selectedFile}
           onClose={() => setSelectedFile(null)}
+          remoteMode={remoteMode}
         />
       )}
     </div>
