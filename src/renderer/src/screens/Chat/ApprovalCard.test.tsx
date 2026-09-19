@@ -125,4 +125,100 @@ describe("ApprovalCard", () => {
         .every((button) => (button as HTMLButtonElement).disabled),
     ).toBe(true);
   });
+
+  it.each([
+    ["approved once", "once", "chat-approval-card--approved"],
+    ["approved for session", "session", "chat-approval-card--approved"],
+    ["approved always", "always", "chat-approval-card--approved"],
+    ["denied", "deny", "chat-approval-card--denied"],
+  ] as const)(
+    "highlights a resolved card as %s",
+    (_case, choice, expectedClass) => {
+      const { container } = render(
+        <I18nProvider>
+          <ApprovalCard
+            msg={message({ resolved: true, choice })}
+            isActive
+            onRespond={vi.fn()}
+            onResolved={vi.fn()}
+          />
+        </I18nProvider>,
+      );
+      expect(
+        container.firstElementChild?.classList.contains(expectedClass),
+      ).toBe(true);
+    },
+  );
+
+  it("stays neutral when resolved without a known choice or unavailable", () => {
+    const { unmount } = render(
+      <I18nProvider>
+        <ApprovalCard
+          msg={message({ resolved: true })}
+          isActive
+          onRespond={vi.fn()}
+          onResolved={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+    expect(
+      document
+        .querySelector(".chat-approval-card")
+        ?.classList.contains("chat-approval-card--neutral"),
+    ).toBe(true);
+    unmount();
+
+    render(
+      <I18nProvider>
+        <ApprovalCard
+          msg={message({ unavailable: true })}
+          isActive
+          onRespond={vi.fn()}
+          onResolved={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+    expect(
+      document
+        .querySelector(".chat-approval-card")
+        ?.classList.contains("chat-approval-card--neutral"),
+    ).toBe(true);
+  });
+
+  it("strips Security scan boilerplate and hides an empty description", () => {
+    const { unmount } = render(
+      <I18nProvider>
+        <ApprovalCard
+          msg={message({
+            description:
+              "Command required approval (Security scan — [HIGH] Nested executable body could not be resolved: Tirith cannot prove the body)",
+          })}
+          isActive
+          onRespond={vi.fn()}
+          onResolved={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+    expect(screen.queryByText(/Security scan/)).toBeNull();
+    expect(screen.queryByText(/Nested executable/)).toBeNull();
+    expect(
+      document.querySelector(".chat-clarify-question"),
+    ).toBeNull();
+    unmount();
+
+    render(
+      <I18nProvider>
+        <ApprovalCard
+          msg={message({
+            description:
+              "Remove generated output; [HIGH] nested command chains could not be resolved",
+          })}
+          isActive
+          onRespond={vi.fn()}
+          onResolved={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+    expect(screen.getByText("Remove generated output")).toBeTruthy();
+  });
 });

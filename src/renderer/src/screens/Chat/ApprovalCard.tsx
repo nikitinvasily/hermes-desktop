@@ -2,6 +2,7 @@ import { memo, useState } from "react";
 import {
   APPROVAL_CHOICES,
   type ApprovalChoice,
+  stripSecurityScanNoise,
 } from "../../../../shared/chat-approval";
 import { useI18n } from "../../components/useI18n";
 import type { ApprovalMessage } from "./types";
@@ -25,6 +26,19 @@ export const ApprovalCard = memo(function ApprovalCard({
   const [error, setError] = useState(false);
   const resolved = !!msg.resolved;
   const unavailable = !!msg.unavailable;
+  // Outcome tint: deny is always red; any approve choice (once/session/always)
+  // is green; resolved without a known choice (answered elsewhere) or an
+  // unavailable card stays neutral (issue #101).
+  const outcomeClass = unavailable
+    ? " chat-approval-card--neutral"
+    : resolved
+      ? msg.choice === "deny"
+        ? " chat-approval-card--denied"
+        : msg.choice
+          ? " chat-approval-card--approved"
+          : " chat-approval-card--neutral"
+      : "";
+  const description = stripSecurityScanNoise(msg.description);
   const choices = APPROVAL_CHOICES.filter((choice) =>
     msg.choices.includes(choice),
   );
@@ -59,12 +73,14 @@ export const ApprovalCard = memo(function ApprovalCard({
 
   return (
     <div
-      className={`chat-clarify chat-approval-card${
+      className={`chat-clarify chat-approval-card${outcomeClass}${
         resolved ? " chat-clarify--resolved" : ""
       }`}
     >
       <div className="chat-approval-heading">{t("chat.approval.title")}</div>
-      <div className="chat-clarify-question">{msg.description}</div>
+      {description && (
+        <div className="chat-clarify-question">{description}</div>
+      )}
       <pre className="chat-approval-command">
         <code>{msg.command}</code>
       </pre>
