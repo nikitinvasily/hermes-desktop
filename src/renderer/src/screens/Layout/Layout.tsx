@@ -445,6 +445,17 @@ function Layout({
   }, []);
   const handleRunSessionId = useCallback(
     (runId: string, sessionId: string | null) => {
+      // First message just materialized the session (null → id): nudge the
+      // sidebar to re-sync NOW, not after the turn ends (issue #97) — the
+      // backend inserts the sessions row at turn start, but every existing
+      // refresh trigger (end of turn, focus, 60s timer) leaves the new chat
+      // invisible for the whole first turn. Guarded on the PREVIOUS value via
+      // runsRef so it fires once per session birth, outside the state updater
+      // (StrictMode runs updaters twice).
+      const before = runsRef.current.find((r) => r.runId === runId);
+      if (sessionId && before && !before.sessionId) {
+        window.dispatchEvent(new CustomEvent("hermes-sessions-maybe-changed"));
+      }
       setRuns((prev) => patchRun(prev, runId, { sessionId }));
     },
     [],
