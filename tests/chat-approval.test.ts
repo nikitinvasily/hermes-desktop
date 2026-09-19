@@ -15,6 +15,14 @@ describe("stripSecurityScanNoise", () => {
     ).toBe("");
   });
 
+  it("removes a bare leading Security scan payload (live dashboard format)", () => {
+    expect(
+      stripSecurityScanNoise(
+        "Security scan — [HIGH] Nested executable body could not be resolved: The shell will execute a grouped, encoded, or dynamically selected value, but Tirith cannot prove the complete executable body. The command is blocked instead of trusting its benign-looking outer leader. ; script execution via -e/-c flag",
+      ),
+    ).toBe("");
+  });
+
   it("keeps a genuine description that precedes scanner segments", () => {
     expect(
       stripSecurityScanNoise(

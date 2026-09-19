@@ -60,6 +60,11 @@ const SECURITY_SCAN_NOISE_RE = new RegExp(
     // Trailing severity segments appended after the real description:
     // "; [HIGH] Nested executable body …"
     String.raw`;\s*\[(?:HIGH|MEDIUM|LOW|CRITICAL|INFO)\][^;]*`,
+    // A bare leading "Security scan — …" payload without the wrapper verb
+    // (observed live: descriptions starting directly with "Security scan") —
+    // when the description BEGINS with scanner output, everything after it is
+    // scanner prose too, including the trailing "; …" segments
+    String.raw`^Security scan\s*[—-][\s\S]*`,
     // A bare leading severity segment (when the wrapper was already
     // stripped): consumes the scanner prose up to a ";" boundary or the end
     String.raw`^\s*\[(?:HIGH|MEDIUM|LOW|CRITICAL|INFO)\][^;]*`,
