@@ -1292,15 +1292,11 @@ function Layout({
 
           {visitedViews.has("discover") && (
             <div style={paneStyle("discover")}>
-              {remoteMode ? (
-                <RemoteNotice feature="Discover" />
-              ) : (
-                <Discover
-                  profile={activeProfile}
-                  visible={view === "discover"}
-                  focusKind={discoverFocus ?? undefined}
-                />
-              )}
+              <Discover
+                profile={activeProfile}
+                visible={view === "discover"}
+                focusKind={discoverFocus ?? undefined}
+              />
             </div>
           )}
 
@@ -1333,11 +1329,7 @@ function Layout({
 
           {visitedViews.has("skills") && (
             <div style={paneStyle("skills")}>
-              {remoteMode ? (
-                <RemoteNotice feature="Skills" />
-              ) : (
-                <Skills profile={activeProfile} />
-              )}
+              <Skills profile={activeProfile} />
             </div>
           )}
 

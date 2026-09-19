@@ -2,6 +2,8 @@ import { execFile } from "child_process";
 import { existsSync, readFileSync } from "fs";
 import { profilePaths, safeWriteFile } from "./utils";
 import { getApiUrl, getRemoteAuthHeader, isRemoteMode } from "./hermes";
+import { getConnectionConfig } from "./config";
+import { remoteDashboardRequestJson } from "./remote-api";
 import { getApiServerKey } from "./config";
 import { getEnhancedPath, HERMES_PYTHON, hermesCliArgs } from "./installer";
 
@@ -609,6 +611,27 @@ async function mcpApi<T>(
   init: RequestInit = {},
   profile?: string,
 ): Promise<T> {
+  const conn = getConnectionConfig();
+  // Direct remote (HTTP): ride the oauth-aware dashboard request boundary —
+  // a bare fetch with the token-only header 401s against an oauth-gated
+  // dashboard (the issue #84 class).
+  if (conn.mode === "remote") {
+    return remoteDashboardRequestJson<T>(
+      conn,
+      path,
+      {
+        method: (init.method ?? "GET") as
+          | "GET"
+          | "POST"
+          | "PUT"
+          | "PATCH"
+          | "DELETE",
+        body:
+          init.body === undefined ? undefined : JSON.parse(String(init.body)),
+      },
+      profile,
+    );
+  }
   const headers: Record<string, string> = {
     ...getRemoteAuthHeader(),
     ...((init.headers as Record<string, string>) || {}),

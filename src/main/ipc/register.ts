@@ -313,6 +313,10 @@ import {
   remoteUninstallSkill,
 } from "../remote-skills";
 import {
+  remoteListInstalledRegistry,
+  remoteInstallRegistryItem,
+} from "../remote-registry";
+import {
   remoteAddModel,
   remoteGetModelConfig,
   remoteListModels,
@@ -3942,9 +3946,12 @@ export function registerIpcHandlers(context: IpcContext): void {
   ipcMain.handle("registry-fetch-models", (_event, force?: boolean) =>
     fetchModelRegistry(!!force),
   );
-  ipcMain.handle("registry-list-installed", (_event, profile?: string) =>
-    listInstalledRegistry(profile),
-  );
+  ipcMain.handle("registry-list-installed", (_event, profile?: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "remote")
+      return remoteListInstalledRegistry(conn, profile);
+    return listInstalledRegistry(profile);
+  });
   ipcMain.handle(
     "registry-detail",
     (_event, kind: RegistryKind, item: RegistryItem) =>
@@ -3952,8 +3959,12 @@ export function registerIpcHandlers(context: IpcContext): void {
   );
   ipcMain.handle(
     "registry-install",
-    (_event, kind: RegistryKind, item: RegistryItem, profile?: string) =>
-      installRegistryItem(kind, item, profile),
+    (_event, kind: RegistryKind, item: RegistryItem, profile?: string) => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "remote")
+        return remoteInstallRegistryItem(conn, kind, item, profile);
+      return installRegistryItem(kind, item, profile);
+    },
   );
 
   // Memory providers
