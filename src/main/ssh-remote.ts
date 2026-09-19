@@ -3303,6 +3303,12 @@ export interface SshClaw3dHqResult {
 export async function sshListClaw3dHqTasks(
   config: SshConfig,
 ): Promise<SshClaw3dHqResult> {
+  // An empty-host config (e.g. a direct remote connection's unused ssh block)
+  // is not an SSH reader: report failure so callers hide the HQ board instead
+  // of treating the unreachable path as an empty (valid) board.
+  if (!config.host.trim()) {
+    return { success: false, error: "SSH tunnel mode is not configured." };
+  }
   for (const remotePath of CLAW3D_TASKS_PATHS) {
     let raw = "";
     try {
