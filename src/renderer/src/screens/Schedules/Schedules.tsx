@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Plus,
   Trash,
@@ -10,6 +10,7 @@ import {
   Alert,
 } from "../../assets/icons";
 import { useI18n } from "../../components/useI18n";
+import { useConnectionChangeReload } from "../../hooks/useConnectionChangeReload";
 import { OrbLoader } from "../../components/OrbLoader";
 
 const DELIVER_TARGETS = [
@@ -95,22 +96,13 @@ function Schedules({ profile }: SchedulesProps): React.JSX.Element {
   // Reload when the ACTIVE CONNECTION changes (issue #86): cron jobs are
   // per-connection data (local jobs.json vs the remote dashboard), so a
   // local/remote switch must refetch or the tab keeps showing the previous
-  // connection's list. Re-activation of the SAME connection (no mode/URL
-  // change) does not reload — the same signature rule as the chat transport
-  // (issue #76), so switching chats back and forth never causes pointless
-  // refetches.
-  const connectionSignatureRef = useRef<string | null>(null);
-  useEffect(() => {
-    const unsubscribe = window.hermesAPI.onConnectionConfigChanged((conn) => {
-      const signature = `${conn.connectionId}|${conn.mode}|${conn.remoteUrl}`;
-      if (connectionSignatureRef.current === signature) return;
-      connectionSignatureRef.current = signature;
-      setError("");
-      setLoading(true);
-      loadJobs();
-    });
-    return unsubscribe;
-  }, [loadJobs]);
+  // connection's list. Shared with the other per-connection screens
+  // (Discover, Kanban) via the hook; the same-signature rule lives there.
+  useConnectionChangeReload(() => {
+    setError("");
+    setLoading(true);
+    loadJobs();
+  });
 
   // Escape key to close modals
   useEffect(() => {
