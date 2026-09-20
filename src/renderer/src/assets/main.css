@@ -2396,6 +2396,12 @@ body:has(.shell-vibrant),
   );
 }
 
+/* Dark theme goes one step brighter (the app-wide --bg-active level) —
+   the 16% mix reads too subtle on the dark sidebar background. */
+[data-theme="dark"] {
+  --sidebar-hover-bg: var(--bg-active);
+}
+
 .sidebar {
   width: 250px;
   /* Anchor for the resize handle (abs-positioned at the right edge). */
