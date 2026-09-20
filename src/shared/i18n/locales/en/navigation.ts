@@ -12,6 +12,7 @@ export default {
   skills: "Skills",
   chats: "Chats",
   subagents: "Subagents",
+  todoTasklist: "TODO",
   pinned: "Pinned",
   archiveSection: "Archive",
   archiveEmpty: "No archived chats",

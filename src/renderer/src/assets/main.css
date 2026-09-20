@@ -18348,3 +18348,47 @@ body:has(.shell-vibrant),
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+
+/* TODO section rows (issue #126) — same row anatomy as the subagent rows,
+   non-interactive (status mirrors the agent's own todo_list state). */
+.chat-context-panel-counter {
+  margin-left: auto;
+  margin-right: 6px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-context-panel-todo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 4px 14px;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+}
+
+.chat-context-panel-todo-marker {
+  flex: 0 0 auto;
+  width: 14px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.chat-context-panel-todo--in_progress .chat-context-panel-todo-marker {
+  color: var(--accent);
+}
+
+.chat-context-panel-todo--completed,
+.chat-context-panel-todo--cancelled {
+  color: var(--text-muted);
+}
+
+.chat-context-panel-todo--completed .chat-context-panel-todo-marker,
+.chat-context-panel-todo--cancelled .chat-context-panel-todo-marker {
+  color: var(--text-muted);
+}
