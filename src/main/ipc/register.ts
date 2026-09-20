@@ -151,6 +151,7 @@ import {
   isGatewayRunning,
   testRemoteConnection,
   restartGateway,
+  restartGatewayWhenIdle,
   notifyProfileSwitched,
   setSshRemoteApiKey,
   bindPendingApproval,
@@ -1184,7 +1185,9 @@ export function registerIpcHandlers(context: IpcContext): void {
         key.endsWith("_TOKEN") ||
         key === "HF_TOKEN";
       if (isGatewayRunning(profile) && looksLikeCredential) {
-        restartGateway(profile);
+        // Deferred while agent work is in flight (issue #128) — same gate as
+        // the model switch: never kill live sessions/subagents for a key write.
+        await restartGatewayWhenIdle(profile, `credential ${key}`);
       }
       return true;
     },
@@ -1308,14 +1311,26 @@ export function registerIpcHandlers(context: IpcContext): void {
         libEntry?.apiMode ?? null,
       );
 
-      // Restart gateway when provider, model, or endpoint changes so it picks up new config
+      // Restart gateway when provider, model, or endpoint changes so it picks up new config.
+      // Deferred while agent work is in flight (issue #128): a hard restart
+      // here killed in-flight subagent runs silently — the restart now waits
+      // for live sessions / active subagents to drain.
       if (
         isGatewayRunning(profile) &&
         (prev.provider !== provider ||
           prev.model !== model ||
           prev.baseUrl !== baseUrl)
       ) {
-        restartGateway(profile);
+        const outcome = await restartGatewayWhenIdle(
+          profile,
+          `model → ${model}`,
+        );
+        if (outcome === "deferred") {
+          new Notification({
+            title: APP_NAME,
+            body: `Model switch queued: waiting for running sessions/subagents to finish before restarting the gateway.`,
+          }).show();
+        }
       }
 
       return true;
@@ -2382,7 +2397,8 @@ export function registerIpcHandlers(context: IpcContext): void {
           ),
       );
       if (isGatewayRunning(profile)) {
-        restartGateway(profile);
+        // Deferred while agent work is in flight (issue #128).
+        await restartGatewayWhenIdle(profile, `messaging ${platform}`);
       }
       return { ok: true, platform };
     },

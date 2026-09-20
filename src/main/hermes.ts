@@ -655,7 +655,10 @@ class TuiGatewayClient {
     });
 
     void this.startDashboardBackend()
-      .then(() => this.readyResolve?.())
+      .then(() => {
+        markTuiGatewayStarted(this.key);
+        this.readyResolve?.();
+      })
       .catch((error) => {
         const err = error instanceof Error ? error : new Error(String(error));
         this.readyReject?.(err);
@@ -3975,6 +3978,132 @@ export function restartGateway(
   gatewayRestartByProfile.set(key, promise);
   gatewayRestartQueueTail = promise.catch(() => undefined);
   return promise;
+}
+
+// ── Deferred gateway restart while agent work is in flight (issue #128) ──
+// `restartGateway` kills the whole gateway process, taking every live session
+// WITH it — including in-flight subagent (delegate) runs, which die silently
+// (no ended_at, no completion delivered to the parent; state.db keeps spinning
+// them forever). Before restarting on a config change (model switch, API-key
+// write), probe the gateway for live work and defer the restart until the
+// last running session / active subagent finishes.
+
+/** Statuses of a live gateway session that mean "work in flight". */
+const LIVE_WORK_STATUSES = new Set(["working", "waiting", "starting"]);
+
+interface ActiveListResponse {
+  sessions?: Array<{ status?: string }>;
+}
+
+interface DelegationStatusResponse {
+  active?: unknown[];
+}
+
+/** Outcome of a live-work probe against the TUI gateway. */
+export type LiveWorkProbe = "busy" | "idle" | "unknown";
+
+/**
+ * Probe the profile's TUI gateway for in-flight agent work. "busy" = at least
+ * one live session with a working/waiting/starting status or any active
+ * subagent (delegation.status is process-global, transport-unscoped — the
+ * right shape for a gate that must protect background children). "unknown" =
+ * gateway unreachable/probe failed (callers fail open and restart as before).
+ */
+export async function probeGatewayLiveWork(
+  profile?: string,
+): Promise<LiveWorkProbe> {
+  if (!shouldUseTuiGatewayClient()) return "unknown";
+  try {
+    const client = getTuiGatewayClient(profile);
+    const [active, delegation] = await Promise.all([
+      client
+        .request<ActiveListResponse>("session.active_list", {}, 2_000)
+        .catch(() => null),
+      client
+        .request<DelegationStatusResponse>("delegation.status", {}, 2_000)
+        .catch(() => null),
+    ]);
+    // Both probes failed → cannot tell; fail open.
+    if (!active && !delegation) return "unknown";
+    if (delegation && (delegation.active?.length ?? 0) > 0) return "busy";
+    if (
+      active &&
+      (active.sessions ?? []).some((s) => LIVE_WORK_STATUSES.has(s.status ?? ""))
+    ) {
+      return "busy";
+    }
+    return "idle";
+  } catch {
+    return "unknown";
+  }
+}
+
+/** Records the last time each profile's TUI gateway (re)started; used to
+ * classify subagent rows with no ended_at as "died with a gateway restart"
+ * when they started before the current gateway generation (issue #128). */
+const tuiGatewayEpochs = new Map<string, number>();
+
+/** Notify `tuiGatewayEpochs` that the profile's TUI gateway just started. */
+export function markTuiGatewayStarted(profile?: string): void {
+  tuiGatewayEpochs.set(profileKey(profile), Date.now());
+}
+
+/** When the profile's current TUI gateway generation started (ms epoch), or
+ * null when unknown (never started / restarted outside our control). */
+export function tuiGatewayStartedAt(profile?: string): number | null {
+  return tuiGatewayEpochs.get(profileKey(profile)) ?? null;
+}
+
+// One deferred restart per profile: a config change (model switch, API-key
+// write) that must restart the gateway, but the gateway is currently running
+// agent work (live session or in-flight subagents). The restart is polled for
+// and applied once the work drains; a NEW config change while waiting just
+// keeps the single pending restart (the latest config is already on disk).
+const pendingDeferredRestarts = new Map<string, { reason: string }>();
+
+const DEFERRED_RESTART_POLL_MS = 5_000;
+
+/**
+ * Restart the gateway for a config change, but only once no agent work is in
+ * flight. Probes `probeGatewayLiveWork` first: idle/unknown restarts
+ * immediately (unknown = probe failed → legacy behavior, fail open); busy
+ * defers. Returns a description of what happened, for the caller's toast.
+ */
+export async function restartGatewayWhenIdle(
+  profile: string | undefined,
+  reason: string,
+): Promise<"restarted" | "deferred" | "failed"> {
+  const key = profileKey(profile);
+  const probe = await probeGatewayLiveWork(profile);
+  if (probe === "idle" || probe === "unknown") {
+    const ok = await restartGateway(profile);
+    return ok ? "restarted" : "failed";
+  }
+  const prev = pendingDeferredRestarts.get(key);
+  if (prev) {
+    // Already waiting; the newer config change wins for the reason only.
+    prev.reason = reason;
+    return "deferred";
+  }
+  pendingDeferredRestarts.set(key, { reason });
+  void pollDeferredRestart(profile);
+  return "deferred";
+}
+
+async function pollDeferredRestart(profile?: string): Promise<void> {
+  const key = profileKey(profile);
+  for (;;) {
+    await new Promise((r) => setTimeout(r, DEFERRED_RESTART_POLL_MS));
+    const pending = pendingDeferredRestarts.get(key);
+    if (!pending) return;
+    const probe = await probeGatewayLiveWork(profile);
+    if (probe === "busy") continue;
+    pendingDeferredRestarts.delete(key);
+    // idle or unknown: the work has drained (or we cannot tell — do not hold
+    // the restart hostage forever). Restart now.
+    await restartGateway(profile);
+    return;
+  }
 }
 
 export async function startGatewayWithRecovery(
