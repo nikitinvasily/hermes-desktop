@@ -13,6 +13,9 @@ export interface SubagentRow {
   title: string;
   model: string | null;
   messageCount: number;
+  /** Dead-but-never-ended child (killed with a gateway restart, issue #128):
+   * show a settled dot instead of a forever spinner. */
+  died?: boolean;
 }
 
 /**
@@ -116,14 +119,18 @@ export function ChatContextPanel({
           >
             <div className="sidebar-recent-collapse-inner">
               {rows.map((row) => {
-                const running = row.endedAt == null;
+                const running = row.endedAt == null && !row.died;
                 return (
                   <button
                     key={row.id}
                     type="button"
                     className="chat-context-panel-row"
                     onClick={() => onOpenSession(row.id)}
-                    title={row.title}
+                    title={
+                      row.died
+                        ? `${row.title} (${t("navigation.subagentDied")})`
+                        : row.title
+                    }
                   >
                     {running ? (
                       <span

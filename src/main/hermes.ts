@@ -111,7 +111,7 @@ function resolveProfile(profile?: string): string | undefined {
 }
 
 /** Map a resolved profile to the key used in the per-profile process maps. */
-function profileKey(profile?: string): string {
+export function profileKey(profile?: string): string {
   return resolveProfile(profile) ?? "default";
 }
 
@@ -4028,7 +4028,9 @@ export async function probeGatewayLiveWork(
     if (delegation && (delegation.active?.length ?? 0) > 0) return "busy";
     if (
       active &&
-      (active.sessions ?? []).some((s) => LIVE_WORK_STATUSES.has(s.status ?? ""))
+      (active.sessions ?? []).some((s) =>
+        LIVE_WORK_STATUSES.has(s.status ?? ""),
+      )
     ) {
       return "busy";
     }
@@ -4052,58 +4054,6 @@ export function markTuiGatewayStarted(profile?: string): void {
  * null when unknown (never started / restarted outside our control). */
 export function tuiGatewayStartedAt(profile?: string): number | null {
   return tuiGatewayEpochs.get(profileKey(profile)) ?? null;
-}
-
-// One deferred restart per profile: a config change (model switch, API-key
-// write) that must restart the gateway, but the gateway is currently running
-// agent work (live session or in-flight subagents). The restart is polled for
-// and applied once the work drains; a NEW config change while waiting just
-// keeps the single pending restart (the latest config is already on disk).
-const pendingDeferredRestarts = new Map<string, { reason: string }>();
-
-const DEFERRED_RESTART_POLL_MS = 5_000;
-
-/**
- * Restart the gateway for a config change, but only once no agent work is in
- * flight. Probes `probeGatewayLiveWork` first: idle/unknown restarts
- * immediately (unknown = probe failed → legacy behavior, fail open); busy
- * defers. Returns a description of what happened, for the caller's toast.
- */
-export async function restartGatewayWhenIdle(
-  profile: string | undefined,
-  reason: string,
-): Promise<"restarted" | "deferred" | "failed"> {
-  const key = profileKey(profile);
-  const probe = await probeGatewayLiveWork(profile);
-  if (probe === "idle" || probe === "unknown") {
-    const ok = await restartGateway(profile);
-    return ok ? "restarted" : "failed";
-  }
-  const prev = pendingDeferredRestarts.get(key);
-  if (prev) {
-    // Already waiting; the newer config change wins for the reason only.
-    prev.reason = reason;
-    return "deferred";
-  }
-  pendingDeferredRestarts.set(key, { reason });
-  void pollDeferredRestart(profile);
-  return "deferred";
-}
-
-async function pollDeferredRestart(profile?: string): Promise<void> {
-  const key = profileKey(profile);
-  for (;;) {
-    await new Promise((r) => setTimeout(r, DEFERRED_RESTART_POLL_MS));
-    const pending = pendingDeferredRestarts.get(key);
-    if (!pending) return;
-    const probe = await probeGatewayLiveWork(profile);
-    if (probe === "busy") continue;
-    pendingDeferredRestarts.delete(key);
-    // idle or unknown: the work has drained (or we cannot tell — do not hold
-    // the restart hostage forever). Restart now.
-    await restartGateway(profile);
-    return;
-  }
 }
 
 export async function startGatewayWithRecovery(

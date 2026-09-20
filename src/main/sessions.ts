@@ -23,6 +23,7 @@ import {
   mergeSessionLocalErrors,
 } from "./session-continuation-store";
 import { deleteSessionContextFolderForSession } from "./session-context-folder-store";
+import { tuiGatewayStartedAt } from "./hermes";
 import { deleteSessionModelOverrideForSession } from "./session-model-override-store";
 
 // Sentinel prefix used by hermes-agent's hermes_state.py to mark
@@ -344,6 +345,10 @@ export interface SubagentSessionSummary {
   title: string;
   model: string | null;
   messageCount: number;
+  /** True when the row has no ended_at but predates the current gateway
+   * generation — the child died with a gateway restart (issue #128), it is
+   * not still running. False while it may genuinely be live. */
+  died?: boolean;
 }
 
 /**
@@ -393,6 +398,11 @@ export function listSubagentSessions(
      WHERE session_id = ? AND role = 'user'
      ORDER BY id ASC LIMIT 1`,
   );
+  // A child with no ended_at that started before the CURRENT gateway
+  // generation cannot be alive — the process it lived in is gone (a config
+  // change restarted the gateway and killed it silently; issue #128). Liveness
+  // lives only in the gateway's in-memory registry, never in state.db.
+  const gatewayEpochMs = tuiGatewayStartedAt(profile);
   return rows.map((r) => {
     const goal = firstUser.get(r.id) as { content: string | null } | undefined;
     return {
@@ -402,6 +412,10 @@ export function listSubagentSessions(
       title: clampGoal(goal?.content ?? ""),
       model: r.model,
       messageCount: r.message_count,
+      died:
+        r.ended_at == null &&
+        gatewayEpochMs != null &&
+        r.started_at * 1000 < gatewayEpochMs,
     };
   });
 }

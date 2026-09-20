@@ -151,7 +151,6 @@ import {
   isGatewayRunning,
   testRemoteConnection,
   restartGateway,
-  restartGatewayWhenIdle,
   notifyProfileSwitched,
   setSshRemoteApiKey,
   bindPendingApproval,
@@ -511,6 +510,7 @@ import {
   cancelWebPreviewInspection,
   inspectWebPreview,
 } from "../web-preview-inspector";
+import { restartGatewayWhenIdle } from "../gateway-restart-gate";
 
 export interface IpcContext {
   activeRuns: Map<string, () => void>;
