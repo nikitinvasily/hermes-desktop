@@ -75,9 +75,9 @@ The flex `gap` that previously spaced rows is replaced by per-row spacing: `.cha
 
 ## Centered column caps line width
 
-On wide monitors the transcript and composer live in a centered 800px column so message lines stay readable.
+On wide monitors the transcript and composer live in a centered 1100px column so message lines stay readable.
 
-The wrapper is `.chat-content-column` (`.chat-messages > .chat-content-column`, and one wrapping the input area's children), a plain block element with `max-width: 800px` and `margin-inline: auto`; narrow windows are unaffected because the column simply fills the space. It stays block flow (no flex) so the `content-visibility` and `scrollHeight` contract above is preserved, and the worktree panel is a flex sibling of `.chat-messages`, outside the column.
+The wrapper is `.chat-content-column` (`.chat-messages > .chat-content-column`, and one wrapping the input area's children), a plain block element with `max-width: 1100px` and `margin-inline: auto`; narrow windows are unaffected because the column simply fills the space. It stays block flow (no flex) so the `content-visibility` and `scrollHeight` contract above is preserved, and the worktree panel is a flex sibling of `.chat-messages`, outside the column.
 
 ## Textarea auto-resize avoids per-keystroke reflow
 
