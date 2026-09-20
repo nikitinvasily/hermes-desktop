@@ -100,6 +100,8 @@ A few non-local commands have dedicated desktop handling and must NOT be diverte
 
 The legacy approval responses `/approve` and `/deny` (the `RENDERER_NATIVE_SLASH` set) are excluded from the pipeline and sent as prompt-level input. They remain a compatibility path for text-only backends; structured gateway approvals use the flow below.
 
+For those text-only backends [[src/renderer/src/screens/Chat/MessageRow.tsx#APPROVAL_RE]] detects a genuine approval prompt in the last agent message and renders the legacy Approve/Deny bar. The `/approve ... /deny` alternative is line-anchored (`^` with the `m` flag) so merely MENTIONING the commands mid-text (a report about the approval mechanism, backticked references) does not summon the bar; the ⚠️/dangerous alternative stays single-line for the same reason. When it does render, the bar is stacked BELOW the bubble inside `.chat-message-body` (a column wrapper for bubble + bar), never beside it.
+
 ## Structured command approvals
 
 Dangerous commands pause the current turn until the user explicitly allows or denies them; the desktop never auto-approves or replays a prompt after an approval request.
