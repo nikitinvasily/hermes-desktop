@@ -5295,6 +5295,18 @@ body:has(.shell-vibrant),
   margin-inline: auto;
 }
 
+/* Positioning wrapper for the conversation column (issue #129): holds the
+   scrolling .chat-messages and the absolutely-docked context panel. The wrap
+   — not the scroller — is the flex child of .chat-body, so it (and the panel
+   docked to it) shrinks when the resizable worktree file panel opens; the
+   panel floats over the conversation only, at any files width. */
+.chat-messages-wrap {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
 .chat-messages {
   flex: 1;
   overflow-y: auto;
@@ -18300,6 +18312,10 @@ body:has(.shell-vibrant),
    otherwise), so it never claims layout space in subagent-free chats.
    Sibling of .chat-messages and the worktree panel — the block-flow /
    content-visibility contract of the message list is untouched. */
+/* Floating chat context panel (issues #122/#126/#129): absolutely docked to
+   the TOP-RIGHT of .chat-messages-wrap (the conversation column). The wrap
+   shrinks when the files panel opens, so the dock follows the conversation
+   edge; absolute (not sticky-in-scroller) keeps it pinned during scroll. */
 .chat-context-panel {
   position: absolute;
   top: 10px;
