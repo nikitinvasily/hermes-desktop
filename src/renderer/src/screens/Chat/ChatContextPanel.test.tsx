@@ -135,7 +135,7 @@ describe("ChatContextPanel (issue #122)", () => {
     expect(onOpenSession).toHaveBeenCalledWith("child-a");
   });
 
-  it("collapses and expands via the section toggle", async () => {
+  it("subagents section starts collapsed and expands via the toggle", async () => {
     setApi([
       {
         id: "child-a",
@@ -150,10 +150,7 @@ describe("ChatContextPanel (issue #122)", () => {
     const toggle = await screen.findByRole("button", {
       name: /subagents/i,
     });
-    expect(
-      document.querySelector(".sidebar-recent-collapse")?.className,
-    ).toContain("expanded");
-    fireEvent.click(toggle);
+    // Collapsed by default since the TODO section landed above (issue #126).
     expect(
       document.querySelector(".sidebar-recent-collapse")?.className,
     ).not.toContain("expanded");
@@ -161,6 +158,10 @@ describe("ChatContextPanel (issue #122)", () => {
     expect(
       document.querySelector(".sidebar-recent-collapse")?.className,
     ).toContain("expanded");
+    fireEvent.click(toggle);
+    expect(
+      document.querySelector(".sidebar-recent-collapse")?.className,
+    ).not.toContain("expanded");
   });
 
   it("re-fetches when refreshKey changes (turn finished)", async () => {

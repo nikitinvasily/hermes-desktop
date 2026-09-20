@@ -10,6 +10,8 @@ import { ReasoningEffortPicker } from "./ReasoningEffortPicker";
 import { ContextFolderChip } from "./ContextFolderChip";
 import { WorktreePanel } from "./WorktreePanel";
 import { ChatContextPanel } from "./ChatContextPanel";
+import type { TodoSnapshot } from "./todoState";
+import { todoFromEvent, todoFromMessages } from "./todoState";
 import { WebPreviewPanel } from "./WebPreviewPanel";
 import { useChatScroll } from "./hooks/useChatScroll";
 import { useTranscriptState } from "./hooks/useTranscriptState";
@@ -210,6 +212,17 @@ function Chat({
   useEffect(() => {
     setPanelRefreshKey((k) => k + 1);
   }, [hermesSessionId]);
+  // Floating context panel TODO state (issue #126): seeded from the
+  // transcript's latest todo_list tool result, superseded by live
+  // `todo.updated` events, reset when the session changes.
+  const [todoSnapshot, setTodoSnapshot] = useState<TodoSnapshot | null>(null);
+  useEffect(() => {
+    setTodoSnapshot(todoFromMessages(messagesRef.current));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hermesSessionId]);
+  const handleTodoEvent = useCallback((payload: unknown): void => {
+    setTodoSnapshot(todoFromEvent(payload));
+  }, []);
   const panelWasLoadingRef = useRef(false);
   useEffect(() => {
     if (panelWasLoadingRef.current && !isLoading) {
@@ -797,6 +810,7 @@ function Chat({
     setToolProgress,
     setUsage,
     onDashboardUnavailable: handleDashboardUnavailable,
+    onTodoState: handleTodoEvent,
   });
 
   const respondDashboardClarify = dashboardTransport.respondClarify;
@@ -1211,6 +1225,7 @@ function Chat({
             profile={profile ?? "default"}
             refreshKey={panelRefreshKey}
             onOpenSession={(id) => onOpenSession?.(id)}
+            todo={todoSnapshot}
           />
         )}
 

@@ -94,6 +94,7 @@ function Harness({
   hermesSessionId = null,
   initialConnectionMode = "local",
   onDashboardUnavailable,
+  onTodoState,
   setUsage = vi.fn() as SetUsageMock,
 }: {
   api: HarnessApi;
@@ -103,6 +104,7 @@ function Harness({
   hermesSessionId?: string | null;
   initialConnectionMode?: "local" | "remote" | "ssh";
   onDashboardUnavailable?: (reason: string) => void;
+  onTodoState?: (snapshot: unknown) => void;
   setUsage?: SetUsageMock;
 }): null {
   // Same write-through transcript state Chat.tsx uses — the transport's
@@ -141,6 +143,7 @@ function Harness({
     setToolProgress: vi.fn(),
     setUsage,
     onDashboardUnavailable,
+    onTodoState,
   });
 
   useEffect(() => {
@@ -185,6 +188,26 @@ function Harness({
 }
 
 describe("useDashboardChatTransport recovery", () => {
+  it("forwards todo.updated payloads to onTodoState (issue #126)", async () => {
+    const onTodoState = vi.fn();
+    const api: HarnessApi = {};
+    render(<Harness api={api} onTodoState={onTodoState} />);
+    await act(async () => {
+      await api.send?.("hello");
+    });
+    const payload = {
+      todos: [{ id: "1", content: "Ship", status: "pending" }],
+      revision: 4,
+    };
+    await act(async () => {
+      dashboardMock.onEvent?.({
+        type: "todo.updated",
+        payload,
+      });
+    });
+    expect(onTodoState).toHaveBeenCalledWith(payload);
+  });
+
   beforeEach(() => {
     dashboardMock.close.mockClear();
     dashboardMock.connect.mockClear();

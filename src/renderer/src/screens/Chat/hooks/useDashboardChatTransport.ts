@@ -122,6 +122,10 @@ interface UseDashboardChatTransportArgs {
    *  unavailable on a remote/SSH connection and the renderer is falling back to
    *  the legacy HTTP transport. Lets the UI surface a one-time notice. */
   onDashboardUnavailable?: (reason: string) => void;
+  /** Live todo snapshot push (issue #126): fired on every `todo.updated`
+   *  gateway event for this session so the chat context panel reflects the
+   *  agent's task list while a turn runs. */
+  onTodoState?: (snapshot: unknown) => void;
 }
 
 interface UseDashboardChatTransportResult {
@@ -1028,6 +1032,7 @@ export function useDashboardChatTransport({
   setToolProgress,
   setUsage,
   onDashboardUnavailable,
+  onTodoState,
 }: UseDashboardChatTransportArgs): UseDashboardChatTransportResult {
   const clientRef = useRef<DashboardGatewayClient | null>(null);
   const connectingRef = useRef<Promise<DashboardGatewayClient> | null>(null);
@@ -1345,6 +1350,13 @@ export function useDashboardChatTransport({
             setSessionYolo(payloadYolo);
           }
         }
+        return;
+      }
+
+      // Live todo snapshots (issue #126): every todo_list mutation emits a
+      // full snapshot; push it to the chat context panel. No messages change.
+      if (event.type === "todo.updated") {
+        onTodoState?.(event.payload);
         return;
       }
 
@@ -1730,6 +1742,7 @@ export function useDashboardChatTransport({
       connectionMode,
       fallbackOnUnavailable,
       onDashboardUnavailable,
+      onTodoState,
     ]);
 
   // Restore the UI's run state from the backend's truth (issue #109): the

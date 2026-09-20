@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight } from "../../assets/icons";
 import { useI18n } from "../../components/useI18n";
+import { TodoSection } from "./TodoSection";
+import type { TodoSnapshot } from "./todoState";
 
 /** A delegate-subagent child run listed by the panel (issue #122). */
 export interface SubagentRow {
@@ -26,6 +28,7 @@ export function ChatContextPanel({
   profile,
   refreshKey,
   onOpenSession,
+  todo,
 }: {
   /** Stored session id of the chat this panel floats over; null = scratch. */
   sessionId: string | null;
@@ -35,10 +38,14 @@ export function ChatContextPanel({
   refreshKey: number;
   /** Open a subagent transcript as a chat run (Layout's resume flow). */
   onOpenSession: (sessionId: string) => void;
+  /** Live todo snapshot for this chat (issue #126): transcript-derived seed,
+   *  updated by `todo.updated` events while the agent works. */
+  todo?: TodoSnapshot | null;
 }): React.JSX.Element | null {
   const { t } = useI18n();
   const [rows, setRows] = useState<SubagentRow[]>([]);
-  const [open, setOpen] = useState(true);
+  const [subagentsOpen, setSubagentsOpen] = useState(false);
+  const [todoOpen, setTodoOpen] = useState(true);
   const aliveRef = useRef(true);
 
   const load = useCallback(async (): Promise<void> => {
@@ -67,56 +74,78 @@ export function ChatContextPanel({
     };
   }, [load, refreshKey]);
 
-  if (rows.length === 0) return null;
+  const hasTodo =
+    !!todo &&
+    todo.items.some(
+      (i) => i.status === "pending" || i.status === "in_progress",
+    );
+  if (rows.length === 0 && !hasTodo) return null;
 
   return (
     <div className="chat-context-panel">
-      <div className="sidebar-recent-section">
-        <button
-          type="button"
-          className="sidebar-recent-section-toggle chat-context-panel-toggle"
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
-        >
-          <span>{t("navigation.subagents")}</span>
-          {open ? (
-            <ChevronDown className="sidebar-recent-disclosure-icon" size={13} />
-          ) : (
-            <ChevronRight
-              className="sidebar-recent-disclosure-icon"
-              size={13}
-            />
-          )}
-        </button>
-        <div className={`sidebar-recent-collapse ${open ? "expanded" : ""}`}>
-          <div className="sidebar-recent-collapse-inner">
-            {rows.map((row) => {
-              const running = row.endedAt == null;
-              return (
-                <button
-                  key={row.id}
-                  type="button"
-                  className="chat-context-panel-row"
-                  onClick={() => onOpenSession(row.id)}
-                  title={row.title}
-                >
-                  {running ? (
-                    <span
-                      className="sidebar-recent-session-spinner"
-                      aria-hidden
-                    />
-                  ) : (
-                    <span className="sidebar-recent-session-dot" aria-hidden />
-                  )}
-                  <span className="chat-context-panel-row-title">
-                    {row.title || row.id.slice(-8)}
-                  </span>
-                </button>
-              );
-            })}
+      {hasTodo && (
+        <TodoSection
+          snapshot={todo ?? null}
+          open={todoOpen}
+          onToggle={() => setTodoOpen((v) => !v)}
+        />
+      )}
+      {rows.length > 0 && (
+        <div className="sidebar-recent-section">
+          <button
+            type="button"
+            className="sidebar-recent-section-toggle chat-context-panel-toggle"
+            onClick={() => setSubagentsOpen((v) => !v)}
+            aria-expanded={subagentsOpen}
+          >
+            <span>{t("navigation.subagents")}</span>
+            {subagentsOpen ? (
+              <ChevronDown
+                className="sidebar-recent-disclosure-icon"
+                size={13}
+              />
+            ) : (
+              <ChevronRight
+                className="sidebar-recent-disclosure-icon"
+                size={13}
+              />
+            )}
+          </button>
+          <div
+            className={`sidebar-recent-collapse ${subagentsOpen ? "expanded" : ""}`}
+          >
+            <div className="sidebar-recent-collapse-inner">
+              {rows.map((row) => {
+                const running = row.endedAt == null;
+                return (
+                  <button
+                    key={row.id}
+                    type="button"
+                    className="chat-context-panel-row"
+                    onClick={() => onOpenSession(row.id)}
+                    title={row.title}
+                  >
+                    {running ? (
+                      <span
+                        className="sidebar-recent-session-spinner"
+                        aria-hidden
+                      />
+                    ) : (
+                      <span
+                        className="sidebar-recent-session-dot"
+                        aria-hidden
+                      />
+                    )}
+                    <span className="chat-context-panel-row-title">
+                      {row.title || row.id.slice(-8)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
