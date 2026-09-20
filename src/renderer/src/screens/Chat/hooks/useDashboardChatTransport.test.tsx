@@ -55,6 +55,8 @@ interface HarnessApi {
   activeTurnRef?: MutableRefObject<ActiveTurn | null>;
   abort?: () => void;
   messages?: ChatMessage[];
+  resyncAfterDetach?: () => Promise<void>;
+  hasDetachedTurn?: boolean;
   respondClarify?: ReturnType<
     typeof useDashboardChatTransport
   >["respondClarify"];
@@ -89,6 +91,7 @@ function Harness({
   connectionId,
   connectionRevision,
   fallbackOnUnavailable = false,
+  hermesSessionId = null,
   initialConnectionMode = "local",
   onDashboardUnavailable,
   setUsage = vi.fn() as SetUsageMock,
@@ -97,6 +100,7 @@ function Harness({
   connectionId?: string;
   connectionRevision?: number;
   fallbackOnUnavailable?: boolean;
+  hermesSessionId?: string | null;
   initialConnectionMode?: "local" | "remote" | "ssh";
   onDashboardUnavailable?: (reason: string) => void;
   setUsage?: SetUsageMock;
@@ -126,7 +130,7 @@ function Harness({
     connectionMode,
     enabled: true,
     fallbackOnUnavailable,
-    hermesSessionId: null,
+    hermesSessionId,
     messagesRef,
     model,
     profile: undefined,
@@ -148,6 +152,8 @@ function Harness({
       activeTurnRef,
       abort: transport.abort,
       messages,
+      resyncAfterDetach: transport.resyncAfterDetach,
+      hasDetachedTurn: transport.hasDetachedTurn,
       respondApproval: transport.respondApproval,
       respondClarify: transport.respondClarify,
       send: transport.sendMessage,
@@ -168,6 +174,8 @@ function Harness({
     transport.sendMessage,
     transport.respondApproval,
     transport.respondClarify,
+    transport.resyncAfterDetach,
+    transport.hasDetachedTurn,
     transport.sessionYolo,
     transport.toggleSessionYolo,
     transport.abort,
@@ -1235,6 +1243,150 @@ describe("useDashboardChatTransport unavailable fallback (issue #667)", () => {
       (m) => "content" in m && m.content.includes("continues on the agent"),
     );
     expect(marker).toBeDefined();
+  });
+
+  it("seeds the run state when session.resume reports a still-running turn (issue #109)", async () => {
+    // @lat: [[dashboard-detach#Run-state seeding from session.resume (issue #109)]]
+    dashboardMock.request.mockImplementation(async (method: string) => {
+      if (method === "session.resume") {
+        return {
+          session_id: "live-resumed",
+          resumed: "stored-open",
+          running: true,
+          status: "streaming",
+        };
+      }
+      return {};
+    });
+    Object.defineProperty(window, "hermesAPI", {
+      configurable: true,
+      value: {
+        freshDashboardWsUrl: vi.fn(async () => "ws://fresh-dashboard"),
+        getSessionMessages: vi.fn(async () => []),
+        startDashboard: vi.fn(async () => ({
+          connection: { wsUrl: "ws://127.0.0.1:12345" },
+          running: true,
+        })),
+      },
+    });
+
+    const api: HarnessApi = {};
+    render(<Harness api={api} hermesSessionId="stored-open" />);
+
+    // Opening a chat whose stored session still runs server-side: no local
+    // turn exists (the renderer lost it), and the resync's resume seeds the
+    // spinner/Stop state from the backend's `running` flag.
+    const turnRef = api.activeTurnRef as MutableRefObject<ActiveTurn | null>;
+    turnRef.current = null;
+    // Read through a thunk: TS narrows `current` to null after the assignment
+    // above and never widens it again across the awaited act() boundary.
+    const turnStatus = (): string | undefined => turnRef.current?.status;
+    await act(async () => {
+      await api.resyncAfterDetach?.();
+    });
+    expect(turnRef.current).not.toBeNull();
+    expect(turnStatus()).toBe("running");
+    expect(api.isLoading).toBe(true);
+    expect(
+      dashboardMock.request.mock.calls.some(
+        ([method]) => method === "session.resume",
+      ),
+    ).toBe(true);
+  });
+
+  it("leaves the state alone when the resumed turn has finished (issue #109)", async () => {
+    dashboardMock.request.mockImplementation(async (method: string) => {
+      if (method === "session.resume") {
+        return {
+          session_id: "live-resumed",
+          resumed: "stored-done",
+          running: false,
+          status: "idle",
+        };
+      }
+      return {};
+    });
+    Object.defineProperty(window, "hermesAPI", {
+      configurable: true,
+      value: {
+        freshDashboardWsUrl: vi.fn(async () => "ws://fresh-dashboard"),
+        getSessionMessages: vi.fn(async () => []),
+        startDashboard: vi.fn(async () => ({
+          connection: { wsUrl: "ws://127.0.0.1:12345" },
+          running: true,
+        })),
+      },
+    });
+
+    const api: HarnessApi = {};
+    render(<Harness api={api} hermesSessionId="stored-done" />);
+
+    const doneTurnRef =
+      api.activeTurnRef as MutableRefObject<ActiveTurn | null>;
+    doneTurnRef.current = null;
+    await act(async () => {
+      await api.resyncAfterDetach?.();
+    });
+    expect(doneTurnRef.current).toBeNull();
+    expect(api.isLoading).toBe(false);
+  });
+
+  it("restores the run state after an accidental WebSocket drop (issue #109)", async () => {
+    dashboardMock.request.mockImplementation(async (method: string) => {
+      if (method === "session.create") {
+        return { session_id: "live-drop", stored_session_id: "stored-drop" };
+      }
+      if (method === "session.resume") {
+        return {
+          session_id: "live-drop",
+          resumed: "stored-drop",
+          running: true,
+          status: "streaming",
+        };
+      }
+      return {};
+    });
+    Object.defineProperty(window, "hermesAPI", {
+      configurable: true,
+      value: {
+        freshDashboardWsUrl: vi.fn(async () => "ws://fresh-dashboard"),
+        getSessionMessages: vi.fn(async () => []),
+        startDashboard: vi.fn(async () => ({
+          connection: { wsUrl: "ws://127.0.0.1:12345" },
+          running: true,
+        })),
+      },
+    });
+
+    const api: HarnessApi = {};
+    render(<Harness api={api} hermesSessionId="stored-drop" />);
+
+    // A send establishes the WS client (with its onClose hook) so the drop
+    // path below runs against a connected client; Chat.tsx seeds the local
+    // active turn around its send, so mirror that here.
+    const dropTurnRef =
+      api.activeTurnRef as MutableRefObject<ActiveTurn | null>;
+    await act(async () => {
+      await api.send?.("drop me mid-turn");
+      dropTurnRef.current = { ...activeBadTurn };
+    });
+    expect(dropTurnRef.current).not.toBeNull();
+
+    // Simulate the socket dropping mid-turn: retireDetachedTurn clears the
+    // UI state and the 1.5s probe re-resumes — the backend reports the turn
+    // still running, so the spinner/Stop state is restored.
+    await act(async () => {
+      dashboardMock.onClose?.();
+    });
+    expect(dropTurnRef.current).toBeNull();
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1700));
+    });
+    const dropStatus = (): string | undefined => dropTurnRef.current?.status;
+    expect(dropTurnRef.current).not.toBeNull();
+    expect(dropStatus()).toBe("running");
+    expect(api.isLoading).toBe(true);
   });
 
   it("leaves the transcript alone when no turn is running at teardown", async () => {

@@ -31,6 +31,10 @@ interface SessionResponse {
   messages?: unknown[];
   message_count?: number;
   resumed?: string;
+  /** True while the resumed session still has a live turn (issue #109). */
+  running?: boolean;
+  /** Gateway session status: "streaming" while a turn is in flight. */
+  status?: string;
   session_id: string;
   stored_session_id?: string | null;
 }
@@ -86,6 +90,8 @@ interface EnsureDashboardRuntimeSessionParams {
 interface EnsureDashboardRuntimeSessionResult {
   created: boolean;
   info?: unknown;
+  /** True while the resumed session still has a live turn (issue #109). */
+  running?: boolean;
   runtimeSessionId: string;
   storedSessionId: string;
 }
@@ -300,6 +306,7 @@ export async function ensureDashboardRuntimeSession(
       return {
         created: false,
         ...(resumed.info !== undefined ? { info: resumed.info } : {}),
+        ...(resumed.running !== undefined ? { running: resumed.running } : {}),
         runtimeSessionId: resumed.session_id,
         storedSessionId: resumed.stored_session_id || resumed.resumed || stored,
       };
@@ -1207,6 +1214,23 @@ export function useDashboardChatTransport({
   const retireDetachedTurnRef = useRef(retireDetachedTurn);
   retireDetachedTurnRef.current = retireDetachedTurn;
 
+  // After an accidental WebSocket drop retired a still-running turn (issue
+  // #76), wait out the immediate reconnect window, then re-resume: when the
+  // agent is still up and the turn still runs, the resume re-attaches the
+  // event stream and ensureRuntimeSession restores the spinner/Stop state
+  // (issue #109). Runs only when the retire actually fired (a detached
+  // marker was set); otherwise the drop happened while idle and there is
+  // nothing to restore. Goes through a latest-ref because resyncAfterDetach
+  // is declared later in the hook.
+  const resyncAfterDetachRef = useRef<() => Promise<void>>(async () => {});
+  const probeRestoreAfterDrop = useCallback((): void => {
+    window.setTimeout(() => {
+      if (detachedSessionIdRef.current) void resyncAfterDetachRef.current();
+    }, 1500);
+  }, []);
+  const probeRestoreAfterDropRef = useRef(probeRestoreAfterDrop);
+  probeRestoreAfterDropRef.current = probeRestoreAfterDrop;
+
   useEffect(() => {
     // Teardown of the transport binding (connection switch, profile switch,
     // connection config change): the WebSocket is deliberately closed below,
@@ -1580,6 +1604,18 @@ export function useDashboardChatTransport({
                 // ensureClient reconnects on the next prompt and
                 // session.resume reconciles the missed tail (issue #76).
                 retireDetachedTurnRef.current();
+                // The socket that owned the runtime-session binding is gone;
+                // clear the binding so the probe's resync re-resumes (the
+                // backend re-attaches the live session's event stream and
+                // reports its `running` flag) instead of skipping the resume
+                // on a stale runtime id (issue #109).
+                runtimeSessionIdRef.current = null;
+                // If the agent is still reachable over HTTP, the resume probe
+                // re-attaches the turn's event stream on a fresh socket and
+                // restores the running state the retire above cleared (issue
+                // #109). Best-effort: a dead dashboard just leaves the
+                // detached marker, exactly as before.
+                probeRestoreAfterDropRef.current();
               }
             },
           });
@@ -1641,6 +1677,32 @@ export function useDashboardChatTransport({
       onDashboardUnavailable,
     ]);
 
+  // Restore the UI's run state from the backend's truth (issue #109): the
+  // gateway keeps authoritative `running` flags, and session.resume reports
+  // them plus re-attaches the event stream of a still-running turn — deltas
+  // and message.complete then arrive on this client like for a local send.
+  // A synthetic activeTurn carries no turnId/userId; the reconcile path does
+  // not key on them for a resumed turn, and an eventual completion clears
+  // the spinner without needing a matching user bubble.
+  const seedRunStateFromResume = useCallback(
+    (running: boolean): void => {
+      if (running) {
+        if (!activeTurnRef.current) {
+          activeTurnRef.current = {
+            turnId: "",
+            userId: "",
+            startIndex: messagesRef.current.length,
+            status: "running",
+          };
+        } else {
+          activeTurnRef.current.status = "running";
+        }
+        setIsLoading(true);
+      }
+    },
+    [activeTurnRef, messagesRef, setIsLoading],
+  );
+
   const ensureRuntimeSession = useCallback(
     async (
       client: DashboardGatewayClient,
@@ -1683,6 +1745,12 @@ export function useDashboardChatTransport({
         runtimeSessionIdRef.current = targetSessionId;
         lastRuntimeSessionWasCreatedRef.current = response.created;
         justCreated = response.created;
+        if (!justCreated && response.running) {
+          // The resumed session still has a live turn (re-opened chat, app
+          // restart, post-detach resync): restore the spinner/Stop state the
+          // renderer lost (issue #109).
+          seedRunStateFromResume(true);
+        }
         if (justCreated && contextFolder) {
           lastSyncedCwdRef.current = contextFolder;
         }
@@ -1717,6 +1785,7 @@ export function useDashboardChatTransport({
       contextFolder,
       messagesRef,
       profile,
+      seedRunStateFromResume,
       setHermesSessionId,
     ],
   );
@@ -2347,6 +2416,9 @@ export function useDashboardChatTransport({
       const client = await ensureClient();
       if (clientRef.current !== client) return;
       const response = await ensureRuntimeSession(client);
+      // ensureRuntimeSession seeds the run state (spinner/Stop) from the
+      // resume response's `running` flag when the turn is still live (issue
+      // #109); a finished turn leaves the retired marker's state as-is.
       void response;
       // Transcript catch-up over the canonical DB — the same path the legacy
       // transport's end-of-stream refresh uses. Requires the raw DB items;
@@ -2376,6 +2448,7 @@ export function useDashboardChatTransport({
     profile,
     enabled,
   ]);
+  resyncAfterDetachRef.current = resyncAfterDetach;
 
   useEffect(
     () => () => {

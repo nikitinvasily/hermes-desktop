@@ -1,5 +1,5 @@
 import { memo, useEffect, useState } from "react";
-import { CircleDashed, ChevronRight, ChevronDown, X } from "lucide-react";
+import { CircleDashed, ChevronRight, ChevronDown, Send, X } from "lucide-react";
 import { useI18n } from "../../components/useI18n";
 import type { Attachment } from "../../../../shared/attachments";
 
@@ -11,15 +11,20 @@ interface QueuedMessage {
 interface QueuedMessagesProps {
   messages: QueuedMessage[];
   onRemove: (index: number) => void;
+  /** Send this queued message now: interrupts the running turn and flushes
+   * the queue head (issue #109 / TODO 3). */
+  onSendNow: (index: number) => void;
 }
 
 /**
  * Pending-send queue indicator shown above the input while the agent is busy.
- * Each queued message can be individually cancelled via an X button.
+ * Each queued message can be individually cancelled via an X button or sent
+ * immediately (interrupting the current run) via the send button.
  */
 export const QueuedMessages = memo(function QueuedMessages({
   messages,
   onRemove,
+  onSendNow,
 }: QueuedMessagesProps): React.JSX.Element | null {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
@@ -43,6 +48,15 @@ export const QueuedMessages = memo(function QueuedMessages({
         <span className="chat-queue-single" title={preview(messages[0])}>
           {preview(messages[0])}
         </span>
+        <button
+          type="button"
+          className="chat-queue-send"
+          onClick={() => onSendNow(0)}
+          aria-label={t("chat.queuedSendNow")}
+          title={t("chat.queuedSendNow")}
+        >
+          <Send size={12} />
+        </button>
         <button
           type="button"
           className="chat-queue-remove"
@@ -79,9 +93,19 @@ export const QueuedMessages = memo(function QueuedMessages({
               <span className="chat-queue-item-text">{preview(m)}</span>
               <button
                 type="button"
+                className="chat-queue-send"
+                onClick={() => onSendNow(i)}
+                aria-label={t("chat.queuedSendNow")}
+                title={t("chat.queuedSendNow")}
+              >
+                <Send size={12} />
+              </button>
+              <button
+                type="button"
                 className="chat-queue-remove"
                 onClick={() => onRemove(i)}
                 aria-label={t("chat.queuedCancel")}
+                title={t("chat.queuedCancel")}
               >
                 <X size={12} />
               </button>
