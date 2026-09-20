@@ -18250,3 +18250,58 @@ body:has(.shell-vibrant),
   font-size: 11px;
   color: var(--text-tertiary);
 }
+
+/* ── Floating chat context panel (issue #122) ─────────────────────────
+   Sits over the conversation area, pinned top-right inside .chat-body.
+   Renders only when it has content (the component returns null
+   otherwise), so it never claims layout space in subagent-free chats.
+   Sibling of .chat-messages and the worktree panel — the block-flow /
+   content-visibility contract of the message list is untouched. */
+.chat-context-panel {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 30;
+  width: 300px;
+  max-width: min(300px, calc(100vw - 280px));
+  padding: 4px 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 10px);
+  background: color-mix(in srgb, var(--bg-primary, var(--bg)) 88%, transparent);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+}
+
+.chat-context-panel .chat-context-panel-toggle {
+  margin: 2px 0 3px;
+}
+
+.chat-context-panel-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 5px 14px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  text-align: left;
+}
+
+.chat-context-panel-row:hover {
+  background: var(--sidebar-hover-bg);
+  color: var(--text-primary);
+}
+
+.chat-context-panel-row-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}

@@ -930,6 +930,29 @@ const hermesAPI = {
   > =>
     ipcRenderer.invoke("list-sessions", limit, offset, connectionId, profile),
 
+  // Floating chat context panel (issue #122): delegate-subagent children of a
+  // chat session. Remote connections return [] (children-free REST lists).
+  listSubagentSessions: (
+    parentSessionId: string,
+    connectionId?: string,
+    profile?: string,
+  ): Promise<
+    Array<{
+      id: string;
+      startedAt: number;
+      endedAt: number | null;
+      title: string;
+      model: string | null;
+      messageCount: number;
+    }>
+  > =>
+    ipcRenderer.invoke(
+      "list-subagent-sessions",
+      parentSessionId,
+      connectionId,
+      profile,
+    ),
+
   getSessionMessages: (
     sessionId: string,
     connectionId?: string,

@@ -74,6 +74,14 @@ Delegate-subagent runs never appear in the sidebar or archive browser: every `de
 
 [[src/main/db.ts#sessionSubagentPredicate]] builds the shared SQL predicate (the same `_delegate_from` JSON check the core's `list_sessions_rich(include_children=False)` applies behind every dashboard list), guarded by `PRAGMA table_info` so legacy schemas without the lineage columns keep the unfiltered behavior. [[src/main/sessions.ts#listSessions]], [[src/main/session-cache.ts#syncSessionCache]], and the local archived read apply it after the archive predicate; the SSH python fallbacks ([[src/main/ssh-remote.ts#sshListSessions]] and the archived-list script) inline the same predicate with the same column guard. Remote mode needs no change — the dashboard REST already excludes child rows. Branch children (`_branched_from`), untagged lineage rows, and malformed `model_config` JSON stay visible, and search still finds subagent transcripts (mirroring the core's `/api/sessions/search`). [[tests/session-subagent-visibility.test.ts]] executes the real SQL against seeded lineages.
 
+Hidden ≠ lost: the same hidden rows are surfaced per-chat by the floating context panel ([[sidebar-navigation#Floating subagents panel]]).
+
+## Floating subagents panel
+
+The chat area carries a floating context panel pinned top-right over the transcript; it renders nothing until it has content, so subagent-free chats keep their full width (issue #122).
+
+The first section, "Subagents", reuses the sidebar section anatomy (`sidebar-recent-section-toggle` + `sidebar-recent-collapse` grid-rows animation) inside `.chat-context-panel`, an absolutely-positioned sibling of `.chat-messages` in `.chat-body` — the message list's block-flow/content-visibility contract is untouched. Rows come from [[src/main/sessions.ts#listSubagentSessions]] over the `list-subagent-sessions` IPC: delegate children of the ACTIVE chat (`parent_session_id` + `_delegate_from`), titled by the child's first user message (the delegation goal, single-line clamped), with a running spinner while `ended_at` is NULL. Clicking a row opens the child transcript through Layout's session-resume flow (seeded run). [[src/renderer/src/screens/Chat/ChatContextPanel.tsx]] re-fetches when the session id changes and after each finished turn; remote/ssh connections return an empty list (children-free REST) so the panel stays hidden there. [[tests/session-subagent-panel.test.ts]] executes the SQL against seeded lineages; the component contract (null-when-empty, spinner-vs-dot, click-to-open, refresh) is covered by [[src/renderer/src/screens/Chat/ChatContextPanel.test.tsx]].
+
 ## By-modification ordering and stable project order
 
 Chats order by last modification, not creation (issue #74), and the Projects section keeps a stable alphabetical order independent of session recency.

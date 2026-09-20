@@ -238,6 +238,7 @@ import {
 import {
   applySessionLocalOverlays,
   listSessions,
+  listSubagentSessions,
   setSessionArchived,
   markSessionRead,
   listArchivedSessions,
@@ -2428,6 +2429,24 @@ export function registerIpcHandlers(context: IpcContext): void {
   );
 
   // Sessions
+  // Floating chat context panel (issue #122): delegate-subagent children of a
+  // chat session. Remote dashboards list children-free (issue #95), so the
+  // panel stays hidden there until the core grows a parent_id filter.
+  ipcMain.handle(
+    "list-subagent-sessions",
+    (
+      _event,
+      parentSessionId: string,
+      connectionId?: string,
+      profile?: string,
+    ) => {
+      const conn = sessionConnection(connectionId);
+      if (conn.mode !== "local") return [];
+      const scopedProfile = activeSshProfile(profile);
+      return listSubagentSessions(parentSessionId, scopedProfile);
+    },
+  );
+
   ipcMain.handle(
     "list-sessions",
     (

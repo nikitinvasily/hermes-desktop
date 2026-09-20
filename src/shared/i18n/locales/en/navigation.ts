@@ -11,6 +11,7 @@ export default {
   projects: "Projects",
   skills: "Skills",
   chats: "Chats",
+  subagents: "Subagents",
   pinned: "Pinned",
   archiveSection: "Archive",
   archiveEmpty: "No archived chats",
