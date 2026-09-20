@@ -23,3 +23,9 @@ The completion chime is enabled by default and can be disabled globally from Set
 Spell checking is enabled by default and supports either system-preferred dictionaries or an explicit multi-language selection.
 
 [[src/main/ipc/register.ts#registerIpcHandlers]] exposes the current Electron session's available, selected, and system-matched dictionaries, validates requested language ids, and applies the result with Electron's session spell-checker API. [[src/renderer/src/components/ChatPreferencesProvider.tsx#ChatPreferencesProvider]] persists enabled/system/custom choices and applies an empty list when spell checking is disabled. [[src/renderer/src/components/settings/LanguagePane.tsx#LanguagePane]] selects system or custom dictionaries, while [[src/renderer/src/screens/Chat/ChatInput.tsx]] binds the enabled flag to its textarea; the Electron session selection also governs other editable renderer fields. [[src/renderer/src/components/ChatPreferencesProvider.test.tsx]] protects persistence, multi-language application, and disabling.
+
+## System event rows
+
+Machine-authored history pivots (model switch, auto-continue, personality switch) ride as `role="user"` rows tagged `display_kind`; they must be projected into display-only event lines at read time, never user bubbles (issue #118).
+
+The projection lives in [[src/main/sessions.ts#expandRowsToHistory]] (local reads) with the remote path carrying the same column through `normalizeMessageRow`; [[src/renderer/src/screens/Chat/MessageRow.tsx#MessageRow]] renders the resulting `system_event` kind as a centered dim line with label parity to the TUI and upstream desktop ("model changed", "resumed interrupted turn", ...). `steer` rows are real user input and deliberately stay bubbles; unknown `display_kind` values fall through to the normal user path.
