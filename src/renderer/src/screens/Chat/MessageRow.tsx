@@ -18,6 +18,14 @@ export const APPROVAL_RE =
   /⚠️.*dangerous|requires? (your )?approval|^\s*\/approve\b.*\/deny|do you want (me )?to (proceed|continue|run|execute)/im;
 
 /**
+ * Background-process completion notification envelope injected by the agent
+ * core (tools/process_registry_notifications.py::format_process_notification)
+ * as a role="user" message. Same shape as upstream desktop's
+ * PROCESS_NOTIFICATION_RE: not a human prompt, rendered as a compact notice.
+ */
+export const PROCESS_NOTIFICATION_RE = /^\[IMPORTANT: Background process [\s\S]*\]$/;
+
+/**
  * Coerce any DB, stream, or IPC timestamp value to valid epoch milliseconds.
  * Handles seconds (< 1e12), ms, us (> 1e14), ns (> 1e17), and ISO strings.
  */
@@ -240,6 +248,23 @@ export const MessageRow = memo(function MessageRow({
         <span className="chat-system-event-text">
           {systemEventLabel(msg.event)}
         </span>
+      </div>
+    );
+  }
+  if (isChatBubbleMessage(msg) && PROCESS_NOTIFICATION_RE.test(msg.content.trim())) {
+    const body = msg.content.trim().replace(/^\[IMPORTANT:\s*/, "").replace(/\]$/, "");
+    const newline = body.indexOf("\n");
+    const headline = (newline === -1 ? body : body.slice(0, newline)).trim();
+    const detail = newline === -1 ? "" : body.slice(newline + 1).trim();
+    return (
+      <div className="chat-message chat-message-process-note">
+        <span className="chat-process-note-headline">{headline}</span>
+        {detail && (
+          <details className="chat-process-note-details">
+            <summary>output</summary>
+            <pre>{detail}</pre>
+          </details>
+        )}
       </div>
     );
   }

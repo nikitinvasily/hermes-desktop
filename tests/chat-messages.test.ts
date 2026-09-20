@@ -5,10 +5,30 @@ import {
   shouldCopyToTranscript,
   shouldSendToAgent,
 } from "../src/renderer/src/screens/Chat/chatMessages";
+import { PROCESS_NOTIFICATION_RE } from "../src/renderer/src/screens/Chat/MessageRow";
 import type {
   ActiveTurn,
   ChatMessage,
 } from "../src/renderer/src/screens/Chat/types";
+
+describe("process notification envelope (issue #124)", () => {
+  it("matches a full background-process completion envelope", () => {
+    const text =
+      "[IMPORTANT: Background process proc_1de1d0b7b000 completed normally (exit code 0).\nCommand: cd ~/repo && npx vitest run\nOutput:\nstarted]";
+    expect(PROCESS_NOTIFICATION_RE.test(text)).toBe(true);
+  });
+
+  it("does not match ordinary messages that merely mention the prefix", () => {
+    expect(
+      PROCESS_NOTIFICATION_RE.test(
+        "Вот пришло [IMPORTANT: Background process ...] уведомление, посмотрим",
+      ),
+    ).toBe(false);
+    expect(
+      PROCESS_NOTIFICATION_RE.test("[IMPORTANT: something else entirely]"),
+    ).toBe(false);
+  });
+});
 
 describe("chat message helpers", () => {
   it("excludes local assistant errors from future agent history", () => {
