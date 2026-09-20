@@ -2385,6 +2385,17 @@ body:has(.shell-vibrant),
     color-mix(in srgb, var(--text-primary) 7%, transparent);
 }
 
+/* Sidebar row highlight (hover/focus/active): mixed from existing tokens so
+   every theme gets a visible step over the sidebar background (--bg-secondary)
+   without introducing new hex colors. */
+:root {
+  --sidebar-hover-bg: color-mix(
+    in srgb,
+    var(--text-primary) 16%,
+    var(--bg-secondary)
+  );
+}
+
 .sidebar {
   width: 250px;
   /* Anchor for the resize handle (abs-positioned at the right edge). */
@@ -2487,7 +2498,7 @@ body:has(.shell-vibrant),
 }
 
 .sidebar-collapse-toggle:hover {
-  background: var(--bg-tertiary);
+  background: var(--sidebar-hover-bg);
   color: var(--text-primary);
 }
 
@@ -2620,7 +2631,7 @@ body:has(.shell-vibrant),
 }
 
 .sidebar-nav-item:hover {
-  background: var(--bg-tertiary);
+  background: var(--sidebar-hover-bg);
   color: var(--text-primary);
 }
 
@@ -2880,7 +2891,7 @@ body:has(.shell-vibrant),
 }
 
 .sidebar-recent-project-heading:hover {
-  background: var(--bg-tertiary);
+  background: var(--sidebar-hover-bg);
   color: var(--text-secondary);
 }
 
@@ -2953,12 +2964,12 @@ body:has(.shell-vibrant),
 }
 
 .sidebar-recent-session:hover {
-  background: var(--bg-tertiary);
+  background: var(--sidebar-hover-bg);
   color: var(--text-primary);
 }
 
 .sidebar-recent-session:focus-visible {
-  background: var(--bg-tertiary);
+  background: var(--sidebar-hover-bg);
   color: var(--text-primary);
 }
 
@@ -2968,7 +2979,7 @@ body:has(.shell-vibrant),
      (accent spinner / unread dot, warning approval dot, issue #90). The
      base .sidebar-recent-session-dot already pins neutral bullets to
      --text-muted, so no override is needed here. */
-  background: var(--bg-tertiary);
+  background: var(--sidebar-hover-bg);
   color: var(--text-primary);
 }
 
@@ -3725,7 +3736,7 @@ body:has(.shell-vibrant),
 }
 
 .sidebar-footer-action:hover {
-  background: var(--bg-tertiary);
+  background: var(--sidebar-hover-bg);
   color: var(--text-primary);
 }
 
