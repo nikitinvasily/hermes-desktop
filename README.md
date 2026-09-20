@@ -28,6 +28,7 @@ Changes in this fork that are **not** in upstream.
 
 ### Fixes
 
+- **Sidebar hover highlight is visible** — hovering (or focusing) a chat row, nav item, or project heading in the sidebar now shows a clear highlight against the sidebar background in every theme; the active chat keeps the same visible highlight.
 - **Model switches show as timeline events, not fake messages** — when the active model changes mid-conversation (a `/model` switch or a config change picked up on the next turn), the chat shows a quiet "model changed" line instead of a raw `[System: The active model for this chat has changed to …]` message that looked like something you sent. Interrupted-turn resumes and background-agent completions get the same quiet treatment.
 - **A new chat shows up in the sidebar right away** — the chat appears in the list the moment you send its first message, while the agent is still working on the reply, instead of only after the turn finishes.
 - **Subagent sessions stay out of the sidebar** — when the agent spawns subagents, their internal sessions no longer clutter the chat list, project groups, or the archive (local and SSH connections; the remote dashboard already filtered them).
