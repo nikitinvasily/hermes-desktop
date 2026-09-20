@@ -84,7 +84,8 @@ function seedProfile(
     CREATE TABLE messages (
       id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT,
       timestamp REAL, tool_call_id TEXT, tool_calls TEXT, tool_name TEXT,
-      reasoning TEXT, reasoning_content TEXT, reasoning_details TEXT
+      reasoning TEXT, reasoning_content TEXT, reasoning_details TEXT,
+      display_kind TEXT
     );
   `);
   return db;
