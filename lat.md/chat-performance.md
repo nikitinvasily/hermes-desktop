@@ -73,6 +73,12 @@ A correct `scrollHeight` matters because [[src/renderer/src/screens/Chat/hooks/u
 
 The flex `gap` that previously spaced rows is replaced by per-row spacing: `.chat-message` carries `padding-bottom: 16px` (which also provides the timestamp's room), and non-message children that lack it (`.chat-clarify`) carry an equivalent `margin-bottom`. Block flow also moves alignment from `align-self` to `margin-left: auto` for user rows, and the empty state fills height with `min-height: 100%` instead of `flex: 1`.
 
+## Centered column caps line width
+
+On wide monitors the transcript and composer live in a centered 800px column so message lines stay readable.
+
+The wrapper is `.chat-content-column` (`.chat-messages > .chat-content-column`, and one wrapping the input area's children), a plain block element with `max-width: 800px` and `margin-inline: auto`; narrow windows are unaffected because the column simply fills the space. It stays block flow (no flex) so the `content-visibility` and `scrollHeight` contract above is preserved, and the worktree panel is a flex sibling of `.chat-messages`, outside the column.
+
 ## Textarea auto-resize avoids per-keystroke reflow
 
 The composer textarea auto-grows to its content. Reading `scrollHeight` to size it forces a layout flush, so it runs once per committed value in a `useLayoutEffect` keyed on the input string, not on every keystroke.

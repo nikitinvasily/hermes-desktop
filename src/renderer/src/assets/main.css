@@ -5269,6 +5269,15 @@ body:has(.shell-vibrant),
   color: var(--text-tertiary);
 }
 
+/* Centered conversation column (#111): on wide monitors the transcript and
+   the input live in a fixed-max-width column so text lines stay readable.
+   Narrow windows are unaffected - the column just fills the space. */
+.chat-content-column {
+  width: 100%;
+  max-width: 800px;
+  margin-inline: auto;
+}
+
 .chat-messages {
   flex: 1;
   overflow-y: auto;
@@ -6307,6 +6316,12 @@ body:has(.shell-vibrant),
   padding: 12px 24px 16px;
   border-top: 1px solid var(--border);
   flex-shrink: 0;
+}
+
+.chat-input-area > .chat-content-column {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .chat-input-shell {

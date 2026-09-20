@@ -22,6 +22,7 @@ Changes in this fork that are **not** in upstream.
 - **Connection switch returns you to your chat** — switching connections reopens the conversation you left open there, and a first new chat starts in the same project when one matches.
 - **New-chat buttons in the sidebar** — quick actions on project headings and on the Chats header.
 - **Resizable sidebar** — drag the right edge (200–420 px, double-click resets), remembered across restarts.
+- **Readable conversation column on wide screens** — messages and the input live in a centered column of capped width instead of stretching line length across the whole monitor.
 - **Stable, predictable sidebar order** — projects sort alphabetically, chats sort by last activity, the active chat keeps its highlight, and the title bar shows a single tab for the current chat instead of one chip per conversation.
 - **Office tab hidden** — the 3D "Office" tab is removed from the sidebar; the feature stays in the code and can be re-enabled.
 

@@ -1159,23 +1159,25 @@ function Chat({
 
       <div className="chat-body">
         <div className="chat-messages" ref={containerRef}>
-          {messages.length === 0 ? (
-            <ChatEmptyState onSelectSuggestion={handleSuggestion} />
-          ) : (
-            <MessageList
-              messages={messages}
-              isLoading={isLoading}
-              toolProgress={toolProgress}
-              onApprove={actions.handleApprove}
-              onDeny={actions.handleDeny}
-              onClarifyResolved={handleClarifyResolved}
-              onClarifyRespond={handleClarifyRespond}
-              onApprovalRespond={handleApprovalRespond}
-              onApprovalResolved={handleApprovalResolved}
-              agentAvatar={agentAvatar}
-            />
-          )}
-          <div ref={bottomRef} />
+          <div className="chat-content-column">
+            {messages.length === 0 ? (
+              <ChatEmptyState onSelectSuggestion={handleSuggestion} />
+            ) : (
+              <MessageList
+                messages={messages}
+                isLoading={isLoading}
+                toolProgress={toolProgress}
+                onApprove={actions.handleApprove}
+                onDeny={actions.handleDeny}
+                onClarifyResolved={handleClarifyResolved}
+                onClarifyRespond={handleClarifyRespond}
+                onApprovalRespond={handleApprovalRespond}
+                onApprovalResolved={handleApprovalResolved}
+                agentAvatar={agentAvatar}
+              />
+            )}
+            <div ref={bottomRef} />
+          </div>
         </div>
 
         {contextFolder && worktreeVisible && (
@@ -1192,110 +1194,115 @@ function Chat({
       </div>
 
       <div className="chat-input-area">
-        <QueuedMessages
-          messages={queuedMessages}
-          onRemove={handleRemoveQueued}
-          onSendNow={handleSendNowQueued}
-        />
-        <ChatInput
-          ref={chatInputRef}
-          isLoading={isLoading}
-          hasSession={!!hermesSessionId}
-          sessionId={hermesSessionId}
-          remoteMode={remoteMode}
-          profile={profile}
-          contextUsage={contextUsage}
-          readiness={readiness}
-          slashCommands={slashMenuCommands}
-          onSubmit={handleSubmitOrQueue}
-          onQuickAsk={actions.handleQuickAsk}
-          onAbort={actions.handleAbort}
-          toolbarExtras={
-            <>
-              <ModelPicker
-                active={active}
-                currentModel={chatCurrentModel}
-                currentProvider={chatCurrentProvider}
-                currentBaseUrl={chatCurrentBaseUrl}
-                modelGroups={modelConfig.modelGroups}
-                displayModel={chatDisplayModel}
-                onOpen={reloadModelConfig}
-                onSelectModel={handleSelectModel}
-              />
-              <ReasoningEffortPicker
-                value={reasoningEffort}
-                onChange={setReasoningEffort}
-              />
-              <div className="chat-fast-wrapper">
+        <div className="chat-content-column">
+          <QueuedMessages
+            messages={queuedMessages}
+            onRemove={handleRemoveQueued}
+            onSendNow={handleSendNowQueued}
+          />
+          <ChatInput
+            ref={chatInputRef}
+            isLoading={isLoading}
+            hasSession={!!hermesSessionId}
+            sessionId={hermesSessionId}
+            remoteMode={remoteMode}
+            profile={profile}
+            contextUsage={contextUsage}
+            readiness={readiness}
+            slashCommands={slashMenuCommands}
+            onSubmit={handleSubmitOrQueue}
+            onQuickAsk={actions.handleQuickAsk}
+            onAbort={actions.handleAbort}
+            toolbarExtras={
+              <>
+                <ModelPicker
+                  active={active}
+                  currentModel={chatCurrentModel}
+                  currentProvider={chatCurrentProvider}
+                  currentBaseUrl={chatCurrentBaseUrl}
+                  modelGroups={modelConfig.modelGroups}
+                  displayModel={chatDisplayModel}
+                  onOpen={reloadModelConfig}
+                  onSelectModel={handleSelectModel}
+                />
+                <ReasoningEffortPicker
+                  value={reasoningEffort}
+                  onChange={setReasoningEffort}
+                />
+                <div className="chat-fast-wrapper">
+                  <button
+                    type="button"
+                    className={`btn-ghost chat-fast-btn ${fastMode ? "chat-fast-active" : ""}`}
+                    onClick={toggleFastMode}
+                  >
+                    <Zap size={14} />
+                  </button>
+                  <div
+                    className={`chat-fast-popover ${fastMode ? "chat-fast-active-popover" : ""}`}
+                  >
+                    <div className="chat-fast-popover-head">
+                      <span
+                        className="chat-fast-popover-icon"
+                        aria-hidden="true"
+                      >
+                        <Zap size={13} />
+                      </span>
+                      <strong>
+                        {fastMode ? t("chat.fastModeOn") : t("chat.fastMode")}
+                      </strong>
+                    </div>
+                    <span>
+                      {fastMode
+                        ? t("chat.fastModeActive")
+                        : t("chat.fastModeInactive")}
+                    </span>
+                  </div>
+                </div>
+                <ContextFolderChip
+                  contextFolder={contextFolder}
+                  show
+                  worktreeVisible={worktreeVisible}
+                  connectionId={connectionId}
+                  profile={profile}
+                  onClearFolder={handleClearFolder}
+                  onToggleWorktree={handleToggleWorktree}
+                  onSelectFolder={handleSelectFolder}
+                />
+                {commandCatalogEnabled && (
+                  <ApprovalToggle
+                    yolo={sessionYolo}
+                    onToggle={toggleSessionYolo}
+                  />
+                )}
                 <button
                   type="button"
-                  className={`btn-ghost chat-fast-btn ${fastMode ? "chat-fast-active" : ""}`}
-                  onClick={toggleFastMode}
+                  className={`btn-ghost chat-tool-btn ${webPreviewVisible ? "chat-tool-btn-active" : ""}`}
+                  onClick={() => setWebPreviewVisible((v) => !v)}
+                  title={
+                    webPreviewVisible ? "Hide web preview" : "Show web preview"
+                  }
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: 28,
+                    height: 28,
+                    padding: 0,
+                    borderRadius: 6,
+                    color: webPreviewVisible
+                      ? "var(--accent-text)"
+                      : "var(--text-secondary)",
+                    background: webPreviewVisible
+                      ? "color-mix(in srgb, var(--accent-text) 10%, transparent)"
+                      : "transparent",
+                  }}
                 >
-                  <Zap size={14} />
+                  <Globe size={14} />
                 </button>
-                <div
-                  className={`chat-fast-popover ${fastMode ? "chat-fast-active-popover" : ""}`}
-                >
-                  <div className="chat-fast-popover-head">
-                    <span className="chat-fast-popover-icon" aria-hidden="true">
-                      <Zap size={13} />
-                    </span>
-                    <strong>
-                      {fastMode ? t("chat.fastModeOn") : t("chat.fastMode")}
-                    </strong>
-                  </div>
-                  <span>
-                    {fastMode
-                      ? t("chat.fastModeActive")
-                      : t("chat.fastModeInactive")}
-                  </span>
-                </div>
-              </div>
-              <ContextFolderChip
-                contextFolder={contextFolder}
-                show
-                worktreeVisible={worktreeVisible}
-                connectionId={connectionId}
-                profile={profile}
-                onClearFolder={handleClearFolder}
-                onToggleWorktree={handleToggleWorktree}
-                onSelectFolder={handleSelectFolder}
-              />
-              {commandCatalogEnabled && (
-                <ApprovalToggle
-                  yolo={sessionYolo}
-                  onToggle={toggleSessionYolo}
-                />
-              )}
-              <button
-                type="button"
-                className={`btn-ghost chat-tool-btn ${webPreviewVisible ? "chat-tool-btn-active" : ""}`}
-                onClick={() => setWebPreviewVisible((v) => !v)}
-                title={
-                  webPreviewVisible ? "Hide web preview" : "Show web preview"
-                }
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  width: 28,
-                  height: 28,
-                  padding: 0,
-                  borderRadius: 6,
-                  color: webPreviewVisible
-                    ? "var(--accent-text)"
-                    : "var(--text-secondary)",
-                  background: webPreviewVisible
-                    ? "color-mix(in srgb, var(--accent-text) 10%, transparent)"
-                    : "transparent",
-                }}
-              >
-                <Globe size={14} />
-              </button>
-            </>
-          }
-        />
+              </>
+            }
+          />
+        </div>
       </div>
       {dragActive && (
         <div className="chat-drop-overlay" aria-hidden>
