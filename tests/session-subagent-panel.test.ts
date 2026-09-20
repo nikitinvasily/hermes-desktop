@@ -190,6 +190,7 @@ describe("listSubagentSessions (issue #122)", () => {
   });
 
   it("marks never-ended children that predate the current gateway generation as died (issue #128)", () => {
+    // @lat: [[gateway-restart-gate#Dead-subagent classification]]
     const db = seedDb();
     addSession(db, "parent", 100);
     // Old generation: started at t=200 (s), gateway restarted at t=250 (ms

@@ -1,4 +1,5 @@
 import { restartGateway, profileKey, probeGatewayLiveWork } from "./hermes";
+// @lat: [[gateway-restart-gate#Deferred restart policy]]
 
 // Deferred gateway restart gate (issue #128): a config change (model switch,
 // API-key write) must restart the gateway, but a hard restart kills every

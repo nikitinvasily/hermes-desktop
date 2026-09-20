@@ -19,6 +19,7 @@ import {
   hasPendingDeferredRestart,
   restartGatewayWhenIdle,
 } from "../src/main/gateway-restart-gate";
+// @lat: [[gateway-restart-gate#Deferred restart policy]]
 
 describe("restartGatewayWhenIdle (issue #128)", () => {
   beforeEach(() => {
