@@ -1300,6 +1300,7 @@ function Layout({
                   onTitleChange={handleRunTitle}
                   onContextFolderChange={handleRunContextFolder}
                   agentAppearance={getAppearance(run.profile)}
+                  onOpenSession={(id) => void handleResumeSession(id)}
                 />
               </div>
             ))}

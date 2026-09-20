@@ -333,6 +333,84 @@ function lastActivityOrder(db: Database.Database): string {
     : "ORDER BY s.started_at DESC";
 }
 
+/** A subagent (delegate) child run of a parent chat session, listed by the
+ * floating chat context panel (issue #122). Title comes from the child's first
+ * user message — the delegation goal — because delegate rows carry no title. */
+export interface SubagentSessionSummary {
+  id: string;
+  startedAt: number;
+  endedAt: number | null;
+  /** Delegation goal: the child's first user message, single-line clamped. */
+  title: string;
+  model: string | null;
+  messageCount: number;
+}
+
+/**
+ * Delegate-subagent children of a session: the exact rows
+ * `sessionSubagentPredicate` hides from chat lists (parent_session_id +
+ * `_delegate_from` marker in model_config). Returns [] on databases without
+ * the lineage columns (pre-Sep-2026 schema) so the panel simply stays hidden.
+ */
+export function listSubagentSessions(
+  parentSessionId: string,
+  profile?: string,
+): SubagentSessionSummary[] {
+  if (!parentSessionId) return [];
+  const db = getDbConnection(true, profile);
+  if (!db) return [];
+  if (
+    !db
+      .prepare(
+        "SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'parent_session_id'",
+      )
+      .get() ||
+    !db
+      .prepare(
+        "SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'model_config'",
+      )
+      .get()
+  ) {
+    return [];
+  }
+  const rows = db
+    .prepare(
+      `SELECT s.id, s.started_at, s.ended_at, s.message_count, s.model
+       FROM sessions s
+       WHERE s.parent_session_id = ?
+         AND json_extract(CASE WHEN json_valid(s.model_config) THEN s.model_config ELSE '{}' END, '$._delegate_from') IS NOT NULL
+       ORDER BY s.started_at ASC`,
+    )
+    .all(parentSessionId) as Array<{
+    id: string;
+    started_at: number;
+    ended_at: number | null;
+    message_count: number;
+    model: string | null;
+  }>;
+  const firstUser = db.prepare(
+    `SELECT content FROM messages
+     WHERE session_id = ? AND role = 'user'
+     ORDER BY id ASC LIMIT 1`,
+  );
+  return rows.map((r) => {
+    const goal = firstUser.get(r.id) as { content: string | null } | undefined;
+    return {
+      id: r.id,
+      startedAt: r.started_at,
+      endedAt: r.ended_at,
+      title: clampGoal(goal?.content ?? ""),
+      model: r.model,
+      messageCount: r.message_count,
+    };
+  });
+}
+
+function clampGoal(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > 80 ? `${flat.slice(0, 79)}…` : flat;
+}
+
 export function listSessions(
   limit = 30,
   offset = 0,

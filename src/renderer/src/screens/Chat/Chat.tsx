@@ -9,6 +9,7 @@ import { ModelPicker } from "./ModelPicker";
 import { ReasoningEffortPicker } from "./ReasoningEffortPicker";
 import { ContextFolderChip } from "./ContextFolderChip";
 import { WorktreePanel } from "./WorktreePanel";
+import { ChatContextPanel } from "./ChatContextPanel";
 import { WebPreviewPanel } from "./WebPreviewPanel";
 import { useChatScroll } from "./hooks/useChatScroll";
 import { useTranscriptState } from "./hooks/useTranscriptState";
@@ -134,6 +135,9 @@ interface ChatProps {
   /** Resolved avatar/colour of `profile`, so idle agent avatars in the
    *  transcript show the agent's profile picture instead of the loading gif. */
   agentAppearance?: { color?: string | null; avatar?: string | null };
+  /** Open another session (a subagent transcript from the floating context
+   *  panel, issue #122) as a chat run — Layout's resume flow. */
+  onOpenSession?: (sessionId: string) => void;
 }
 
 function Chat({
@@ -153,6 +157,7 @@ function Chat({
   onTitleChange,
   onContextFolderChange,
   agentAppearance,
+  onOpenSession,
 }: ChatProps): React.JSX.Element {
   const { t } = useI18n();
   const { completionSoundEnabled } = useChatPreferences();
@@ -197,6 +202,21 @@ function Chat({
   useEffect(() => {
     onSessionIdChange?.(runId, hermesSessionId);
   }, [runId, hermesSessionId, onSessionIdChange]);
+
+  // Floating context panel (issue #122): re-fetch the subagent list when the
+  // session changes and after each finished turn (children flush to state.db
+  // as the turn runs; the refresh key gates the panel's load effect).
+  const [panelRefreshKey, setPanelRefreshKey] = useState(0);
+  useEffect(() => {
+    setPanelRefreshKey((k) => k + 1);
+  }, [hermesSessionId]);
+  const panelWasLoadingRef = useRef(false);
+  useEffect(() => {
+    if (panelWasLoadingRef.current && !isLoading) {
+      setPanelRefreshKey((k) => k + 1);
+    }
+    panelWasLoadingRef.current = isLoading;
+  }, [isLoading]);
   useEffect(() => {
     if (!hermesSessionId) return;
     void window.hermesAPI
@@ -1182,6 +1202,16 @@ function Chat({
 
         {contextFolder && worktreeVisible && (
           <WorktreePanel folderPath={contextFolder} remoteMode={remoteMode} />
+        )}
+
+        {active && (
+          <ChatContextPanel
+            sessionId={hermesSessionId}
+            connectionId={connectionId}
+            profile={profile ?? "default"}
+            refreshKey={panelRefreshKey}
+            onOpenSession={(id) => onOpenSession?.(id)}
+          />
         )}
 
         {webPreviewVisible && (

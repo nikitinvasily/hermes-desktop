@@ -646,6 +646,22 @@ interface HermesAPI {
       preview: string;
     }>
   >;
+  // Floating chat context panel (issue #122): delegate-subagent children of a
+  // chat session. Remote connections return [] (children-free REST lists).
+  listSubagentSessions: (
+    parentSessionId: string,
+    connectionId?: string,
+    profile?: string,
+  ) => Promise<
+    Array<{
+      id: string;
+      startedAt: number;
+      endedAt: number | null;
+      title: string;
+      model: string | null;
+      messageCount: number;
+    }>
+  >;
   getSessionMessages: (
     sessionId: string,
     connectionId?: string,
