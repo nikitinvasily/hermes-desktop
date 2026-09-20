@@ -8,7 +8,11 @@ import { AttachmentChip } from "../../components/AttachmentChip";
 import { MediaSegmentView } from "../../components/MediaImage";
 import { useI18n } from "../../components/useI18n";
 import { parseMediaTokens, cleanLeakedToolTags } from "./mediaUtils";
-import type { ChatBubbleMessage, ChatMessage } from "./types";
+import type {
+  ChatBubbleMessage,
+  ChatMessage,
+  SystemEventMessage,
+} from "./types";
 
 export const APPROVAL_RE =
   /⚠️.*dangerous|requires? (your )?approval|^\s*\/approve\b.*\/deny|do you want (me )?to (proceed|continue|run|execute)/im;
@@ -86,6 +90,24 @@ function isChatBubbleMessage(msg: ChatMessage): msg is ChatBubbleMessage {
     msg.kind === "assistant" ||
     (!msg.kind && (msg.role === "user" || msg.role === "agent"))
   );
+}
+
+function isSystemEventMessage(msg: ChatMessage): msg is SystemEventMessage {
+  return msg.kind === "system_event" && msg.role === "system";
+}
+
+/** Label for a display-only timeline event (parity with TUI/upstream desktop). */
+function systemEventLabel(event: SystemEventMessage["event"]): string {
+  switch (event) {
+    case "model_switch":
+      return "model changed";
+    case "auto_continue":
+      return "resumed interrupted turn";
+    case "personality_switch":
+      return "personality changed";
+    case "async_delegation_complete":
+      return "background agent work finished";
+  }
 }
 
 /** Appearance of the agent whose turn a row belongs to, used to render its
@@ -212,6 +234,15 @@ export const MessageRow = memo(function MessageRow({
   }, [bubbleContent]);
 
   // Only chat bubble messages have content/attachments
+  if (isSystemEventMessage(msg)) {
+    return (
+      <div className="chat-message chat-message-system-event">
+        <span className="chat-system-event-text">
+          {systemEventLabel(msg.event)}
+        </span>
+      </div>
+    );
+  }
   if (!isChatBubbleMessage(msg)) {
     return (
       <div className={`chat-message chat-message-${msg.role}`}>

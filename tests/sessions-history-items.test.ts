@@ -37,6 +37,7 @@ function row(
     reasoning: null,
     reasoning_content: null,
     reasoning_details: null,
+    display_kind: null,
     ...over,
   };
 }
@@ -319,6 +320,76 @@ describe("expandRowsToHistory", () => {
     expect((items[0] as Extract<HistoryItem, { kind: "user" }>).content).toBe(
       "real",
     );
+  });
+
+  it("projects display_kind pivots as system events, not user bubbles (issue #118)", () => {
+    const items = expandRowsToHistory([
+      row({
+        id: 1,
+        role: "user",
+        content: "real question",
+        timestamp: 1,
+      }),
+      row({
+        id: 2,
+        role: "user",
+        content:
+          "[System: The active model for this chat has changed to glm-5.3 via provider zai. From this point forward, use this runtime metadata when answering questions about what model/provider is active.]",
+        timestamp: 2,
+        display_kind: "model_switch",
+      }),
+      row({
+        id: 3,
+        role: "user",
+        content: "[System note: previous turn was interrupted]",
+        timestamp: 3,
+        display_kind: "auto_continue",
+      }),
+      row({
+        id: 4,
+        role: "assistant",
+        content: "answer",
+        timestamp: 4,
+      }),
+    ]);
+    expect(kinds(items)).toEqual(["user", "system_event", "system_event", "assistant"]);
+    const evt = items[1] as Extract<HistoryItem, { kind: "system_event" }>;
+    expect(evt.event).toBe("model_switch");
+    expect(evt.timestamp).toBe(2);
+    expect(
+      (items[2] as Extract<HistoryItem, { kind: "system_event" }>).event,
+    ).toBe("auto_continue");
+    // The raw marker text must NOT leak into any user-visible content.
+    expect(JSON.stringify(items)).not.toContain("active model for this chat");
+  });
+
+  it("keeps steer rows as user bubbles (real user input, not a pivot)", () => {
+    const items = expandRowsToHistory([
+      row({
+        id: 1,
+        role: "user",
+        content: "[OUT-OF-BAND USER MESSAGE — steering text]",
+        timestamp: 1,
+        display_kind: "steer",
+      }),
+    ]);
+    expect(kinds(items)).toEqual(["user"]);
+    expect(
+      (items[0] as Extract<HistoryItem, { kind: "user" }>).content,
+    ).toContain("steering text");
+  });
+
+  it("leaves unknown display_kind values on the normal user path", () => {
+    const items = expandRowsToHistory([
+      row({
+        id: 1,
+        role: "user",
+        content: "plain",
+        timestamp: 1,
+        display_kind: "something_new",
+      }),
+    ]);
+    expect(kinds(items)).toEqual(["user"]);
   });
 
   it("rehydrates desktop-stored prompt images and hides the DB placeholder", () => {
