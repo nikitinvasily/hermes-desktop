@@ -5468,6 +5468,17 @@ body:has(.shell-vibrant),
   margin-top: -8px;
 }
 
+/* Column stack of bubble + approval bar (issue #113): keeps the legacy
+   Approve/Deny bar BELOW the bubble instead of beside it. min-width: 0 lets
+   the bubble shrink inside the flex row (avatar + body). */
+.chat-message-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
 .chat-avatar {
   width: 28px;
   height: 28px;
@@ -5786,7 +5797,8 @@ body:has(.shell-vibrant),
   display: flex;
   gap: 8px;
   margin-top: 8px;
-  margin-left: 42px;
+  /* Legacy bar under the last agent message (issue #113): now stacked below
+     the bubble inside .chat-message-body — no 42px avatar offset needed. */
 }
 
 .chat-approval-btn {
