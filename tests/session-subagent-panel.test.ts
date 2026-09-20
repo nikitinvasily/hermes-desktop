@@ -35,6 +35,13 @@ vi.mock("../src/main/utils", () => ({
   safeWriteFile: (path: string, data: string) => writeFileSync(path, data),
 }));
 
+const { gatewayEpochRef } = vi.hoisted(() => ({
+  gatewayEpochRef: { value: null as number | null },
+}));
+vi.mock("../src/main/hermes", () => ({
+  tuiGatewayStartedAt: () => gatewayEpochRef.value,
+}));
+
 // Execute the real queries with Node 22's SQLite engine. The application
 // rebuilds better-sqlite3 for Electron, whose ABI differs from the test runner.
 vi.mock("better-sqlite3", () => ({
@@ -180,5 +187,53 @@ describe("listSubagentSessions (issue #122)", () => {
     `);
 
     expect(listSubagentSessions("parent")).toEqual([]);
+  });
+
+  it("marks never-ended children that predate the current gateway generation as died (issue #128)", () => {
+    // @lat: [[gateway-restart-gate#Dead-subagent classification]]
+    const db = seedDb();
+    addSession(db, "parent", 100);
+    // Old generation: started at t=200 (s), gateway restarted at t=250 (ms
+    // epoch 250_000), row never got an ended_at → died with the restart.
+    addSession(db, "child-dead", 200, {
+      parentSessionId: "parent",
+      modelConfig: { _delegate_from: "parent" },
+    });
+    // Current generation: started AFTER the restart, no ended_at yet — may
+    // genuinely still be running, must NOT be marked died.
+    addSession(db, "child-live", 300, {
+      parentSessionId: "parent",
+      modelConfig: { _delegate_from: "parent" },
+    });
+    // Old generation but properly ended — already settled, not died.
+    addSession(db, "child-done", 150, {
+      parentSessionId: "parent",
+      modelConfig: { _delegate_from: "parent" },
+      endedAt: 240,
+    });
+
+    gatewayEpochRef.value = 250_000;
+    try {
+      const rows = listSubagentSessions("parent");
+      const byId = new Map(rows.map((r) => [r.id, r]));
+      expect(byId.get("child-dead")?.died).toBe(true);
+      expect(byId.get("child-live")?.died).toBe(false);
+      expect(byId.get("child-done")?.died).toBe(false);
+    } finally {
+      gatewayEpochRef.value = null;
+    }
+  });
+
+  it("marks nothing died while the gateway generation is unknown", () => {
+    const db = seedDb();
+    addSession(db, "parent", 100);
+    addSession(db, "child", 200, {
+      parentSessionId: "parent",
+      modelConfig: { _delegate_from: "parent" },
+    });
+
+    gatewayEpochRef.value = null;
+    const rows = listSubagentSessions("parent");
+    expect(rows[0].died).toBe(false);
   });
 });

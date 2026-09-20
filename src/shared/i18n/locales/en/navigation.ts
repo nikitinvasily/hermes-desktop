@@ -12,6 +12,7 @@ export default {
   skills: "Skills",
   chats: "Chats",
   subagents: "Subagents",
+  subagentDied: "died with a gateway restart",
   todoTasklist: "TODO",
   pinned: "Pinned",
   archiveSection: "Archive",
