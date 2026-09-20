@@ -6278,6 +6278,24 @@ body:has(.shell-vibrant),
   border-radius: var(--radius-sm, 6px);
 }
 
+.chat-queue-send {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm, 6px);
+}
+
+.chat-queue-send:hover {
+  color: var(--accent);
+  background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+}
+
 .chat-queue-remove:hover {
   color: var(--text-primary);
   background: var(--bg-hover, rgba(255, 255, 255, 0.08));

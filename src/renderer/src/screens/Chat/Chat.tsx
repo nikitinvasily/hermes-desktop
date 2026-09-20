@@ -989,6 +989,23 @@ function Chat({
     setQueuedMessages([...queueRef.current]);
   }, []);
 
+  // "Send now" on a queued message (issue #109 / TODO 3): move it to the head
+  // of the queue, then abort the running turn — handleAbort interrupts the
+  // agent and clears isLoading, and the drain effect above immediately sends
+  // the (new) queue head in FIFO order. A failed send puts the message back
+  // at the front via the drain's existing recovery path.
+  const handleSendNowQueued = useCallback(
+    (index: number) => {
+      if (!isLoading) return;
+      const [item] = queueRef.current.splice(index, 1);
+      if (!item) return;
+      queueRef.current.unshift(item);
+      setQueuedMessages([...queueRef.current]);
+      actions.handleAbort();
+    },
+    [isLoading, actions],
+  );
+
   const handleSubmitOrQueue = useCallback(
     (text: string, attachments: Attachment[]) => {
       // Side questions (`/btw`) run on a concurrent background agent, so they
@@ -1178,6 +1195,7 @@ function Chat({
         <QueuedMessages
           messages={queuedMessages}
           onRemove={handleRemoveQueued}
+          onSendNow={handleSendNowQueued}
         />
         <ChatInput
           ref={chatInputRef}

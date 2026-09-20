@@ -15,3 +15,9 @@ The beam is an absolutely positioned, non-interactive decoration whose generated
 The ChatInput integration test verifies the requested preset, strength, and theme while ensuring the beam is decorative and not an overflow-clipping ancestor of the textarea or toolbar.
 
 [[src/renderer/src/screens/Chat/ChatInput.test.tsx]] protects the component boundary and configuration without coupling tests to the dependency's generated animation CSS.
+
+## Queued message send-now
+
+While the agent is busy, [[src/renderer/src/screens/Chat/QueuedMessages.tsx#QueuedMessages]] shows each pending message with a send button that interrupts the current run and flushes that message immediately.
+
+Sending a queued message now moves it to the head of the queue and aborts the running turn; the existing queue-drain effect on isLoading→false sends the head in FIFO order, and a failed send restores the message at the front via the drain's recovery path. See [[dashboard-detach#Run-state seeding from session.resume (issue #109)]] for the run-state machinery underneath.

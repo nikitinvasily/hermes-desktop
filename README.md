@@ -37,6 +37,7 @@ Changes in this fork that are **not** in upstream.
 - **"Move to project" is reliable** — works over SSH/remote, re-homes the session's workspace on the agent itself (the chat's working directory follows the move), leaves no ghost in the old group, and the picker lists all projects.
 - **Switching the model over SSH has no side effects** — the pick writes only the model block of the remote config; it used to silently force streaming on and disable smart model routing.
 - **Switching connections no longer freezes a running chat** — a mid-flight turn survives connection switches and dashboard drops: the spinner stops with a note that the agent keeps running server-side, and switching back resumes the session and shows the missed tail, including the final answer.
+- **A running turn keeps its spinner and Stop button** — reopening a chat (or reconnecting after a network blip) while the agent is still working restores the live run state instead of showing an idle chat: streaming continues into the open chat, and Stop works again. Related: queued messages gain a "send now" button that interrupts the current run and sends that message immediately.
 - **Onboarding never writes to the remote agent** — completing the local Setup screen while an SSH connection is active no longer rewrites the remote agent's global model.
 - **Multi-question clarify prompts render** — each question gets its own interactive answer card; they used to be silently dropped, leaving the chat looking frozen.
 

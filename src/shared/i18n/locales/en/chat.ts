@@ -163,6 +163,7 @@ export default {
   queuedCount: "{{count}} queued",
   queuedAttachment: "{{count}} attachment(s)",
   queuedCancel: "Remove from queue",
+  queuedSendNow: "Send now (interrupts the current run)",
   copyMessage: "Copy message",
   worktree: {
     loading: "Loading",
