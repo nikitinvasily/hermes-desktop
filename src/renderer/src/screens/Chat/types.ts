@@ -102,13 +102,32 @@ export interface ApprovalMessage {
   unavailable?: boolean;
 }
 
+/**
+ * Display-only timeline event (model switch, auto-continue, ...) reconstructed
+ * from the backend's `display_kind` tag. Machine-authored pivots ride as
+ * role="user" rows in state.db but must not render as user bubbles (issue #118);
+ * the row shows as a dim system line instead, like TUI/upstream desktop.
+ */
+export interface SystemEventMessage {
+  id: string;
+  kind: "system_event";
+  role: "system";
+  event:
+    | "model_switch"
+    | "auto_continue"
+    | "personality_switch"
+    | "async_delegation_complete";
+  timestamp?: number;
+}
+
 export type ChatMessage =
   | ChatBubbleMessage
   | ReasoningMessage
   | ToolCallMessage
   | ToolResultMessage
   | ClarifyMessage
-  | ApprovalMessage;
+  | ApprovalMessage
+  | SystemEventMessage;
 
 export interface ActiveTurn {
   turnId: string;

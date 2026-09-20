@@ -13,7 +13,13 @@ import type { ActiveTurn, ChatMessage, ChatBubbleMessage } from "./types";
  * renderer doesn't have to import main-process types).
  */
 export interface DbHistoryItem {
-  kind: "user" | "assistant" | "reasoning" | "tool_call" | "tool_result";
+  kind:
+    | "user"
+    | "assistant"
+    | "reasoning"
+    | "tool_call"
+    | "tool_result"
+    | "system_event";
   id: number;
   content?: string;
   error?: string;
@@ -23,6 +29,12 @@ export interface DbHistoryItem {
   args?: string;
   timestamp?: number;
   attachments?: Attachment[];
+  /** For kind === "system_event": the backend display_kind tag. */
+  event?:
+    | "model_switch"
+    | "auto_continue"
+    | "personality_switch"
+    | "async_delegation_complete";
 }
 
 /**
@@ -46,6 +58,16 @@ export function dbItemsToChatMessages(
   return items
     .map((it): ChatMessage | null => {
       switch (it.kind) {
+        case "system_event":
+          return {
+            id: `db-e-${it.id}`,
+            kind: "system_event",
+            role: "system",
+            event: it.event || "model_switch",
+            ...(typeof it.timestamp === "number"
+              ? { timestamp: it.timestamp }
+              : {}),
+          };
         case "user":
           return {
             id: `db-${it.id}`,

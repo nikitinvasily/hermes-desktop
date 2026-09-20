@@ -223,6 +223,8 @@ function historyItemSearchText(item: HistoryItem): string {
       return item.text || "";
     case "tool_call":
       return [item.name, item.args].filter(Boolean).join(" ");
+    case "system_event":
+      return item.event;
   }
 }
 
@@ -683,6 +685,7 @@ function normalizeMessageRow(row: RemoteRecord, index: number): RawMessageRow {
         : row.reasoning_details === undefined || row.reasoning_details === null
           ? null
           : JSON.stringify(row.reasoning_details),
+    display_kind: nullableString(row.display_kind),
   };
 }
 

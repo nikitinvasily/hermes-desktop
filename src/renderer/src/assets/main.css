@@ -5468,6 +5468,21 @@ body:has(.shell-vibrant),
   margin-top: -8px;
 }
 
+/* Display-only timeline event (model switch, auto-continue, ...) — a dim
+   centered line, not a bubble (issue #118; parity with TUI/upstream). */
+.chat-message-system-event {
+  display: flex;
+  justify-content: center;
+  padding: 2px 0;
+  margin: 4px 0;
+}
+
+.chat-system-event-text {
+  font-size: 12px;
+  color: var(--text-muted);
+  user-select: none;
+}
+
 /* Column stack of bubble + approval bar (issue #113): keeps the legacy
    Approve/Deny bar BELOW the bubble instead of beside it. min-width: 0 lets
    the bubble shrink inside the flex row (avatar + body). */

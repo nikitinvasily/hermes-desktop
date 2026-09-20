@@ -78,6 +78,13 @@ export interface SessionMessage {
  */
 export type HistoryItem =
   | {
+      kind: "system_event";
+      id: number;
+      /** Backend display_kind tag driving the event line's label. */
+      event: SystemEventKind;
+      timestamp: number;
+    }
+  | {
       kind: "user";
       id: number;
       content: string;
@@ -736,6 +743,34 @@ export interface RawMessageRow {
   reasoning: string | null;
   reasoning_content: string | null;
   reasoning_details: string | null;
+  /**
+   * Backend timeline tag (state.db messages.display_kind). Machine-authored
+   * pivots (model switch, auto-continue, ...) ride as role="user" rows but
+   * must render as system event lines, not user bubbles (issue #118).
+   */
+  display_kind: string | null;
+}
+
+/**
+ * Timeline tags the backend renders as display-only event lines on every
+ * official surface (TUI messages.ts, upstream desktop hydration). `steer` is
+ * deliberately absent: a steered message is real user input and stays a bubble.
+ */
+export type SystemEventKind =
+  | "model_switch"
+  | "auto_continue"
+  | "personality_switch"
+  | "async_delegation_complete";
+
+const SYSTEM_EVENT_KINDS: ReadonlySet<string> = new Set<SystemEventKind>([
+  "model_switch",
+  "auto_continue",
+  "personality_switch",
+  "async_delegation_complete",
+]);
+
+export function isSystemEventKind(value: unknown): value is SystemEventKind {
+  return typeof value === "string" && SYSTEM_EVENT_KINDS.has(value);
 }
 
 /**
@@ -749,6 +784,15 @@ export function expandRowsToHistory(rows: RawMessageRow[]): HistoryItem[] {
     const decoded = decodeContent(r.content || "", r.id);
 
     if (r.role === "user") {
+      if (isSystemEventKind(r.display_kind)) {
+        items.push({
+          kind: "system_event",
+          id: r.id,
+          event: r.display_kind,
+          timestamp: r.timestamp,
+        });
+        continue;
+      }
       if (!decoded.text && decoded.attachments.length === 0) continue;
       items.push({
         kind: "user",
@@ -869,7 +913,8 @@ export function getSessionMessages(
     .prepare(
       `SELECT id, role, content, timestamp,
               tool_call_id, tool_calls, tool_name,
-              reasoning, reasoning_content, reasoning_details
+              reasoning, reasoning_content, reasoning_details,
+              display_kind
        FROM messages
        WHERE session_id = ? AND role IN ('user', 'assistant', 'tool')
        ORDER BY timestamp, id`,
