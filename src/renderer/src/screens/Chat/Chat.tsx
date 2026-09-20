@@ -1192,41 +1192,43 @@ function Chat({
       <ConfigHealthBanner profile={profile} onOpenDiagnose={onOpenDiagnose} />
 
       <div className="chat-body">
-        <div className="chat-messages" ref={containerRef}>
-          <div className="chat-content-column">
-            {messages.length === 0 ? (
-              <ChatEmptyState onSelectSuggestion={handleSuggestion} />
-            ) : (
-              <MessageList
-                messages={messages}
-                isLoading={isLoading}
-                toolProgress={toolProgress}
-                onApprove={actions.handleApprove}
-                onDeny={actions.handleDeny}
-                onClarifyResolved={handleClarifyResolved}
-                onClarifyRespond={handleClarifyRespond}
-                onApprovalRespond={handleApprovalRespond}
-                onApprovalResolved={handleApprovalResolved}
-                agentAvatar={agentAvatar}
-              />
-            )}
-            <div ref={bottomRef} />
+        <div className="chat-messages-wrap">
+          <div className="chat-messages" ref={containerRef}>
+            <div className="chat-content-column">
+              {messages.length === 0 ? (
+                <ChatEmptyState onSelectSuggestion={handleSuggestion} />
+              ) : (
+                <MessageList
+                  messages={messages}
+                  isLoading={isLoading}
+                  toolProgress={toolProgress}
+                  onApprove={actions.handleApprove}
+                  onDeny={actions.handleDeny}
+                  onClarifyResolved={handleClarifyResolved}
+                  onClarifyRespond={handleClarifyRespond}
+                  onApprovalRespond={handleApprovalRespond}
+                  onApprovalResolved={handleApprovalResolved}
+                  agentAvatar={agentAvatar}
+                />
+              )}
+              <div ref={bottomRef} />
+            </div>
           </div>
+
+          {active && (
+            <ChatContextPanel
+              sessionId={hermesSessionId}
+              connectionId={connectionId}
+              profile={profile ?? "default"}
+              refreshKey={panelRefreshKey}
+              onOpenSession={(id) => onOpenSession?.(id)}
+              todo={todoSnapshot}
+            />
+          )}
         </div>
 
         {contextFolder && worktreeVisible && (
           <WorktreePanel folderPath={contextFolder} remoteMode={remoteMode} />
-        )}
-
-        {active && (
-          <ChatContextPanel
-            sessionId={hermesSessionId}
-            connectionId={connectionId}
-            profile={profile ?? "default"}
-            refreshKey={panelRefreshKey}
-            onOpenSession={(id) => onOpenSession?.(id)}
-            todo={todoSnapshot}
-          />
         )}
 
         {webPreviewVisible && (
