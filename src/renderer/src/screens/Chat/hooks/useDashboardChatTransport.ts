@@ -649,6 +649,57 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+// The backend keeps the per-session approval bypass (yolo) in process memory
+// only, so a locally spawned backend loses it on app restart (issue #115).
+// The transport persists the user's choice per stored session and re-applies
+// it once per runtime session when the backend reports it off.
+const SESSION_YOLO_STORAGE_KEY = "hermes.sessionYolo.v1";
+
+function sessionYoloStorageKey(
+  connectionId: string | undefined,
+  profile: string | undefined,
+  sessionId: string,
+): string {
+  return `${SESSION_YOLO_STORAGE_KEY}:${connectionId ?? "local"}:${profile ?? "default"}:${sessionId}`;
+}
+
+function readStoredSessionYolo(
+  connectionId: string | undefined,
+  profile: string | undefined,
+  sessionId: string | null,
+): boolean {
+  if (!sessionId) return false;
+  try {
+    return (
+      window.localStorage.getItem(
+        sessionYoloStorageKey(connectionId, profile, sessionId),
+      ) === "1"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function writeStoredSessionYolo(
+  connectionId: string | undefined,
+  profile: string | undefined,
+  sessionId: string | null,
+  enabled: boolean | null,
+): void {
+  if (!sessionId) return;
+  const key = sessionYoloStorageKey(connectionId, profile, sessionId);
+  try {
+    if (enabled === null) {
+      window.localStorage.removeItem(key);
+    } else {
+      window.localStorage.setItem(key, enabled ? "1" : "0");
+    }
+  } catch {
+    // localStorage unavailable (privacy mode) — persistence degrades to the
+    // pre-fix behavior (flag lost on restart), never breaks the toggle.
+  }
+}
+
 function payloadTextLength(
   payload: Record<string, unknown>,
   key: string,
@@ -999,6 +1050,10 @@ export function useDashboardChatTransport({
   // session/connection change so a stale flag never leaks across chats.
   const [sessionYolo, setSessionYolo] = useState<boolean | null>(null);
   const sessionYoloSessionRef = useRef<string | null>(null);
+  // Restoration of the persisted bypass (issue #115) fires at most once per
+  // runtime session: the ref holds the id we already re-applied it for (or
+  // decided not to), so repeated session.info events never re-send.
+  const sessionYoloRestoredForRef = useRef<string | null>(null);
   const pendingClarifyRef = useRef<{
     requestId: string;
     /** qids of a batch request still unanswered; empty/undefined for a
@@ -1758,6 +1813,44 @@ export function useDashboardChatTransport({
         storedSessionIdRef.current = storedId;
         recreateRuntimeSessionRef.current = false;
         setHermesSessionId(storedId);
+        // Restore the persisted per-session approval bypass (issue #115):
+        // the backend keeps it in process memory only, so after an app
+        // restart the resumed session reports it off (a lazy resume carries
+        // no yolo at all). Re-apply the user's stored choice once per runtime
+        // session — only when the stored choice is ON and the backend's own
+        // reported state (when present) is OFF. This is the authoritative
+        // restore point: it runs on chat open, not only when session.info
+        // happens to arrive.
+        if (
+          !justCreated &&
+          sessionYoloRestoredForRef.current !== targetSessionId &&
+          readStoredSessionYolo(connectionId, profile, storedId)
+        ) {
+          const reportedYolo = asRecord(response.info)?.yolo;
+          if (reportedYolo !== true) {
+            sessionYoloRestoredForRef.current = targetSessionId;
+            void client
+              .request("config.set", {
+                key: "yolo",
+                value: "1",
+                scope: "session",
+                session_id: targetSessionId,
+              })
+              .then((result) => {
+                if (clientRef.current !== client) return;
+                const value = (result as { value?: string } | undefined)?.value;
+                if (value === undefined || value === "1") {
+                  sessionYoloSessionRef.current = targetSessionId;
+                  setSessionYolo(true);
+                }
+              })
+              .catch(() => {
+                if (sessionYoloRestoredForRef.current === targetSessionId) {
+                  sessionYoloRestoredForRef.current = null;
+                }
+              });
+          }
+        }
       }
 
       if (
@@ -1789,6 +1882,26 @@ export function useDashboardChatTransport({
       setHermesSessionId,
     ],
   );
+
+  // Eagerly resume a chat whose persisted approval bypass is ON (issue #115):
+  // opening the chat (not just sending a message) must light the shield and
+  // re-apply the flag to the fresh backend. Nothing else on chat open calls
+  // ensureRuntimeSession, and the restore inside it is the authoritative point.
+  const sessionYoloEagerRestoredRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!enabled) return;
+    if (sessionYoloEagerRestoredRef.current === hermesSessionId) return;
+    if (!readStoredSessionYolo(connectionId, profile, hermesSessionId)) {
+      return;
+    }
+    sessionYoloEagerRestoredRef.current = hermesSessionId;
+    void ensureClient()
+      .then((client) => ensureRuntimeSession(client))
+      .catch(() => {
+        // Leave the marker: a manual prompt retries the resume (and its own
+        // restore) — do not re-run the eager path on every render.
+      });
+  }, [hermesSessionId, enabled, connectionId, profile]);
 
   const ensureSelectedModel = useCallback(
     async (
@@ -2372,6 +2485,17 @@ export function useDashboardChatTransport({
           scope: "session",
           session_id: sessionId,
         });
+        // Persist the user's choice per stored session (issue #115) so a
+        // backend restart can restore it. Keyed by the STORED id, which is
+        // stable across app restarts, unlike the runtime id.
+        if (clientRef.current === client) {
+          writeStoredSessionYolo(
+            connectionId,
+            profile,
+            storedSessionIdRef.current ?? sessionId,
+            next,
+          );
+        }
         // Optimistically mirror the requested state; the authoritative
         // session.info emitted by the backend lands a beat later and corrects
         // any drift (e.g. approvals.mode=off keeps yolo true after "off").
@@ -2384,7 +2508,7 @@ export function useDashboardChatTransport({
         return false;
       }
     },
-    [enabled, ensureRuntimeSession],
+    [enabled, ensureRuntimeSession, connectionId, profile],
   );
 
   const abort = useCallback(() => {

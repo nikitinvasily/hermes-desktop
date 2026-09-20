@@ -118,6 +118,12 @@ Gateway-only WebSocket chat registers opaque renderer IDs through [[src/main/her
 
 The current upstream `/v1/runs/{run_id}/approval` handler ignores request IDs and resolves the queue head. Desktop therefore stops Runs API turns that request approval, using the original connection's credentials, and directs users to Dashboard chat. Ordinary Runs streaming remains available; manual Runs approvals require an upstream contract change first.
 
+### Per-session auto-approve persistence
+
+The chat-toolbar shield toggles the per-session approval bypass (`config.set key=yolo scope=session`); the backend keeps that flag in process memory only, so a locally spawned backend loses it on app restart.
+
+[[src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts#useDashboardChatTransport]] persists the user's choice in localStorage under `hermes.sessionYolo.v1:<connectionId>:<profile>:<storedSessionId>` — the STORED session id is stable across restarts, unlike the runtime id. On `session.info` reporting `yolo: false`, the transport re-sends `config.set yolo=1` once per runtime session when the stored choice is on; a failed re-send clears the once-marker so a later event retries. A stored off (or no record) never sends anything — the backend state already matches the user's choice. Only a user-initiated off writes `0`; the record is never removed, so toggling is idempotent across restarts. Specified by the session approval toggle tests in [[src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.test.tsx]].
+
 ### Stale approval isolation
 
 Dashboard regression tests simulate expired requests and lost acknowledgments with a queued second command, ensuring retries cannot approve that next command and unresolved responses stop the turn.

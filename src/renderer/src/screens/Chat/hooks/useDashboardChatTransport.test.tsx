@@ -1822,6 +1822,7 @@ describe("useDashboardChatTransport session approval toggle", () => {
     dashboardMock.onEvent = null;
     dashboardMock.onClose = null;
     dashboardMock.instances.length = 0;
+    window.localStorage.clear();
   });
 
   afterEach(() => {
@@ -1894,6 +1895,98 @@ describe("useDashboardChatTransport session approval toggle", () => {
     });
     // Optimistic state until the backend's session.info lands.
     expect(api.sessionYolo).toBe(true);
+    // The choice persists per stored session (issue #115).
+    expect(
+      window.localStorage.getItem("hermes.sessionYolo.v1:local:default:stored"),
+    ).toBe("1");
+  });
+
+  it("clears the stored flag when the bypass is turned off", async () => {
+    const api = await yoloHarness();
+    await act(async () => {
+      await api.toggleSessionYolo!(true);
+    });
+    await act(async () => {
+      await api.toggleSessionYolo!(false);
+    });
+    expect(
+      window.localStorage.getItem("hermes.sessionYolo.v1:local:default:stored"),
+    ).toBe("0");
+  });
+
+  it("restores the persisted bypass after a restart (issue #115)", async () => {
+    // Simulate the persisted pre-restart state: the user enabled the bypass
+    // for this stored session in an earlier app run.
+    window.localStorage.setItem(
+      "hermes.sessionYolo.v1:local:default:stored",
+      "1",
+    );
+    // Fresh app run: same stored chat session, backend process is new (its
+    // in-memory yolo set is empty), resume reports yolo off.
+    dashboardMock.request.mockImplementation(async (method: string) => {
+      if (method === "session.resume")
+        return {
+          session_id: "live-2",
+          stored_session_id: "stored",
+          running: false,
+        };
+      if (method === "model.options")
+        return { model: "bad-model", provider: "bad-provider", providers: [] };
+      if (method === "config.set") return { value: "1" };
+      return {};
+    });
+    const api: HarnessApi = {};
+    render(<Harness api={api} hermesSessionId="stored" />);
+    // Establish the runtime session (resume path) — the restore fires there,
+    // no session.info event needed (a lazy resume carries no yolo at all).
+    await act(async () => {
+      await api.send?.("hello");
+    });
+    expect(api.sessionYolo).toBe(true);
+    expect(dashboardMock.request).toHaveBeenCalledWith("config.set", {
+      key: "yolo",
+      value: "1",
+      scope: "session",
+      session_id: "live-2",
+    });
+    // A duplicate restore must not fire again for the same runtime session.
+    dashboardMock.request.mockClear();
+    await act(async () => {
+      dashboardMock.onEvent?.({
+        type: "session.info",
+        session_id: "live-2",
+        payload: { yolo: false, model: "bad-model" },
+      });
+    });
+    const sets = dashboardMock.request.mock.calls.filter(
+      ([method]) => method === "config.set",
+    );
+    expect(sets).toHaveLength(0);
+  });
+
+  it("does not restore when no flag was persisted", async () => {
+    dashboardMock.request.mockImplementation(async (method: string) => {
+      if (method === "session.resume")
+        return {
+          session_id: "live-3",
+          stored_session_id: "stored",
+          running: false,
+        };
+      if (method === "model.options")
+        return { model: "bad-model", provider: "bad-provider", providers: [] };
+      if (method === "config.set") return { value: "1" };
+      return {};
+    });
+    const api: HarnessApi = {};
+    render(<Harness api={api} hermesSessionId="stored" />);
+    await act(async () => {
+      await api.send?.("hello");
+    });
+    expect(api.sessionYolo).toBeNull();
+    const sets = dashboardMock.request.mock.calls.filter(
+      ([method]) => method === "config.set",
+    );
+    expect(sets).toHaveLength(0);
   });
 
   it("reports failure when the RPC rejects", async () => {
