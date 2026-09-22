@@ -13,6 +13,8 @@ const token: MediaToken = {
   src: "data:image/png;base64,iVBORw0KGgo=",
   isUrl: true,
   isImage: true,
+  isAudio: false,
+  isVoice: false,
   name: "pic.png",
 };
 

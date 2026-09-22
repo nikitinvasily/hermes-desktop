@@ -7147,6 +7147,74 @@ body:has(.shell-vibrant),
   font-size: 13px;
 }
 
+/* ── Inline audio players (telegram/TTS media) ──────── */
+
+.chat-voice-message,
+.chat-audio-message {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-secondary, transparent);
+  max-width: 100%;
+}
+
+.chat-voice-message {
+  width: fit-content;
+}
+
+.chat-voice-icon,
+.chat-audio-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.chat-voice-audio {
+  height: 32px;
+  max-width: 260px;
+}
+
+.chat-audio-element {
+  height: 32px;
+  width: 100%;
+  min-width: 220px;
+  max-width: 420px;
+}
+
+.chat-audio-message {
+  flex-wrap: wrap;
+}
+
+.chat-audio-download {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.chat-audio-download:hover {
+  color: var(--text-primary);
+  background: var(--bg-active, rgba(128, 128, 128, 0.15));
+}
+
+.chat-voice-loading-text {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
 /* ── Slash Command Menu ─────────────────────────────── */
 
 .slash-menu-overlay {

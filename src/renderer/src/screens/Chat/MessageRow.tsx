@@ -7,7 +7,11 @@ import { AgentMarkdown } from "../../components/AgentMarkdown";
 import { AttachmentChip } from "../../components/AttachmentChip";
 import { MediaSegmentView } from "../../components/MediaImage";
 import { useI18n } from "../../components/useI18n";
-import { parseMediaTokens, cleanLeakedToolTags } from "./mediaUtils";
+import {
+  parseMediaTokens,
+  cleanLeakedToolTags,
+  hasUserMediaHints,
+} from "./mediaUtils";
 import type {
   ChatBubbleMessage,
   ChatMessage,
@@ -23,7 +27,8 @@ export const APPROVAL_RE =
  * as a role="user" message. Same shape as upstream desktop's
  * PROCESS_NOTIFICATION_RE: not a human prompt, rendered as a compact notice.
  */
-export const PROCESS_NOTIFICATION_RE = /^\[IMPORTANT: Background process [\s\S]*\]$/;
+export const PROCESS_NOTIFICATION_RE =
+  /^\[IMPORTANT: Background process [\s\S]*\]$/;
 
 /**
  * Coerce any DB, stream, or IPC timestamp value to valid epoch milliseconds.
@@ -211,18 +216,20 @@ export const MessageRow = memo(function MessageRow({
   const [copied, setCopied] = useState(false);
 
   // MessageRow is wrapped in memo() but still re-renders on any prop change
-  // (e.g. isLoading toggling at the end of a stream), and `parseMediaTokens`
+  // (e.g. isLoading toggles at the end of a stream), and `parseMediaTokens`
   // runs a full regex pipeline. Cache the result against the message content
   // so a long conversation doesn't reparse every row on every render.
-  // Only agent bubbles need media parsing — user bubbles render content
-  // verbatim — so this is gated on the role to skip the work entirely for
-  // user rows. (Follow-up item from PR #303 review.)
+  // Agent bubbles always get media parsing. User bubbles are verbatim text
+  // EXCEPT when they carry platform-media hints (incoming Telegram photos'
+  // vision hint, voice-message markers) — `hasUserMediaHints` gates that
+  // cheaply so ordinary user rows skip the pipeline entirely.
   const bubbleContent = isChatBubbleMessage(msg)
     ? (msg as ChatBubbleMessage).content
     : null;
   const segments = useMemo(
     () =>
-      msg.role === "agent" && bubbleContent
+      bubbleContent &&
+      (msg.role === "agent" || hasUserMediaHints(bubbleContent))
         ? // Recover any tool/skill call the model leaked as text (e.g. a raw
           // `<skill_view>{"answer": …}</skill_view>` tag) before tokenizing.
           parseMediaTokens(cleanLeakedToolTags(bubbleContent))
@@ -251,8 +258,14 @@ export const MessageRow = memo(function MessageRow({
       </div>
     );
   }
-  if (isChatBubbleMessage(msg) && PROCESS_NOTIFICATION_RE.test(msg.content.trim())) {
-    const body = msg.content.trim().replace(/^\[IMPORTANT:\s*/, "").replace(/\]$/, "");
+  if (
+    isChatBubbleMessage(msg) &&
+    PROCESS_NOTIFICATION_RE.test(msg.content.trim())
+  ) {
+    const body = msg.content
+      .trim()
+      .replace(/^\[IMPORTANT:\s*/, "")
+      .replace(/\]$/, "");
     const newline = body.indexOf("\n");
     const headline = (newline === -1 ? body : body.slice(0, newline)).trim();
     const detail = newline === -1 ? "" : body.slice(newline + 1).trim();
@@ -368,7 +381,26 @@ export const MessageRow = memo(function MessageRow({
               )
             ) : msg.role === "user" ? (
               <div className="chat-user-markdown">
-                <AgentMarkdown>{msg.content}</AgentMarkdown>
+                {segments ? (
+                  segments.map((segment) =>
+                    segment.type === "text" ? (
+                      segment.value.trim() ? (
+                        <AgentMarkdown key={`t-${segment.start}`}>
+                          {segment.value}
+                        </AgentMarkdown>
+                      ) : null
+                    ) : (
+                      <MediaSegmentView
+                        key={`m-${segment.start}`}
+                        token={segment.token}
+                        raw={segment.raw}
+                        source={segment.source}
+                      />
+                    ),
+                  )
+                ) : (
+                  <AgentMarkdown>{msg.content}</AgentMarkdown>
+                )}
               </div>
             ) : (
               msg.content

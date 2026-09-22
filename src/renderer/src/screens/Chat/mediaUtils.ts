@@ -18,6 +18,39 @@
  */
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i;
+const AUDIO_EXT = /\.(mp3|wav|ogg|oga|opus|m4a|flac|aac)$/i;
+
+// Platform delivery markers (hermes-agent tts_tool / gateway platforms):
+// `[[audio_as_voice]]` asks for a voice bubble, `[[as_document]]` for a
+// document attachment. Display-side they are stripped; the voice marker
+// additionally styles audio tokens of the same message as a voice message
+// (the marker is message-global in the gateway but only flags audio files).
+const AUDIO_AS_VOICE_RE = /^\s*\[\[audio_as_voice\]\]\s*$/;
+const AS_DOCUMENT_RE = /^\s*\[\[as_document\]\]\s*$/;
+
+// Gateway vision enrichment: incoming platform photos are stored as a
+// description block plus a bracketed hint naming the cached file:
+//   [If you need a closer look, use vision_analyze with image_url: /path.jpg ~]
+// The path never matches INLINE_PATH_RE (the ` ~]` suffix is not an allowed
+// terminator), so without this rule the photo is never rendered.
+const VISION_HINT_RE =
+  /\[\s*(?:If you need[^\]\n]*?use\s+\S+\s+with\s+)?[a-z_]+_url:\s*((?:[A-Za-z]:[\\/]|\/|~\/)[^\s\]]+?)\s*(?:~)?\s*\]/g;
+
+// Gateway voice-marker shapes (run_inbound): incoming voice messages are
+// stored as bracketed notes naming the audio file.
+//   [The user sent a voice message: /path (duration: 0:12)]
+//   [voice message could not be transcribed automatically; the audio is available at: /path]
+const VOICE_MARKER_RE =
+  /\[\s*(?:The user sent a voice message:|voice message could not be transcribed automatically; the audio is available at:)\s*((?:[A-Za-z]:[\\/]|\/|~\/)[^\s\]]+?)(?:\s*\(duration:[^)]*\))?\s*\]/g;
+
+/** True when a user bubble carries platform-media hints worth segment-parsing. */
+const USER_MEDIA_HINT_RE =
+  /(?:image_url:|The user sent a voice message:|voice message could not be transcribed)/;
+
+/** True when `content` carries platform-media hints (vision/voice markers). */
+export function hasUserMediaHints(content: string): boolean {
+  return USER_MEDIA_HINT_RE.test(content);
+}
 
 // Extensions recognised in a bare (untagged) path.
 const BARE_PATH_EXT =
@@ -114,6 +147,11 @@ export interface MediaToken {
   isUrl: boolean;
   /** True when the extension looks like a displayable image. */
   isImage: boolean;
+  /** True when the extension looks like playable audio. */
+  isAudio: boolean;
+  /** True for audio delivered under an `[[audio_as_voice]]` marker — styled
+   * as a voice message instead of a generic audio file. */
+  isVoice: boolean;
   /** Last path/URL segment, for download filenames and alt text. */
   name: string;
 }
@@ -154,7 +192,7 @@ interface Hit {
 function toToken(raw: string, wasQuoted: boolean): MediaToken | null {
   let src = raw.trim();
   // Bare MEDIA: tokens may swallow trailing sentence punctuation.
-  if (!wasQuoted) src = src.replace(/[).,;:!?\]}]+$/, "");
+  if (!wasQuoted) src = src.replace(/[).,;:!?}]+$/, "");
   if (!src) return null;
   const isUrl = /^(?:https?:\/\/|data:image\/)/i.test(src);
   const name = src.split(/[\\/]/).filter(Boolean).pop() || src;
@@ -162,6 +200,8 @@ function toToken(raw: string, wasQuoted: boolean): MediaToken | null {
     src,
     isUrl,
     isImage: /^data:image\//i.test(src) || IMAGE_EXT.test(src),
+    isAudio: AUDIO_EXT.test(src),
+    isVoice: false,
     name,
   };
 }
@@ -232,6 +272,24 @@ function mediaDedupeKey(token: MediaToken): string {
  * rendered as markdown; media segments as inline images or download chips.
  */
 export function parseMediaTokens(content: string): MediaSegment[] {
+  // 0a) Platform delivery markers. `[[audio_as_voice]]` / `[[as_document]]`
+  // are directives to the sending platform, never display text; strip them
+  // and remember the voice intent so audio tokens of the same message render
+  // as a voice message.
+  let wantsVoice = false;
+  if (content.includes("[[")) {
+    content = content
+      .split("\n")
+      .filter((line) => {
+        if (AUDIO_AS_VOICE_RE.test(line)) {
+          wantsVoice = true;
+          return false;
+        }
+        return !AS_DOCUMENT_RE.test(line);
+      })
+      .join("\n");
+  }
+
   const code = codeRanges(content);
   const markdownDestinations = markdownDestinationRanges(content);
   const hits: Hit[] = [];
@@ -267,6 +325,41 @@ export function parseMediaTokens(content: string): MediaSegment[] {
     const quoted = m[1] ?? m[2] ?? m[3];
     const token = toToken(quoted ?? m[4] ?? "", quoted !== undefined);
     if (!token) continue;
+    hits.push({
+      start: m.index,
+      end: m.index + m[0].length,
+      token,
+      raw: m[0],
+      source: "media-token",
+    });
+  }
+
+  // 1e) Platform vision hint: `[... use vision_analyze with image_url: <path> ~]`
+  // on incoming user photos. The cached file is known to exist (the gateway
+  // just wrote it), so this is a trusted media-token, not a bare-path candidate.
+  VISION_HINT_RE.lastIndex = 0;
+  while ((m = VISION_HINT_RE.exec(content)) !== null) {
+    const rawPath = m[1];
+    const token = toToken(rawPath, true);
+    if (!token) continue;
+    hits.push({
+      start: m.index,
+      end: m.index + m[0].length,
+      token,
+      raw: m[0],
+      source: "media-token",
+    });
+  }
+
+  // 1f) Incoming voice notes: `[The user sent a voice message: <path> (duration: …)]`
+  // and the untranscribed variant. The audio file is known to exist; render
+  // it as a voice-message player row.
+  VOICE_MARKER_RE.lastIndex = 0;
+  while ((m = VOICE_MARKER_RE.exec(content)) !== null) {
+    const rawPath = m[1];
+    const token = toToken(rawPath, true);
+    if (!token) continue;
+    token.isVoice = true;
     hits.push({
       start: m.index,
       end: m.index + m[0].length,
@@ -384,6 +477,14 @@ export function parseMediaTokens(content: string): MediaSegment[] {
   }
 
   hits.sort((a, b) => a.start - b.start);
+  // The `[[audio_as_voice]]` marker is message-global: flag every audio hit
+  // of this message as a voice message (non-audio hits keep their shape —
+  // the gateway only applies the marker to audio files).
+  if (wantsVoice) {
+    for (const h of hits) {
+      if (h.token.isAudio) h.token.isVoice = true;
+    }
+  }
   const seenImages = new Set<string>();
   const hasDirectMarkdownImage = hits.some(
     (hit) =>
@@ -543,6 +644,8 @@ export function describeImageSrc(src: string): MediaToken {
     src: trimmed,
     isUrl,
     isImage: /^data:image\//i.test(trimmed) || IMAGE_EXT.test(trimmed),
+    isAudio: AUDIO_EXT.test(trimmed),
+    isVoice: false,
     name,
   };
 }
