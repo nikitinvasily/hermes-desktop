@@ -450,7 +450,7 @@ export const MessageRow = memo(function MessageRow({
                     ),
                   )
                 ) : (
-                  <AgentMarkdown>{msg.content}</AgentMarkdown>
+                  <AgentMarkdown>{bubbleContent ?? msg.content}</AgentMarkdown>
                 )}
               </div>
             ) : (
