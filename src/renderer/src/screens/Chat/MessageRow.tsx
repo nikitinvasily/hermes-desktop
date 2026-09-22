@@ -5,9 +5,14 @@ import ProfileAvatar from "../../components/common/ProfileAvatar";
 import { OrbLoader } from "../../components/OrbLoader";
 import { AgentMarkdown } from "../../components/AgentMarkdown";
 import { AttachmentChip } from "../../components/AttachmentChip";
-import { MediaSegmentView } from "../../components/MediaImage";
+import { MediaSegmentView, VisionNote } from "../../components/MediaImage";
 import { useI18n } from "../../components/useI18n";
-import { parseMediaTokens, cleanLeakedToolTags } from "./mediaUtils";
+import {
+  parseMediaTokens,
+  cleanLeakedToolTags,
+  hasUserMediaHints,
+} from "./mediaUtils";
+import { parseEnvelope } from "./envelopeUtils";
 import type {
   ChatBubbleMessage,
   ChatMessage,
@@ -23,7 +28,8 @@ export const APPROVAL_RE =
  * as a role="user" message. Same shape as upstream desktop's
  * PROCESS_NOTIFICATION_RE: not a human prompt, rendered as a compact notice.
  */
-export const PROCESS_NOTIFICATION_RE = /^\[IMPORTANT: Background process [\s\S]*\]$/;
+export const PROCESS_NOTIFICATION_RE =
+  /^\[IMPORTANT: Background process [\s\S]*\]$/;
 
 /**
  * Coerce any DB, stream, or IPC timestamp value to valid epoch milliseconds.
@@ -211,18 +217,29 @@ export const MessageRow = memo(function MessageRow({
   const [copied, setCopied] = useState(false);
 
   // MessageRow is wrapped in memo() but still re-renders on any prop change
-  // (e.g. isLoading toggling at the end of a stream), and `parseMediaTokens`
+  // (e.g. isLoading toggles at the end of a stream), and `parseMediaTokens`
   // runs a full regex pipeline. Cache the result against the message content
   // so a long conversation doesn't reparse every row on every render.
-  // Only agent bubbles need media parsing — user bubbles render content
-  // verbatim — so this is gated on the role to skip the work entirely for
-  // user rows. (Follow-up item from PR #303 review.)
-  const bubbleContent = isChatBubbleMessage(msg)
+  // Agent bubbles always get media parsing. User bubbles are verbatim text
+  // EXCEPT when they carry platform-media hints (incoming Telegram photos'
+  // vision hint, voice-message markers) — `hasUserMediaHints` gates that
+  // cheaply so ordinary user rows skip the pipeline entirely.
+  const rawContent = isChatBubbleMessage(msg)
     ? (msg as ChatBubbleMessage).content
     : null;
+  // OUT-OF-BAND steer envelopes are real user input wrapped in machine
+  // chrome: render the user text as the bubble, the envelope header and
+  // origin JSON as a small "via …" caption under it.
+  const oob =
+    rawContent && msg.role === "user" ? parseEnvelope(rawContent) : null;
+  const bubbleContent =
+    oob && oob.kind === "out-of-band" && oob.userText
+      ? oob.userText
+      : rawContent;
   const segments = useMemo(
     () =>
-      msg.role === "agent" && bubbleContent
+      bubbleContent &&
+      (msg.role === "agent" || hasUserMediaHints(bubbleContent))
         ? // Recover any tool/skill call the model leaked as text (e.g. a raw
           // `<skill_view>{"answer": …}</skill_view>` tag) before tokenizing.
           parseMediaTokens(cleanLeakedToolTags(bubbleContent))
@@ -251,8 +268,14 @@ export const MessageRow = memo(function MessageRow({
       </div>
     );
   }
-  if (isChatBubbleMessage(msg) && PROCESS_NOTIFICATION_RE.test(msg.content.trim())) {
-    const body = msg.content.trim().replace(/^\[IMPORTANT:\s*/, "").replace(/\]$/, "");
+  if (
+    isChatBubbleMessage(msg) &&
+    PROCESS_NOTIFICATION_RE.test(msg.content.trim())
+  ) {
+    const body = msg.content
+      .trim()
+      .replace(/^\[IMPORTANT:\s*/, "")
+      .replace(/\]$/, "");
     const newline = body.indexOf("\n");
     const headline = (newline === -1 ? body : body.slice(0, newline)).trim();
     const detail = newline === -1 ? "" : body.slice(newline + 1).trim();
@@ -267,6 +290,37 @@ export const MessageRow = memo(function MessageRow({
         )}
       </div>
     );
+  }
+  // Machine-authored caps envelopes (async delegation, system notes, [SILENT],
+  // unknown future envelopes): compact notice, long bodies collapsed. Runs
+  // AFTER the process-notification renderer so #124 keeps its exact shape.
+  if (isChatBubbleMessage(msg)) {
+    const envelope = parseEnvelope(msg.content);
+    if (envelope && envelope.suppressBubble) {
+      return (
+        <div className="chat-message chat-message-process-note">
+          <span className="chat-process-note-headline">
+            {envelope.headline}
+          </span>
+          {envelope.meta.length > 0 && (
+            <div className="chat-envelope-meta">
+              {envelope.meta.map((m) => (
+                <span key={m.label} className="chat-envelope-meta-item">
+                  <span className="chat-envelope-meta-label">{m.label}</span>{" "}
+                  {m.value}
+                </span>
+              ))}
+            </div>
+          )}
+          {envelope.detail && (
+            <details className="chat-process-note-details">
+              <summary>details</summary>
+              <pre>{envelope.detail}</pre>
+            </details>
+          )}
+        </div>
+      );
+    }
   }
   if (!isChatBubbleMessage(msg)) {
     return (
@@ -357,6 +411,11 @@ export const MessageRow = memo(function MessageRow({
                       {segment.value}
                     </AgentMarkdown>
                   ) : null
+                ) : segment.type === "vision-note" ? (
+                  <VisionNote
+                    key={`v-${segment.start}`}
+                    description={segment.value}
+                  />
                 ) : (
                   <MediaSegmentView
                     key={`m-${segment.start}`}
@@ -368,7 +427,31 @@ export const MessageRow = memo(function MessageRow({
               )
             ) : msg.role === "user" ? (
               <div className="chat-user-markdown">
-                <AgentMarkdown>{msg.content}</AgentMarkdown>
+                {segments ? (
+                  segments.map((segment) =>
+                    segment.type === "text" ? (
+                      segment.value.trim() ? (
+                        <AgentMarkdown key={`t-${segment.start}`}>
+                          {segment.value}
+                        </AgentMarkdown>
+                      ) : null
+                    ) : segment.type === "vision-note" ? (
+                      <VisionNote
+                        key={`v-${segment.start}`}
+                        description={segment.value}
+                      />
+                    ) : (
+                      <MediaSegmentView
+                        key={`m-${segment.start}`}
+                        token={segment.token}
+                        raw={segment.raw}
+                        source={segment.source}
+                      />
+                    ),
+                  )
+                ) : (
+                  <AgentMarkdown>{bubbleContent ?? msg.content}</AgentMarkdown>
+                )}
               </div>
             ) : (
               msg.content
@@ -377,6 +460,11 @@ export const MessageRow = memo(function MessageRow({
           {msg.error && (
             <div className="chat-error-message" role="alert">
               {msg.error}
+            </div>
+          )}
+          {oob && oob.kind === "out-of-band" && oob.userText && (
+            <div className="chat-oob-caption" title={oob.detail}>
+              {oob.headline}
             </div>
           )}
         </div>

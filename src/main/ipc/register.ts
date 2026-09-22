@@ -735,7 +735,12 @@ async function withRemoteDashboard<T>(
 async function getActiveDashboardMediaConfig(): Promise<RemoteSessionBridgeConfig | null> {
   const conn = getConnectionConfig();
   if (conn.mode === "remote") {
-    if (!conn.remoteUrl.trim() || !conn.apiKey.trim()) return null;
+    if (!conn.remoteUrl.trim()) return null;
+    // Token auth requires a key; OAuth connections authenticate through the
+    // cookie partition inside remoteDashboardRequestJson (see below), so they
+    // stay eligible with an empty key. The old `!conn.apiKey.trim()` guard
+    // silently disabled media resolution for every OAuth connection.
+    if (conn.remoteAuthMode !== "oauth" && !conn.apiKey.trim()) return null;
     return { remoteUrl: conn.remoteUrl, apiKey: conn.apiKey };
   }
   if (conn.mode === "ssh") {
@@ -754,6 +759,11 @@ async function readMediaForCurrentConnection(
 ): Promise<string | null> {
   const local = readMediaAsDataUrl(filePath);
   if (local) return local;
+  const conn = getConnectionConfig();
+  // Direct-remote goes through remoteDashboardRequestJson (fs/read-data-url):
+  // it resolves auth mode per connection, so OAuth cookies work like tokens.
+  // SSH keeps the tunnel+token bridge config.
+  if (conn.mode === "remote") return remoteReadImageFile(conn, filePath);
   const remote = await getActiveDashboardMediaConfig();
   return remote ? remoteReadMediaAsDataUrl(remote, filePath) : null;
 }
@@ -762,9 +772,7 @@ async function mediaFileExistsForCurrentConnection(
   filePath: string,
 ): Promise<boolean> {
   if (mediaFileExists(filePath)) return true;
-  const remote = await getActiveDashboardMediaConfig();
-  if (!remote) return false;
-  return (await remoteReadMediaAsDataUrl(remote, filePath)) !== null;
+  return (await readMediaForCurrentConnection(filePath)) !== null;
 }
 
 async function resolveMediaForSave(src: string): Promise<string> {

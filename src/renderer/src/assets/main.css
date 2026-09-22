@@ -5555,6 +5555,35 @@ body:has(.shell-vibrant),
   overflow-wrap: anywhere;
 }
 
+/* Envelope meta chips (async delegation goal/status/duration…) */
+.chat-envelope-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 14px;
+  max-width: 100%;
+  margin-top: 2px;
+}
+
+.chat-envelope-meta-item {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.chat-envelope-meta-label {
+  opacity: 0.7;
+  user-select: none;
+}
+
+/* "via telegram dm" caption under an out-of-band user bubble */
+.chat-oob-caption {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  margin-top: 3px;
+  user-select: none;
+}
+
 /* Column stack of bubble + approval bar (issue #113): keeps the legacy
    Approve/Deny bar BELOW the bubble instead of beside it. min-width: 0 lets
    the bubble shrink inside the flex row (avatar + body). */
@@ -7145,6 +7174,121 @@ body:has(.shell-vibrant),
   background: transparent;
   cursor: pointer;
   font-size: 13px;
+}
+
+/* ── Inline audio players (telegram/TTS media) ──────── */
+
+.chat-voice-message,
+.chat-audio-message {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-secondary, transparent);
+  max-width: 100%;
+}
+
+.chat-voice-message {
+  width: fit-content;
+}
+
+.chat-voice-icon,
+.chat-audio-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.chat-voice-audio {
+  height: 32px;
+  max-width: 260px;
+}
+
+.chat-audio-element {
+  height: 32px;
+  width: 100%;
+  min-width: 220px;
+  max-width: 420px;
+}
+
+.chat-audio-message {
+  flex-wrap: wrap;
+}
+
+.chat-audio-download {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.chat-audio-download:hover {
+  color: var(--text-primary);
+  background: var(--bg-active, rgba(128, 128, 128, 0.15));
+}
+
+.chat-voice-loading-text {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* ── Vision description card (incoming photos) ──────── */
+
+.chat-vision-note {
+  margin: 4px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  max-width: 480px;
+}
+
+.chat-vision-note-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chat-vision-note-toggle:hover {
+  color: var(--text-primary);
+  background: var(--bg-active, rgba(128, 128, 128, 0.1));
+}
+
+.chat-vision-note-chevron {
+  margin-left: auto;
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.chat-vision-note-chevron.open {
+  transform: rotate(180deg);
+}
+
+.chat-vision-note-body {
+  padding: 8px 10px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  border-top: 1px solid var(--border);
+  white-space: pre-wrap;
 }
 
 /* ── Slash Command Menu ─────────────────────────────── */

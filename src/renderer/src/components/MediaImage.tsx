@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { Download, X } from "lucide-react";
+import { Download, X, Mic, FileAudio, Eye, ChevronDown } from "lucide-react";
 import { useLightboxClose } from "../hooks/useLightboxClose";
 import type { MediaToken } from "../screens/Chat/mediaUtils";
 import { useI18n } from "./useI18n";
@@ -137,6 +137,137 @@ export function MediaImage({
   );
 }
 
+/**
+ * Inline audio player for agent/platform-delivered audio (TTS voice replies,
+ * incoming voice messages, `MEDIA:*.mp3` files). Local paths resolve to a
+ * data URL through the main process (`readMediaFile`), which also covers
+ * remote dashboard connections. The `[[audio_as_voice]]` delivery marker
+ * styles the row as a voice message.
+ */
+export function AudioPlayer({
+  token,
+}: {
+  token: MediaToken;
+}): React.JSX.Element {
+  const { t } = useI18n();
+  const isDirect = /^data:|https?:\/\//i.test(token.src);
+  const [resolved, setResolved] = useState<string | null>(
+    isDirect ? token.src : null,
+  );
+  const [failed, setFailed] = useState(false);
+  const onContextMenu = useMediaContextMenu({
+    ...token,
+    src: resolved ?? token.src,
+  });
+
+  useEffect(() => {
+    if (isDirect) return;
+    let cancelled = false;
+    window.hermesAPI
+      .readMediaFile(token.src)
+      .then((dataUrl) => {
+        if (cancelled) return;
+        if (dataUrl) setResolved(dataUrl);
+        else setFailed(true);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token.src, isDirect]);
+
+  if (failed) {
+    return (
+      <span className="chat-media-error">⚠ Could not load {token.name}</span>
+    );
+  }
+
+  if (token.isVoice) {
+    return (
+      <div
+        className={`chat-voice-message${resolved ? "" : " chat-voice-loading"}`}
+        onContextMenu={onContextMenu}
+        title={t("chat.media.voiceMessage")}
+      >
+        <span className="chat-voice-icon">
+          <Mic size={14} />
+        </span>
+        {resolved ? (
+          <audio
+            className="chat-voice-audio"
+            src={resolved}
+            controls
+            preload="metadata"
+          />
+        ) : (
+          <span className="chat-voice-loading-text">…</span>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="chat-audio-message" onContextMenu={onContextMenu}>
+      <span className="chat-audio-icon">
+        <FileAudio size={14} />
+      </span>
+      {resolved ? (
+        <audio className="chat-audio-element" src={resolved} controls />
+      ) : (
+        <span className="chat-media-loading">Loading {token.name}…</span>
+      )}
+      {!token.isUrl && (
+        <button
+          className="chat-audio-download"
+          onClick={() =>
+            void window.hermesAPI.saveMediaFile(
+              resolved ?? token.src,
+              token.name,
+            )
+          }
+          aria-label="Download"
+        >
+          <Download size={14} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Collapsible "what the agent saw" card for an incoming platform photo's
+ * vision description (the bracketed `[The user sent an image~ …]` prose).
+ * Collapsed by default — the rendered image is the primary content; the
+ * description stays available one click away.
+ */
+export function VisionNote({
+  description,
+}: {
+  description: string;
+}): React.JSX.Element {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="chat-vision-note">
+      <button
+        className="chat-vision-note-toggle"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <Eye size={13} />
+        <span>{t("chat.media.photoDescription")}</span>
+        <ChevronDown
+          size={13}
+          className={`chat-vision-note-chevron${open ? " open" : ""}`}
+        />
+      </button>
+      {open && <div className="chat-vision-note-body">{description}</div>}
+    </div>
+  );
+}
+
 /** A compact, clickable chip for non-image media — saves the file. */
 export function DownloadChip({
   token,
@@ -197,6 +328,8 @@ export function MediaSegmentView({
   if (verified !== true) return <>{raw}</>;
   return token.isImage ? (
     <MediaImage token={token} />
+  ) : token.isAudio ? (
+    <AudioPlayer token={token} />
   ) : (
     <DownloadChip token={token} />
   );

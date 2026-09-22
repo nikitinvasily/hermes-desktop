@@ -133,6 +133,10 @@ export default {
     open: "Open",
     saveAs: "Save as…",
     saveImage: "Save image",
+    photoDescription: "What the agent saw",
+    photoShow: "Show description",
+    photoHide: "Hide description",
+    voiceMessage: "Voice message",
   },
   commands: {
     new: "Start a new chat",

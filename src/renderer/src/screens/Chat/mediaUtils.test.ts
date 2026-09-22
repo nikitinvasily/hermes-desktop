@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   parseMediaTokens,
   hasMediaTokens,
+  hasUserMediaHints,
   describeImageSrc,
   cleanLeakedToolTags,
   type MediaSegment,
@@ -512,5 +513,147 @@ describe("cleanLeakedToolTags", () => {
   it("is a no-op (same reference path) when there is no closing tag", () => {
     const text = "no closing tag here";
     expect(cleanLeakedToolTags(text)).toBe(text);
+  });
+});
+
+// ── Platform media markers (issue #132) ─────────────────
+describe("parseMediaTokens platform markers (issue #132)", () => {
+  it("strips [[audio_as_voice]] and flags the audio token as voice", () => {
+    const segs = parseMediaTokens(
+      "MEDIA:/home/hermes/.hermes/cache/audio/tts_1.ogg\n[[audio_as_voice]]\n\nТекст ответа",
+    );
+    const mediaSegs = segs.filter((s) => s.type === "media");
+    expect(mediaSegs).toHaveLength(1);
+    expect(media(segs).token).toMatchObject({
+      src: "/home/hermes/.hermes/cache/audio/tts_1.ogg",
+      isAudio: true,
+      isVoice: true,
+    });
+    // The marker must be gone from every text segment.
+    for (const seg of segs) {
+      if (seg.type === "text")
+        expect(seg.value).not.toContain("[[audio_as_voice]]");
+    }
+  });
+
+  it("strips [[as_document]] without touching other content", () => {
+    const segs = parseMediaTokens(
+      "MEDIA:/tmp/report.pdf\n[[as_document]]\n\nВот отчёт",
+    );
+    expect(media(segs).token).toMatchObject({
+      src: "/tmp/report.pdf",
+      isVoice: false,
+    });
+    for (const seg of segs) {
+      if (seg.type === "text")
+        expect(seg.value).not.toContain("[[as_document]]");
+    }
+  });
+
+  it("flags only audio tokens with the voice marker, not images", () => {
+    const segs = parseMediaTokens(
+      "[[audio_as_voice]]\nMEDIA:/tmp/pic.png\nMEDIA:/tmp/a.ogg",
+    );
+    const tokens = segs.filter((s) => s.type === "media").map((s) => s.token);
+    expect(tokens.find((t) => t.src === "/tmp/pic.png")?.isVoice).toBe(false);
+    expect(tokens.find((t) => t.src === "/tmp/a.ogg")?.isVoice).toBe(true);
+  });
+
+  it("leaves a bare [[some_other_marker]] line untouched", () => {
+    const segs = parseMediaTokens("line one\n[[not_a_directive]]\nline two");
+    expect(segs).toHaveLength(1);
+    expect(segs[0].type === "text" && segs[0].value).toContain(
+      "[[not_a_directive]]",
+    );
+  });
+
+  it("extracts the photo path from a vision hint (incoming telegram photo)", () => {
+    const content =
+      "[The user sent an image~ Here's what I can see:\nA vertical close-up.]\n[If you need a closer look, use vision_analyze with image_url: /home/hermes/.hermes/cache/images/img_b9c94e45be0f.jpg ~]\n\nВот верхняя поверхность панели.";
+    const segs = parseMediaTokens(content);
+    expect(media(segs)).toMatchObject({
+      type: "media",
+      source: "media-token",
+      token: {
+        src: "/home/hermes/.hermes/cache/images/img_b9c94e45be0f.jpg",
+        isImage: true,
+      },
+    });
+    const texts = segs
+      .filter((s) => s.type === "text")
+      .map((s) => s.value)
+      .join("");
+    expect(texts).not.toContain("image_url:");
+  });
+
+  it("extracts an incoming voice message marker with duration", () => {
+    const segs = parseMediaTokens(
+      "[The user sent a voice message: /home/hermes/.hermes/cache/audio/voice_xyz.ogg (duration: 0:12)]\n\nПроверь пожалуйста",
+    );
+    expect(media(segs)).toMatchObject({
+      type: "media",
+      source: "media-token",
+      token: {
+        src: "/home/hermes/.hermes/cache/audio/voice_xyz.ogg",
+        isAudio: true,
+        isVoice: true,
+      },
+    });
+  });
+
+  it("extracts the untranscribed-voice variant", () => {
+    const segs = parseMediaTokens(
+      "[voice message could not be transcribed automatically; the audio is available at: /home/hermes/.hermes/cache/audio/voice_abc.opus]",
+    );
+    expect(media(segs).token).toMatchObject({
+      src: "/home/hermes/.hermes/cache/audio/voice_abc.opus",
+      isVoice: true,
+    });
+  });
+
+  it("does not misread a code snippet mentioning image_url as media", () => {
+    const content = "```\nvision_analyze with image_url: /tmp/example.jpg\n```";
+    const segs = parseMediaTokens(content);
+    expect(segs.filter((s) => s.type === "media")).toHaveLength(0);
+  });
+
+  it("hasUserMediaHints detects platform hints and rejects plain text", () => {
+    expect(hasUserMediaHints("[...image_url: /tmp/a.jpg]")).toBe(true);
+    expect(
+      hasUserMediaHints("[The user sent a voice message: /tmp/a.ogg]"),
+    ).toBe(true);
+    expect(hasUserMediaHints("просто сообщение без хинтов")).toBe(false);
+  });
+});
+
+// ── Vision description cards (issue #132 follow-up) ────
+describe("parseMediaTokens vision description card", () => {
+  it("turns the bracketed vision description into a vision-note segment", () => {
+    const content =
+      "[The user sent an image~ Here's what I can see:\nA high-angle, top-down shot of a black printed circuit board densely populated with yellow and white LEDs.]\n[If you need a closer look, use vision_analyze with image_url: /home/hermes/.hermes/cache/images/img_b9c94e45be0f.jpg ~]\n\nВот верхняя поверхность панели.";
+    const segs = parseMediaTokens(content);
+    const note = segs.find((s) => s.type === "vision-note");
+    expect(note).toBeTruthy();
+    expect(note && note.type === "vision-note" && note.value).toBe(
+      "A high-angle, top-down shot of a black printed circuit board densely populated with yellow and white LEDs.",
+    );
+    // No raw bracketed prose survives into text segments.
+    const texts = segs
+      .filter((s) => s.type === "text")
+      .map((s) => s.value)
+      .join("");
+    expect(texts).not.toContain("[The user sent an image");
+    // The image is still a media segment.
+    expect(
+      segs.some(
+        (s) =>
+          s.type === "media" && s.token.src.endsWith("img_b9c94e45be0f.jpg"),
+      ),
+    ).toBe(true);
+  });
+
+  it("emits no vision-note when there is no description block", () => {
+    const segs = parseMediaTokens("[[audio_as_voice]]\nMEDIA:/tmp/a.ogg");
+    expect(segs.some((s) => s.type === "vision-note")).toBe(false);
   });
 });
