@@ -25,3 +25,9 @@ Incoming photos end with a vision hint (`[… use vision_analyze with image_url:
 Audio tokens render as playable rows instead of download chips; voice-flagged audio gets the compact voice-message styling with a mic icon.
 
 [[src/renderer/src/components/MediaImage.tsx#AudioPlayer]] resolves the source (data URL directly, local path via `readMediaFile`, covering remote connections), renders a native `<audio controls>` element, and offers download via context menu or an explicit button on the generic (non-voice) variant. Routing lives in [[src/renderer/src/components/MediaImage.tsx#MediaSegmentView]]: image → MediaImage, audio → AudioPlayer, everything else → download chip. Specified by the AudioPlayer tests in [[src/renderer/src/components/MediaImage.audio.test.tsx]].
+
+## Remote media resolution and the OAuth trap
+
+Remote media reads must go through `remoteDashboardRequestJson` (auth-mode aware); gating them on a non-empty `apiKey` silently disables every OAuth connection.
+
+The original `getActiveDashboardMediaConfig` in [[src/main/ipc/register.ts]] rejected remote connections without an API key — which is every OAuth connection, whose auth lives in the cookie partition, not in the key. Symptom: players and images render their shell but always show "Could not load", while the chat WebSocket stays connected (the same cookie works there). Direct-remote reads now use [[src/main/remote-files.ts#remoteReadImageFile]] (`fs/read-data-url`, OAuth routed through the Electron cookie partition); the SSH tunnel+token bridge keeps the old path. Server-side note: files under `/tmp` may live in the dashboard service's PrivateTmp namespace and be invisible to the API even though SSH sees them — media that matters lands under the agent's cache directories.
