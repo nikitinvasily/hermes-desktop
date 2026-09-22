@@ -5555,6 +5555,35 @@ body:has(.shell-vibrant),
   overflow-wrap: anywhere;
 }
 
+/* Envelope meta chips (async delegation goal/status/duration…) */
+.chat-envelope-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 14px;
+  max-width: 100%;
+  margin-top: 2px;
+}
+
+.chat-envelope-meta-item {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.chat-envelope-meta-label {
+  opacity: 0.7;
+  user-select: none;
+}
+
+/* "via telegram dm" caption under an out-of-band user bubble */
+.chat-oob-caption {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  margin-top: 3px;
+  user-select: none;
+}
+
 /* Column stack of bubble + approval bar (issue #113): keeps the legacy
    Approve/Deny bar BELOW the bubble instead of beside it. min-width: 0 lets
    the bubble shrink inside the flex row (avatar + body). */

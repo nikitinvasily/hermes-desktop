@@ -4,6 +4,7 @@ This directory defines the high-level concepts, business logic, and architecture
 
 - [[chat-commands]] — how typed slash commands are routed through the gateway's `slash.exec`/`command.dispatch` pipeline instead of being sent as prompt text.
 - [[chat-media]] — how MEDIA tokens, platform delivery markers (`[[audio_as_voice]]`), incoming photos/voice notes, and audio files render as inline media instead of raw text.
+- [[chat-envelopes]] — how machine-authored bracketed envelopes (async delegation, out-of-band steers, system notes) render as notices instead of raw bubbles.
 - [[chat-input]] — the unified chat composer surface and its theme-aware animated border treatment.
 - [[chat-performance]] — how chat rendering stays responsive through contained transcript rows, batched textarea resizing, and fixed-row slash-command virtualization.
 - [[chat-experience-preferences]] — user-message Markdown plus persisted completion-sound and native multi-language spell-check preferences.
