@@ -5,7 +5,7 @@ import ProfileAvatar from "../../components/common/ProfileAvatar";
 import { OrbLoader } from "../../components/OrbLoader";
 import { AgentMarkdown } from "../../components/AgentMarkdown";
 import { AttachmentChip } from "../../components/AttachmentChip";
-import { MediaSegmentView } from "../../components/MediaImage";
+import { MediaSegmentView, VisionNote } from "../../components/MediaImage";
 import { useI18n } from "../../components/useI18n";
 import {
   parseMediaTokens,
@@ -370,6 +370,11 @@ export const MessageRow = memo(function MessageRow({
                       {segment.value}
                     </AgentMarkdown>
                   ) : null
+                ) : segment.type === "vision-note" ? (
+                  <VisionNote
+                    key={`v-${segment.start}`}
+                    description={segment.value}
+                  />
                 ) : (
                   <MediaSegmentView
                     key={`m-${segment.start}`}
@@ -389,6 +394,11 @@ export const MessageRow = memo(function MessageRow({
                           {segment.value}
                         </AgentMarkdown>
                       ) : null
+                    ) : segment.type === "vision-note" ? (
+                      <VisionNote
+                        key={`v-${segment.start}`}
+                        description={segment.value}
+                      />
                     ) : (
                       <MediaSegmentView
                         key={`m-${segment.start}`}

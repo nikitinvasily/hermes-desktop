@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { Download, X, Mic, FileAudio } from "lucide-react";
+import { Download, X, Mic, FileAudio, Eye, ChevronDown } from "lucide-react";
 import { useLightboxClose } from "../hooks/useLightboxClose";
 import type { MediaToken } from "../screens/Chat/mediaUtils";
 import { useI18n } from "./useI18n";
@@ -149,6 +149,7 @@ export function AudioPlayer({
 }: {
   token: MediaToken;
 }): React.JSX.Element {
+  const { t } = useI18n();
   const isDirect = /^data:|https?:\/\//i.test(token.src);
   const [resolved, setResolved] = useState<string | null>(
     isDirect ? token.src : null,
@@ -188,6 +189,7 @@ export function AudioPlayer({
       <div
         className={`chat-voice-message${resolved ? "" : " chat-voice-loading"}`}
         onContextMenu={onContextMenu}
+        title={t("chat.media.voiceMessage")}
       >
         <span className="chat-voice-icon">
           <Mic size={14} />
@@ -230,6 +232,38 @@ export function AudioPlayer({
           <Download size={14} />
         </button>
       )}
+    </div>
+  );
+}
+
+/**
+ * Collapsible "what the agent saw" card for an incoming platform photo's
+ * vision description (the bracketed `[The user sent an image~ …]` prose).
+ * Collapsed by default — the rendered image is the primary content; the
+ * description stays available one click away.
+ */
+export function VisionNote({
+  description,
+}: {
+  description: string;
+}): React.JSX.Element {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="chat-vision-note">
+      <button
+        className="chat-vision-note-toggle"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <Eye size={13} />
+        <span>{t("chat.media.photoDescription")}</span>
+        <ChevronDown
+          size={13}
+          className={`chat-vision-note-chevron${open ? " open" : ""}`}
+        />
+      </button>
+      {open && <div className="chat-vision-note-body">{description}</div>}
     </div>
   );
 }

@@ -43,6 +43,12 @@ const VISION_HINT_RE =
 const VOICE_MARKER_RE =
   /\[\s*(?:The user sent a voice message:|voice message could not be transcribed automatically; the audio is available at:)\s*((?:[A-Za-z]:[\\/]|\/|~\/)[^\s\]]+?)(?:\s*\(duration:[^)]*\))?\s*\]/g;
 
+// Gateway vision description block: the first bracketed part of an incoming
+// photo message, `[The user sent an image~ Here's what I can see:\n<text>]`.
+// Rendered as a collapsible "what the agent saw" card under the image
+// instead of raw bracketed English prose inside the user bubble.
+const VISION_DESCRIPTION_RE = /\[The user sent an image~[^\]]*\]/g;
+
 /** True when a user bubble carries platform-media hints worth segment-parsing. */
 const USER_MEDIA_HINT_RE =
   /(?:image_url:|The user sent a voice message:|voice message could not be transcribed)/;
@@ -167,6 +173,14 @@ export type MediaSegment =
       start: number;
     }
   | {
+      /** Collapsible vision-description card for an incoming photo (the
+       *  bracketed `[The user sent an image~ …]` prose block). */
+      type: "vision-note";
+      /** The description body (without the bracket wrapper). */
+      value: string;
+      start: number;
+    }
+  | {
       type: "media";
       token: MediaToken;
       /** Exact original text this segment replaced. Rendered verbatim when
@@ -272,6 +286,7 @@ function mediaDedupeKey(token: MediaToken): string {
  * rendered as markdown; media segments as inline images or download chips.
  */
 export function parseMediaTokens(content: string): MediaSegment[] {
+  const originalContent = content;
   // 0a) Platform delivery markers. `[[audio_as_voice]]` / `[[as_document]]`
   // are directives to the sending platform, never display text; strip them
   // and remember the voice intent so audio tokens of the same message render
@@ -507,8 +522,48 @@ export function parseMediaTokens(content: string): MediaSegment[] {
   }
 
   const segments: MediaSegment[] = [];
+  // Vision-description blocks become collapsible note segments. Collected
+  // after the media hits and merged by position: the description block sits
+  // BEFORE the hint line carrying the image path, so appending them after
+  // the media loop would skip every block. Overlap with a media hit cannot
+  // happen (the path lives in the separate hint bracket).
+  const noteHits: Array<{ start: number; end: number; value: string }> = [];
+  if (originalContent.includes("[The user sent an image")) {
+    VISION_DESCRIPTION_RE.lastIndex = 0;
+    let vm: RegExpExecArray | null;
+    while ((vm = VISION_DESCRIPTION_RE.exec(content)) !== null) {
+      const body = vm[0]
+        .replace(/^\[The user sent an image~[^\n]*\n?/, "")
+        .replace(/\]$/, "")
+        .trim();
+      noteHits.push({
+        start: vm.index,
+        end: vm.index + vm[0].length,
+        value: body,
+      });
+    }
+  }
+
   let last = 0;
-  for (const h of uniqueHits) {
+  const allHits: Array<
+    | {
+        kind: "media";
+        start: number;
+        end: number;
+        hit: (typeof uniqueHits)[number];
+      }
+    | { kind: "note"; start: number; end: number; value: string }
+  > = [
+    ...uniqueHits.map((hit) => ({
+      kind: "media" as const,
+      start: hit.start,
+      end: hit.end,
+      hit,
+    })),
+    ...noteHits.map((note) => ({ kind: "note" as const, ...note })),
+  ].sort((a, b) => a.start - b.start);
+  for (const h of allHits) {
+    if (h.start < last) continue;
     if (h.start > last) {
       segments.push({
         type: "text",
@@ -516,13 +571,17 @@ export function parseMediaTokens(content: string): MediaSegment[] {
         start: last,
       });
     }
-    segments.push({
-      type: "media",
-      token: h.token,
-      raw: h.raw,
-      source: h.source,
-      start: h.start,
-    });
+    if (h.kind === "note") {
+      segments.push({ type: "vision-note", value: h.value, start: h.start });
+    } else {
+      segments.push({
+        type: "media",
+        token: h.hit.token,
+        raw: h.hit.raw,
+        source: h.hit.source,
+        start: h.start,
+      });
+    }
     last = h.end;
   }
   if (last < content.length) {

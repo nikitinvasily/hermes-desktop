@@ -625,3 +625,35 @@ describe("parseMediaTokens platform markers (issue #132)", () => {
     expect(hasUserMediaHints("просто сообщение без хинтов")).toBe(false);
   });
 });
+
+// ── Vision description cards (issue #132 follow-up) ────
+describe("parseMediaTokens vision description card", () => {
+  it("turns the bracketed vision description into a vision-note segment", () => {
+    const content =
+      "[The user sent an image~ Here's what I can see:\nA high-angle, top-down shot of a black printed circuit board densely populated with yellow and white LEDs.]\n[If you need a closer look, use vision_analyze with image_url: /home/hermes/.hermes/cache/images/img_b9c94e45be0f.jpg ~]\n\nВот верхняя поверхность панели.";
+    const segs = parseMediaTokens(content);
+    const note = segs.find((s) => s.type === "vision-note");
+    expect(note).toBeTruthy();
+    expect(note && note.type === "vision-note" && note.value).toBe(
+      "A high-angle, top-down shot of a black printed circuit board densely populated with yellow and white LEDs.",
+    );
+    // No raw bracketed prose survives into text segments.
+    const texts = segs
+      .filter((s) => s.type === "text")
+      .map((s) => s.value)
+      .join("");
+    expect(texts).not.toContain("[The user sent an image");
+    // The image is still a media segment.
+    expect(
+      segs.some(
+        (s) =>
+          s.type === "media" && s.token.src.endsWith("img_b9c94e45be0f.jpg"),
+      ),
+    ).toBe(true);
+  });
+
+  it("emits no vision-note when there is no description block", () => {
+    const segs = parseMediaTokens("[[audio_as_voice]]\nMEDIA:/tmp/a.ogg");
+    expect(segs.some((s) => s.type === "vision-note")).toBe(false);
+  });
+});
