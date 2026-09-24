@@ -137,6 +137,7 @@ export default {
     photoShow: "Show description",
     photoHide: "Hide description",
     voiceMessage: "Voice message",
+    fileGone: "file is no longer available on the agent",
   },
   commands: {
     new: "Start a new chat",
