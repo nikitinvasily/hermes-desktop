@@ -27,6 +27,7 @@ Changes in this fork that are **not** in upstream.
 - **Stable, predictable sidebar order** — projects sort alphabetically, chats sort by last activity, the active chat keeps its highlight, and the title bar shows a single tab for the current chat instead of one chip per conversation.
 - **Office tab hidden** — the 3D "Office" tab is removed from the sidebar; the feature stays in the code and can be re-enabled.
 - **Voice messages and audio players in the chat** — spoken replies (TTS) and voice messages from messaging platforms render as playable audio rows (voice-message style when the agent sent it as speech) instead of a raw `[[audio_as_voice]]` marker or a download chip; any audio file the agent delivers gets an inline player. Photos you send via Telegram and similar platforms are displayed in the chat instead of only being described in text, and voice notes that could not be transcribed are playable too. The agent's auto-generated description of an incoming photo folds into a compact collapsible card under the image. Works on local and remote connections.
+- **Documents you send render as file cards** — a document attached to a message (PDF, JSON, spreadsheet…) shows as a compact card with its original filename that saves the file on click, instead of a paragraph of raw system text. When the file was cleaned up on the agent side, the card says so explicitly instead of failing silently.
 
 ### Fixes
 

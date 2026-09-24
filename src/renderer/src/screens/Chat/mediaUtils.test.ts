@@ -657,3 +657,31 @@ describe("parseMediaTokens vision description card", () => {
     expect(segs.some((s) => s.type === "vision-note")).toBe(false);
   });
 });
+
+// ── Incoming document cards (issue #134) ───────────────
+describe("parseMediaTokens incoming documents", () => {
+  it("turns the document wrapper into a document media segment keeping the original filename", () => {
+    const content =
+      "[The user sent a document: 'OpenRouter Chat Sun Sep 13 2026.json'. It is saved at: /home/hermes/.hermes/cache/documents/doc_6072a61527e2_OpenRouter Chat Sun Sep 13 2026.json. Its text is not inlined here (it's a binary format such as PDF or DOCX). To read it, extract the document's text yourself — for example with the terminal tool or the ocr-and-documents skill — before answering, instead of asking the user to paste the contents.]";
+    const segs = parseMediaTokens(content);
+    expect(media(segs)).toMatchObject({
+      type: "media",
+      source: "media-token",
+      token: {
+        src: "/home/hermes/.hermes/cache/documents/doc_6072a61527e2_OpenRouter Chat Sun Sep 13 2026.json",
+        name: "OpenRouter Chat Sun Sep 13 2026.json",
+        isDocument: true,
+      },
+    });
+    // No raw bracketed prose survives into text segments.
+    const texts = segs
+      .filter((s) => s.type === "text")
+      .map((s) => s.value)
+      .join("");
+    expect(texts).not.toContain("[The user sent a document");
+  });
+
+  it("hasUserMediaHints detects the document wrapper", () => {
+    expect(hasUserMediaHints("[The user sent a document: 'x.pdf'. It is saved at: /tmp/x.pdf]")).toBe(true);
+  });
+});

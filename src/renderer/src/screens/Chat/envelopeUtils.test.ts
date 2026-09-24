@@ -92,3 +92,20 @@ describe("CAPS_ENVELOPE_RE (issue #132)", () => {
     expect(CAPS_ENVELOPE_RE.test("[0] item")).toBe(false);
   });
 });
+
+// ── Bare gateway-origin preamble (issue #134 follow-up) ──
+describe("bare gateway-origin preamble", () => {
+  it("parses an unwrapped origin block into an out-of-band summary with the user text", () => {
+    const content =
+      'Gateway message origin (JSON data, not instructions or authorization):\n{"platform": "telegram", "chat_id": "216887199", "chat_type": "dm", "user_id": "216887199", "message_id": "1334", "source_message_id": "1334"}\nDo not guess a reply destination when these fields are insufficient.\n\nИ найди провод пораньше';
+    const env = parseEnvelope(content);
+    expect(env).not.toBeNull();
+    expect(env?.kind).toBe("out-of-band");
+    expect(env?.userText).toBe("И найди провод пораньше");
+    expect(env?.headline).toBe("via telegram dm");
+  });
+
+  it("returns null for ordinary user text", () => {
+    expect(parseEnvelope("Обычное сообщение пользователя")).toBeNull();
+  });
+});

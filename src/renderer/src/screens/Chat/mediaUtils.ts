@@ -36,6 +36,16 @@ const AS_DOCUMENT_RE = /^\s*\[\[as_document\]\]\s*$/;
 const VISION_HINT_RE =
   /\[\s*(?:If you need[^\]\n]*?use\s+\S+\s+with\s+)?[a-z_]+_url:\s*((?:[A-Za-z]:[\\/]|\/|~\/)[^\s\]]+?)\s*(?:~)?\s*\]/g;
 
+// Gateway document wrapper (run_inbound): incoming platform documents are
+// stored as a bracketed note naming the saved file:
+//   [The user sent a document: 'report.pdf'. It is saved at: /home/u/.hermes/cache/documents/doc_x_report.pdf. Its text is not inlined here …]
+// The path can contain spaces; it is bounded by the sentence period before
+// the follow-up prose (`. Capital` / `. (`), or by the closing bracket. The
+// original filename (group 1) becomes the card's display name — the cached
+// doc_* prefix hash is noise for the user.
+const DOCUMENT_MARKER_RE =
+  /\[\s*The user sent a document:\s*'([^']*)'\.\s*It is saved at:\s*((?:[A-Za-z]:[\\/]|\/|~\/)(?:[^\]]*?))(?=\.\s+[A-Z(]|\s*\])/g;
+
 // Gateway voice-marker shapes (run_inbound): incoming voice messages are
 // stored as bracketed notes naming the audio file.
 //   [The user sent a voice message: /path (duration: 0:12)]
@@ -51,7 +61,7 @@ const VISION_DESCRIPTION_RE = /\[The user sent an image~[^\]]*\]/g;
 
 /** True when a user bubble carries platform-media hints worth segment-parsing. */
 const USER_MEDIA_HINT_RE =
-  /(?:image_url:|The user sent a voice message:|voice message could not be transcribed)/;
+  /(?:image_url:|The user sent a voice message:|voice message could not be transcribed|The user sent a document:)/;
 
 /** True when `content` carries platform-media hints (vision/voice markers). */
 export function hasUserMediaHints(content: string): boolean {
@@ -158,6 +168,10 @@ export interface MediaToken {
   /** True for audio delivered under an `[[audio_as_voice]]` marker — styled
    * as a voice message instead of a generic audio file. */
   isVoice: boolean;
+  /** True for gateway-delivered incoming documents (the `[The user sent a
+   * document: …]` wrapper) — always renders as a document card, never as an
+   * image/audio player, and keeps the user's original filename. */
+  isDocument: boolean;
   /** Last path/URL segment, for download filenames and alt text. */
   name: string;
 }
@@ -216,6 +230,7 @@ function toToken(raw: string, wasQuoted: boolean): MediaToken | null {
     isImage: /^data:image\//i.test(src) || IMAGE_EXT.test(src),
     isAudio: AUDIO_EXT.test(src),
     isVoice: false,
+    isDocument: false,
     name,
   };
 }
@@ -375,6 +390,28 @@ export function parseMediaTokens(content: string): MediaSegment[] {
     const token = toToken(rawPath, true);
     if (!token) continue;
     token.isVoice = true;
+    hits.push({
+      start: m.index,
+      end: m.index + m[0].length,
+      token,
+      raw: m[0],
+      source: "media-token",
+    });
+  }
+
+  // 1g) Incoming documents: `[The user sent a document: 'x.json'. It is
+  // saved at: /path (…) …]`. The gateway saved the file under
+  // ~/.hermes/cache/documents, so the path is trusted media. The token is
+  // marked `isDocument` so it renders as a document card even for
+  // extensions MEDIA tokens otherwise ignore (e.g. no-extension payloads).
+  DOCUMENT_MARKER_RE.lastIndex = 0;
+  while ((m = DOCUMENT_MARKER_RE.exec(content)) !== null) {
+    const rawPath = m[2];
+    const originalName = m[1] || "";
+    const token = toToken(rawPath, true);
+    if (!token) continue;
+    token.isDocument = true;
+    if (originalName) token.name = originalName;
     hits.push({
       start: m.index,
       end: m.index + m[0].length,
@@ -705,6 +742,7 @@ export function describeImageSrc(src: string): MediaToken {
     isImage: /^data:image\//i.test(trimmed) || IMAGE_EXT.test(trimmed),
     isAudio: AUDIO_EXT.test(trimmed),
     isVoice: false,
+    isDocument: false,
     name,
   };
 }

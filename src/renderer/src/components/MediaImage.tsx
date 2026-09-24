@@ -1,6 +1,14 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { Download, X, Mic, FileAudio, Eye, ChevronDown } from "lucide-react";
+import {
+  Download,
+  X,
+  Mic,
+  FileAudio,
+  FileText,
+  Eye,
+  ChevronDown,
+} from "lucide-react";
 import { useLightboxClose } from "../hooks/useLightboxClose";
 import type { MediaToken } from "../screens/Chat/mediaUtils";
 import { useI18n } from "./useI18n";
@@ -43,6 +51,7 @@ export function MediaImage({
     isDirect ? token.src : null,
   );
   const [failed, setFailed] = useState(false);
+  const [gone, setGone] = useState(false);
   const [zoomed, setZoomed] = useState(false);
   useLightboxClose(zoomed, () => setZoomed(false));
   const resolvedToken = { ...token, src: resolved ?? token.src };
@@ -56,7 +65,22 @@ export function MediaImage({
       .then((dataUrl) => {
         if (cancelled) return;
         if (dataUrl) setResolved(dataUrl);
-        else setFailed(true);
+        else {
+          // Distinguish "file no longer exists" (deleted server-side, e.g.
+          // a /tmp TTS payload or a cleaned gateway cache) from a load
+          // error — the message to the user differs (issue #134).
+          window.hermesAPI
+            .mediaFileExists(token.src)
+            .then((ok) => {
+              if (!cancelled) {
+                if (ok) setFailed(true);
+                else setGone(true);
+              }
+            })
+            .catch(() => {
+              if (!cancelled) setGone(true);
+            });
+        }
       })
       .catch(() => {
         if (!cancelled) setFailed(true);
@@ -65,6 +89,14 @@ export function MediaImage({
       cancelled = true;
     };
   }, [token.src, isDirect]);
+
+  if (gone) {
+    return (
+      <span className="chat-media-error">
+        ⚠ {token.name} — {t("chat.media.fileGone")}
+      </span>
+    );
+  }
 
   if (failed) {
     return (
@@ -155,6 +187,7 @@ export function AudioPlayer({
     isDirect ? token.src : null,
   );
   const [failed, setFailed] = useState(false);
+  const [gone, setGone] = useState(false);
   const onContextMenu = useMediaContextMenu({
     ...token,
     src: resolved ?? token.src,
@@ -168,7 +201,20 @@ export function AudioPlayer({
       .then((dataUrl) => {
         if (cancelled) return;
         if (dataUrl) setResolved(dataUrl);
-        else setFailed(true);
+        else {
+          // Same gone/failed split as MediaImage (issue #134).
+          window.hermesAPI
+            .mediaFileExists(token.src)
+            .then((ok) => {
+              if (!cancelled) {
+                if (ok) setFailed(true);
+                else setGone(true);
+              }
+            })
+            .catch(() => {
+              if (!cancelled) setGone(true);
+            });
+        }
       })
       .catch(() => {
         if (!cancelled) setFailed(true);
@@ -177,6 +223,14 @@ export function AudioPlayer({
       cancelled = true;
     };
   }, [token.src, isDirect]);
+
+  if (gone) {
+    return (
+      <span className="chat-media-error">
+        ⚠ {token.name} — {t("chat.media.fileGone")}
+      </span>
+    );
+  }
 
   if (failed) {
     return (
@@ -288,6 +342,62 @@ export function DownloadChip({
 }
 
 /**
+ * Document card for a gateway-delivered incoming document (issue #134).
+ * Unlike DownloadChip (fire-and-forget save), it first checks the file is
+ * still reachable — documents often outlive the gateway's cleanup — and
+ * shows a distinct "no longer available" state instead of silently doing
+ * nothing on click.
+ */
+export function DocumentCard({
+  token,
+}: {
+  token: MediaToken;
+}): React.JSX.Element {
+  const { t } = useI18n();
+  const [state, setState] = useState<"checking" | "ready" | "gone">(
+    token.isUrl ? "ready" : "checking",
+  );
+  const onContextMenu = useMediaContextMenu(token);
+
+  useEffect(() => {
+    if (token.isUrl) return;
+    let cancelled = false;
+    window.hermesAPI
+      .mediaFileExists(token.src)
+      .then((ok) => {
+        if (!cancelled) setState(ok ? "ready" : "gone");
+      })
+      .catch(() => {
+        if (!cancelled) setState("gone");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token.src, token.isUrl]);
+
+  if (state === "gone") {
+    return (
+      <span className="chat-media-error">
+        ⚠ {token.name} — {t("chat.media.fileGone")}
+      </span>
+    );
+  }
+
+  return (
+    <button
+      className="chat-media-file chat-media-document"
+      disabled={state === "checking"}
+      onClick={() => void window.hermesAPI.saveMediaFile(token.src, token.name)}
+      onContextMenu={onContextMenu}
+      title={token.src}
+    >
+      <FileText size={14} />
+      {token.name}
+    </button>
+  );
+}
+
+/**
  * Renders one media segment (issue #299). Explicit `MEDIA:` tokens are
  * trusted and shown eagerly; a bare-path candidate is first verified to
  * point at a real file — until then, and if verification fails, its
@@ -326,6 +436,7 @@ export function MediaSegmentView({
   }, [source, token.src, token.isUrl]);
 
   if (verified !== true) return <>{raw}</>;
+  if (token.isDocument) return <DocumentCard token={token} />;
   return token.isImage ? (
     <MediaImage token={token} />
   ) : token.isAudio ? (
