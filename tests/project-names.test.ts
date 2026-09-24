@@ -85,7 +85,7 @@ describe("remoteProjectFolderNames", () => {
         JSON.stringify({
           projects: [
             {
-              id: "/home/hermes/.hermes/workspace/diy",
+              id: "p_diy",
               label: "DIY и мастерская",
               path: "/home/hermes/.hermes/workspace/diy",
               repos: [
@@ -96,6 +96,22 @@ describe("remoteProjectFolderNames", () => {
                 },
               ],
             },
+            {
+              // Ancestor repo (git root) of the project's own folder must
+              // NOT inherit the project label — it would misname the whole
+              // parent folder group (issue #136).
+              id: "p_inv",
+              label: "Инвестиции",
+              path: "/home/hermes/.hermes/workspace/investments",
+              repos: [
+                {
+                  id: "/home/hermes/.hermes/workspace",
+                  label: "workspace",
+                  groups: [],
+                },
+              ],
+            },
+            { id: "/home/hermes/auto-group", label: "Auto" },
             { id: "no-path", label: "No path project" },
           ],
         }),
@@ -107,7 +123,7 @@ describe("remoteProjectFolderNames", () => {
     const address = server.address() as { port: number };
     const config: RemoteSessionConfig = {
       remoteUrl: `http://127.0.0.1:${address.port}`,
-      apiKey: "test-key",
+      apiKey: "k",
     };
 
     try {
@@ -117,6 +133,10 @@ describe("remoteProjectFolderNames", () => {
       );
       // Repo folders inherit the PROJECT label (the human name), not a repo id.
       expect(names["/home/hermes/projects/andrei"]).toBe("DIY и мастерская");
+      // The workspace git-root ancestor stays unnamed (slug fallback).
+      expect(names["/home/hermes/.hermes/workspace"]).toBeUndefined();
+      // Auto groups (no p_ id) do not contribute names.
+      expect(names["/home/hermes/auto-group"]).toBeUndefined();
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
