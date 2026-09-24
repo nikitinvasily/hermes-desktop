@@ -7,10 +7,7 @@ import {
 import type { RemoteSessionConfig } from "../src/main/remote-sessions";
 
 function startServer(
-  handler: (
-    req: http.IncomingMessage,
-    res: http.ServerResponse,
-  ) => unknown,
+  handler: (req: http.IncomingMessage, res: http.ServerResponse) => unknown,
 ): Promise<{ server: http.Server; port: number }> {
   const server = http.createServer((req, res) => {
     try {
@@ -118,6 +115,39 @@ describe("remoteProjectGroupSessions", () => {
     const result = await remoteProjectGroupSessions(configFor(port));
     // No project produced a usable session list: empty groups are omitted.
     expect(result.groups.size).toBe(0);
+  });
+
+  it("filters auto groups (no p_ id) even when they carry sessions", async () => {
+    // Regression (issue #136): the live tree mixes explicit projects with
+    // auto groups derived from cwd/git_repo_root ("workspace", "/tmp", …).
+    // The old code accepted any node with a path, leaking duplicate
+    // pseudo-projects into the sidebar's tree-merge.
+    const { server, port } = await startServer(() => ({
+      projects: [
+        {
+          id: "/home/hermes/.hermes/workspace",
+          label: "workspace",
+          path: "/home/hermes/.hermes/workspace",
+          previewSessions: [{ id: "s9", title: "misplaced", started_at: 5 }],
+        },
+        {
+          id: "p_77a",
+          label: "Трейдинг",
+          path: "/home/hermes/.hermes/workspace/trading",
+          previewSessions: [{ id: "s1", title: "real", started_at: 10 }],
+        },
+      ],
+    }));
+    servers.push(server);
+
+    const result = await remoteProjectGroupSessions(configFor(port));
+    expect(result.groups.size).toBe(1);
+    expect(result.groups.has("/home/hermes/.hermes/workspace")).toBe(false);
+    expect(
+      result.groups
+        .get("/home/hermes/.hermes/workspace/trading")!
+        .map((s) => s.id),
+    ).toEqual(["s1"]);
   });
 
   it("returns empty groups when the tree request fails", async () => {

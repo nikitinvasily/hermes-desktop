@@ -137,8 +137,15 @@ export async function remoteProjectGroupSessions(
     for (const projectRow of projects) {
       const project = asRecord(projectRow);
       if (!project) continue;
-      // Explicit projects and auto groups both carry their folder as `path`;
-      // the synthetic Home bucket has none and belongs to the flat Chats list.
+      // Explicit-projects-only (issue #136): the tree mixes declared projects
+      // (id p_…) with AUTO groups derived from session cwd/git_repo_root
+      // ("/home/hermes", "…/workspace", "/tmp"). Auto groups leak duplicate
+      // pseudo-projects into the sidebar when the projects list is stale/null
+      // (e.g. a remote REST 401), so mirror remoteListProjects' filter.
+      const id = stringValue(project.id).trim();
+      if (!id.startsWith("p_")) continue;
+      // Explicit projects carry their folder as `path`; the synthetic Home
+      // bucket has none and belongs to the flat Chats list.
       const path = stringValue(project.path).trim();
       if (!path) continue;
       const rows = asArray(project.previewSessions);

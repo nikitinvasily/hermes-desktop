@@ -833,6 +833,20 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         });
       }
       groups = [...merged, ...unseen];
+      // Cross-group dedupe (issue #136): a session whose derived folder and
+      // explicit project disagree can appear in two groups (window row in one,
+      // tree row in another). Flatten, drop ids already seen, and re-bucket so
+      // each session lives in exactly one group — first occurrence wins.
+      const seenIds = new Set<string>();
+      const deduped = groups.map((g) => ({
+        ...g,
+        sessions: g.sessions.filter((s) => {
+          if (seenIds.has(s.id)) return false;
+          seenIds.add(s.id);
+          return true;
+        }),
+      }));
+      groups = deduped.filter((g) => g.sessions.length > 0);
     }
     // Projects-only rule (issue #68): a folder with sessions but NO project
     // record is not a project — its sessions belong to the flat Chats list,
@@ -937,12 +951,18 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   // fallback while the project list has not loaded (null), matching the
   // Projects-section filter's graceful degradation.
   const projectChoices = useMemo<SidebarMenuProject[]>(() => {
+    // Normalized-path keys (issue #136): the same folder can arrive in two
+    // spellings (trailing slash / separators) from bindings vs the tree, and
+    // the fallback below reads raw session contextFolders — dedupe by
+    // normalizeFolderPath so one folder is never offered twice.
     const byPath = new Map<string, SidebarMenuProject>();
     if (projects === null) {
       for (const s of sessions) {
         const folder = s.contextFolder?.trim();
-        if (folder && !byPath.has(folder)) {
-          byPath.set(folder, {
+        if (!folder) continue;
+        const key = normalizeFolderPath(folder);
+        if (!byPath.has(key)) {
+          byPath.set(key, {
             path: folder,
             name: projectNames[folder] || folderName(folder),
           });
@@ -952,8 +972,11 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     for (const p of projects ?? []) {
       const add = (path: string | null | undefined): void => {
         const key = path?.trim();
-        if (!key || byPath.has(key)) return;
-        byPath.set(key, { path: key, name: p.name || folderName(key) });
+        if (!key || byPath.has(normalizeFolderPath(key))) return;
+        byPath.set(normalizeFolderPath(key), {
+          path: key,
+          name: p.name || folderName(key),
+        });
       };
       add(p.primaryPath);
       for (const f of p.folders) add(f.path);
