@@ -133,8 +133,35 @@ export async function remoteListProjects(
       if (!id || !id.startsWith("p_")) continue; // auto/synthetic groups
       const folders: ProjectFolderInfo[] = [];
       const repos = Array.isArray(row.repos) ? row.repos : [];
+      // Repo nodes sit at the GIT ROOT, which can be an ANCESTOR of the
+      // project's own folder (e.g. ~/.hermes/workspace is a git repo while
+      // the project lives in workspace/investments). Treating such a repo
+      // path as a project folder made the ancestor a second "project" group
+      // and mislabeled it with this project's name (issue #136): keep only
+      // repos that are not a proper ancestor of the declared path or of a
+      // sibling repo path.
+      const declared = typeof row.path === "string" && row.path ? row.path : "";
+      const repoPaths = repos
+        .map((repo) => {
+          if (!repo || typeof repo !== "object") return "";
+          const r = repo as Record<string, unknown>;
+          // Repo nodes use the path as id when path is absent — consider both.
+          return String(r.path ?? r.id ?? "");
+        })
+        .filter(Boolean);
+      const isAncestorOf = (a: string, b: string): boolean =>
+        b.startsWith(a.endsWith("/") ? a : `${a}/`);
       for (const repo of repos) {
         if (!repo || typeof repo !== "object") continue;
+        const repoPath = String((repo as Record<string, unknown>).path ?? "");
+        if (
+          (repoPath && (declared ? isAncestorOf(repoPath, declared) : false)) ||
+          repoPaths.some(
+            (other) => other !== repoPath && isAncestorOf(repoPath, other),
+          )
+        ) {
+          continue;
+        }
         folders.push(folderFromRemote(repo as Record<string, unknown>));
       }
       const primary = folders.find((f) => f.isPrimary) ?? folders[0] ?? null;

@@ -182,14 +182,45 @@ export async function remoteProjectFolderNames(
     for (const project of projects) {
       if (!project || typeof project !== "object") continue;
       const row = project as Record<string, unknown>;
+      const id = typeof row.id === "string" ? row.id : "";
+      if (!id.startsWith("p_")) continue; // auto/synthetic groups
+      // Repo nodes sit at the GIT ROOT, which can be an ANCESTOR of the
+      // project folder (workspace repo vs workspace/investments) — mapping
+      // such an ancestor to the project label misnames a whole parent
+      // folder group (issue #136). Skip ancestor repos here too.
+      const declared = typeof row.path === "string" ? row.path : "";
+      const repos = Array.isArray(row.repos) ? row.repos : [];
+      const repoPaths = repos
+        .map((repo) => {
+          if (!repo || typeof repo !== "object") return "";
+          const r = repo as Record<string, unknown>;
+          // Repo nodes use the path as id when path is absent (auto nodes),
+          // so consider BOTH spellings for ancestor detection.
+          return String(r.path ?? r.id ?? "");
+        })
+        .filter(Boolean);
+      const isAncestorOf = (a: string, b: string): boolean =>
+        Boolean(a) && Boolean(b) && b.startsWith(a.endsWith("/") ? a : `${a}/`);
+      const skipRepo = (repoPath: string): boolean =>
+        (declared ? isAncestorOf(repoPath, declared) : false) ||
+        repoPaths.some(
+          (other) => other !== repoPath && isAncestorOf(repoPath, other),
+        );
       mergeInto(result, row.path, row.label);
       mergeInto(result, row.id, row.label);
-      const repos = Array.isArray(row.repos) ? row.repos : [];
       for (const repo of repos) {
         if (!repo || typeof repo !== "object") continue;
         const repoRow = repo as Record<string, unknown>;
-        mergeInto(result, repoRow.path, row.label);
-        mergeInto(result, repoRow.id, row.label);
+        const repoPath = String(repoRow.path ?? "");
+        const repoId = String(repoRow.id ?? "");
+        if (repoPath && skipRepo(repoPath)) continue;
+        mergeInto(result, repoPath, row.label);
+        // A skipped repo's ID is often the same path (auto tree nodes use the
+        // path as id) — skipping the path but mapping the id leaks the same
+        // mislabel through the id key, so the id must pass the same check.
+        if (!skipRepo(repoId)) {
+          mergeInto(result, repoId, row.label);
+        }
       }
     }
   } catch {
