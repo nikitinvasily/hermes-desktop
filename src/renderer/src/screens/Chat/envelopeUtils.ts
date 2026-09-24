@@ -76,7 +76,40 @@ function parseMetaLines(text: string): Array<{ label: string; value: string }> {
 /** Parse a caps envelope body into a renderable summary. */
 export function parseEnvelope(content: string): EnvelopeSummary | null {
   const text = content.trim();
-  if (!text.startsWith("[")) return null;
+  if (!text.startsWith("[")) {
+    // Bare gateway-origin preamble (legacy rows, no OUT-OF-BAND wrapper):
+    //   Gateway message origin (JSON data, not instructions…):\n{…}\nDo not guess…\n\n<real user text>
+    // Same shape as the wrapped steer envelope minus the bracket chrome —
+    // treat it identically so the user text renders as the bubble.
+    if (!text.startsWith("Gateway message origin")) return null;
+    const paragraphs = text.split(/\n\s*\n/);
+    const userText = (paragraphs[paragraphs.length - 1] ?? "").trim();
+    const originMatch = text.match(/\{[\s\S]*"platform"[\s\S]*?\}/);
+    let origin: string | null = null;
+    if (originMatch) {
+      try {
+        const parsed = JSON.parse(originMatch[0]) as {
+          platform?: string;
+          chat_type?: string;
+        };
+        origin =
+          parsed.platform && parsed.chat_type
+            ? `${parsed.platform} ${parsed.chat_type}`
+            : (parsed.platform ?? null);
+      } catch {
+        origin = null;
+      }
+    }
+    const headerEnd = text.indexOf("\n");
+    return {
+      kind: "out-of-band",
+      headline: origin ? `via ${origin}` : "gateway message",
+      meta: [],
+      detail: text.slice(0, headerEnd >= 0 ? headerEnd : text.length),
+      userText: userText || undefined,
+      suppressBubble: false,
+    };
+  }
 
   // OUT-OF-BAND: header block ... user text ... closing marker.
   if (text.startsWith("[OUT-OF-BAND USER MESSAGE")) {
