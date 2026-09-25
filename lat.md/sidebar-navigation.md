@@ -32,6 +32,12 @@ Approval state lifts out of the chat transport: [[src/renderer/src/screens/Chat/
 
 A finished turn may flip its session to unread on the agent, so `handleRunLoading` fires a `hermes-sessions-maybe-changed` renderer event on the true→false loading edge; the sidebar listens for it and refreshes past its throttle instead of waiting for the 60s interval.
 
+## Session channel icons
+
+Non-desktop session sources replace the neutral gray bullet with a small channel icon, so a Telegram (or cron/api/web) session is recognizable at a glance without opening it (issue #140).
+
+`CHANNEL_ICONS` in [[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx]] maps known sources to lucide icons and human labels: `telegram → Send`, `cron → Clock`, `api → Plug`, `web → Globe`. The icon renders at 12px in the same `--text-muted` tone as the neutral bullet (`.sidebar-recent-session-dot--channel`), so it reads as provenance, not a state. STATE BULLETS KEEP PRIORITY: approval > spinner > unread > channel icon > pin > neutral dot — an unread Telegram session shows the accent unread dot, and only falls back to the icon once viewed (and not pinned). The row's `title` gains a hover hint (`"<title> (via Telegram)"`) via `channelSourceLabel`, which also title-cases unknown non-default sources as a future-proof hint; `chat`/`desktop` stay hint-free. The `source` field itself was already plumbed end to end (local sqlite select, remote REST `/api/sessions`, project tree groups), so the change is renderer-only and `normalizeRows`/the project-group merge merely carry it onto `RecentSession`. The Archive dialog is deliberately untouched.
+
 ## Collapse toggle brand mark
 
 The sidebar header's collapse control doubles as the brand mark: collapsed it shows a circular dot that swaps to the expand icon on hover; expanded it is just the collapse icon, parked top-right for a clean, logo-free header.

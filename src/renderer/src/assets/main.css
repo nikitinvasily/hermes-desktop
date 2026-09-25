@@ -2969,6 +2969,13 @@ body:has(.shell-vibrant),
   color: var(--warning);
 }
 
+.sidebar-recent-session-dot--channel {
+  /* Non-desktop channel icon (issue #140): replaces the neutral bullet
+     for telegram/cron/api/web sessions; same muted tone so it reads as
+     provenance, not a state. */
+  display: inline-flex;
+}
+
 .sidebar-recent-session:hover {
   background: var(--sidebar-hover-bg);
   color: var(--text-primary);
