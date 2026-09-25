@@ -14,11 +14,15 @@ import {
   ChevronDown,
   ChevronRight,
   Circle,
+  Clock,
   Folder,
+  Globe,
   MoreHorizontal,
   Pencil,
   Pin,
+  Plug,
   Plus,
+  Send,
   Trash,
   X,
 } from "../../assets/icons";
@@ -56,6 +60,34 @@ interface RecentSession {
   /** Whether the run's turn is actually generating (spinner truth); a dead
    *  send (never created a session, not loading) shows the neutral dot. */
   pendingLoading?: boolean;
+  /** Channel the session originated from (issue #140): non-desktop sources
+   *  render a channel icon instead of the neutral bullet. */
+  source?: string;
+}
+
+/** Non-desktop channel icons (issue #140): shown in place of the neutral
+ * gray bullet; state bullets (approval/spinner/unread/pin) keep priority.
+ * Keep in sync with channelSourceLabel below. */
+const CHANNEL_ICONS: Record<
+  string,
+  { Icon: typeof Send; label: string }
+> = {
+  telegram: { Icon: Send, label: "Telegram" },
+  cron: { Icon: Clock, label: "Scheduler" },
+  api: { Icon: Plug, label: "API" },
+  web: { Icon: Globe, label: "Web" },
+};
+
+/** Human hover-hint for a session source, or null for desktop chats. */
+function channelSourceLabel(source: string | undefined): string | null {
+  if (!source) return null;
+  const known = CHANNEL_ICONS[source];
+  if (known) return known.label;
+  // Unknown-but-non-default sources (a future platform): still hint them.
+  if (source !== "chat" && source !== "desktop") {
+    return source.charAt(0).toUpperCase() + source.slice(1);
+  }
+  return null;
 }
 
 /** Recency key for sidebar ordering (issue #74): last activity, startedAt fallback. */
@@ -360,6 +392,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         startedAt?: number;
         lastActivityAt?: number;
         unread?: boolean;
+        source?: string;
       }>,
       limit = RECENT_SESSIONS_PAGE_SIZE,
     ): RecentSession[] =>
@@ -373,6 +406,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
             startedAt,
             lastActivityAt,
             unread,
+            source,
           }) => ({
             id,
             title,
@@ -380,6 +414,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
             startedAt,
             lastActivityAt: lastActivityAt ?? startedAt,
             unread: unread === true,
+            source,
           }),
         ),
     [],
@@ -646,6 +681,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
               contextFolder: rowFolder,
               startedAt: s.startedAt,
               lastActivityAt: s.lastActivityAt,
+              source: s.source,
             });
           }
         }
@@ -1275,6 +1311,13 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         : currentSessionId === s.id;
     const editing = !isPending && editingId === s.id;
     const menuOpen = !isPending && menuTarget?.id === s.id;
+    // Channel icon (issue #140): non-desktop sources replace the neutral
+    // gray bullet; state bullets above keep their priority.
+    const channel = s.source ? CHANNEL_ICONS[s.source] : undefined;
+    const channelLabel = channelSourceLabel(s.source);
+    const rowTitle = channelLabel
+      ? `${title} (via ${channelLabel})`
+      : title;
 
     if (editing) {
       return (
@@ -1352,7 +1395,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
           if (isPending) return;
           openMenuForSession(s, e.clientX, e.clientY);
         }}
-        title={title}
+        title={rowTitle}
       >
         {awaitingApproval ? (
           <Circle
@@ -1373,6 +1416,12 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
             size={7}
             fill="currentColor"
             strokeWidth={0}
+          />
+        ) : channel ? (
+          <channel.Icon
+            className="sidebar-recent-session-dot sidebar-recent-session-dot--channel"
+            size={12}
+            aria-label={channelLabel ?? undefined}
           />
         ) : pinned ? (
           <Pin className="sidebar-recent-session-dot" size={11} />

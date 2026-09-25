@@ -157,6 +157,71 @@ describe("SidebarRecentSessions new-chat buttons", () => {
   });
 });
 
+// @lat: [[sidebar-navigation#Session channel icons]]
+describe("SidebarRecentSessions channel icons (issue #140)", () => {
+  function seedSessions(
+    rows: Array<{
+      id: string;
+      title: string;
+      contextFolder?: string | null;
+      source?: string;
+      unread?: boolean;
+    }>,
+  ): void {
+    listCachedSessions.mockImplementation(async () => rows);
+    syncSessionCache.mockImplementation(async () => rows);
+  }
+
+  it("replaces the neutral bullet with a channel icon and hover hint for telegram", async () => {
+    seedSessions([
+      {
+        id: "session-tg",
+        title: "Telegram chat",
+        contextFolder: null,
+        source: "telegram",
+      },
+    ]);
+    renderSidebar(vi.fn());
+
+    const row = await screen.findByText("Telegram chat");
+    // Hover hint carries the provenance.
+    expect(row.closest('[role="button"]')?.getAttribute("title")).toBe(
+      "Telegram chat (via Telegram)",
+    );
+    // The channel icon (aria-label) replaced the neutral bullet.
+    expect(screen.getByLabelText("Telegram")).toBeTruthy();
+  });
+
+  it("keeps state bullets' priority over the channel icon", async () => {
+    seedSessions([
+      {
+        id: "session-tg-unread",
+        title: "Unread telegram",
+        contextFolder: null,
+        source: "telegram",
+        unread: true,
+      },
+    ]);
+    renderSidebar(vi.fn());
+
+    await screen.findByText("Unread telegram");
+    // Unread wins: no channel icon rendered alongside.
+    expect(screen.queryByLabelText("Telegram")).toBeNull();
+  });
+
+  it("leaves desktop sessions without icon or hint", async () => {
+    seedSessions([
+      { id: "session-desktop", title: "Desktop chat", contextFolder: null },
+    ]);
+    renderSidebar(vi.fn());
+
+    const row = await screen.findByText("Desktop chat");
+    expect(row.closest('[role="button"]')?.getAttribute("title")).toBe(
+      "Desktop chat",
+    );
+  });
+});
+
 describe("SidebarRecentSessions projects-only groups (issue #68)", () => {
   const listProjects = vi.fn();
 
