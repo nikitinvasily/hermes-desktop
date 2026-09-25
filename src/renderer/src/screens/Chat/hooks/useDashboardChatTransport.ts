@@ -624,6 +624,18 @@ export function resolveDashboardProviderForModel(
   );
 }
 
+// A /moa one-shot in flight: the gateway switched the live session to the
+// virtual moa provider for one turn (issue #138) while the chat's configured
+// provider is a normal one. Model enforcement must stand down for this turn.
+export function isTransientMoaTurn(
+  requestedProvider: string | undefined,
+  live: ModelOptionsResponse | null | undefined,
+): boolean {
+  const liveProvider = (live?.provider || "").trim().toLowerCase();
+  const requested = (requestedProvider || "").trim().toLowerCase();
+  return liveProvider === "moa" && requested !== "moa";
+}
+
 export function dashboardModelMatches(
   requestedProvider: string | undefined,
   requestedModel: string | undefined,
@@ -1947,6 +1959,12 @@ export function useDashboardChatTransport({
             session_id: targetSessionId,
           },
         );
+        // /moa is a one-shot: the gateway switches the live session to the moa
+        // provider for a single turn and restores the configured model after
+        // it (issue #138). While that turn is in flight the live provider IS
+        // moa on purpose — enforcing the chat's configured model here would
+        // force /model back mid-turn and fail validation, killing the MoA run.
+        if (isTransientMoaTurn(provider, before)) return targetSessionId;
         let dashboardProvider = resolveDashboardProviderForModel(
           provider,
           model,

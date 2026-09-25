@@ -31,6 +31,8 @@ Changes in this fork that are **not** in upstream.
 
 ### Fixes
 
+- **`/moa` works on remote connections** — running a prompt through the Mixture-of-Agents preset no longer fails with a "did not switch to <model>" error: the chat used to force its configured model back while the one-shot MoA turn was still in flight, killing it. The turn now runs and the configured model is restored afterwards, as designed.
+
 - **Remote sidebars no longer show duplicate projects** — over a remote/SSH connection the agent's project tree also contains auto-generated folder groups (e.g. the whole workspace or /tmp); these used to leak into the sidebar's Projects section and the "Move to project" menu as look-alike duplicates of real projects, especially while the connection's session token was stale. Only real projects are listed now, and a chat can never appear in two project groups at once.
 
 - **Switching the model no longer kills running subagents** — changing the model (or an API key, or a messaging setting) used to restart the agent backend immediately, silently killing every running session and in-flight subagent; the restart now waits until the work finishes (a system notification says the switch was queued). Subagent runs that did die with an old backend restart show as finished in the Subagents panel instead of spinning forever.
