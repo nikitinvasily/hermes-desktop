@@ -42,6 +42,16 @@ The upstream desktop model applies the session switch on the active gateway sess
 
 Attachment turns must not be forced through the CLI override fallback because the CLI path cannot carry multimodal input.
 
+## /moa one-shot turns suspend model enforcement
+
+The `/moa` slash command runs one prompt through the default Mixture-of-Agents preset and restores the previous model after the turn, so the live session sits on the virtual `moa` provider on purpose while that turn runs.
+
+[[src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts#isTransientMoaTurn]] detects this window (live provider `moa`, chat configured for a normal provider) and `switchAndValidate` skips the `/model` enforcement and validation for it — forcing the configured model back mid-turn killed the MoA run with a "did not switch" error (issue #138).
+
+## Attachment legacy detail
+
+How attachment turns route when a session override is active.
+
 [[src/main/hermes.ts#sendMessageViaCli]] can inline text-file attachments but ignores images, while the gateway/API path preserves image parts and path refs through [[src/main/hermes.ts#buildUserContent]]. When a session override is active and the user sends attachments, [[src/main/hermes.ts#shouldForceCliForSessionOverride]] leaves the turn eligible for the dashboard/gateway or API transport instead of silently dropping media.
 
 ## Readiness follows chat routing

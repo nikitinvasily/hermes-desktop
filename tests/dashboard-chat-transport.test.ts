@@ -9,6 +9,7 @@ import {
   dashboardShouldPersistLocalOverlays,
   ensureDashboardRuntimeSession,
   isDashboardSlashWorkerExitError,
+  isTransientMoaTurn,
   dashboardSeedMessagesFromTranscript,
   dashboardPromptTextForAttachments,
   dashboardModelCommand,
@@ -251,6 +252,40 @@ describe("dashboardModelMatches", () => {
 
   it("does not require a live model for auto mode", () => {
     expect(dashboardModelMatches("auto", "whatever", null)).toBe(true);
+  });
+});
+
+describe("isTransientMoaTurn", () => {
+  it("flags a moa one-shot while the chat is configured for a normal provider", () => {
+    expect(
+      isTransientMoaTurn("zai", { provider: "moa", model: "default" }),
+    ).toBe(true);
+  });
+
+  it("is case-insensitive on the live provider", () => {
+    expect(
+      isTransientMoaTurn("zai", { provider: "MoA", model: "default" }),
+    ).toBe(true);
+  });
+
+  it("does not flag a moa-configured chat sitting on moa", () => {
+    expect(
+      isTransientMoaTurn("moa", { provider: "moa", model: "default" }),
+    ).toBe(false);
+  });
+
+  it("does not flag a normal live provider", () => {
+    expect(
+      isTransientMoaTurn("zai", { provider: "zai", model: "glm-5.3" }),
+    ).toBe(false);
+    expect(
+      isTransientMoaTurn("zai", { provider: "openrouter", model: "x" }),
+    ).toBe(false);
+  });
+
+  it("does not flag a missing live provider", () => {
+    expect(isTransientMoaTurn("zai", null)).toBe(false);
+    expect(isTransientMoaTurn("zai", {})).toBe(false);
   });
 });
 
