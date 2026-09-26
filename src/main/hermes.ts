@@ -517,6 +517,22 @@ interface GatewayPending {
 
 type GatewayEventHandler = (event: GatewayEvent) => void;
 
+/**
+ * A server→client request handler (approval, clarify, sudo/secret, …).
+ * Returns the result payload (or a promise of one) to answer with, or `false`
+ * to decline — declining makes the client answer `-32601`.
+ */
+type GatewayServerRequestResult =
+  | Record<string, unknown>
+  | Promise<Record<string, unknown> | void>
+  | false;
+type GatewayServerRequestHandler = (
+  method: string,
+  params: Record<string, unknown>,
+  serverRequestId: string,
+) => GatewayServerRequestResult;
+type GatewayRequestCancelHandler = (params: Record<string, unknown>) => void;
+
 const DASHBOARD_GATEWAY_PORT_FLOOR = 9120;
 const DASHBOARD_GATEWAY_PORT_CEILING = 9199;
 
@@ -582,6 +598,8 @@ async function waitForDashboardReady(
 
 class TuiGatewayClient {
   private handlers = new Set<GatewayEventHandler>();
+  private requestHandlers = new Set<GatewayServerRequestHandler>();
+  private cancelHandlers = new Set<GatewayRequestCancelHandler>();
   private nextId = 0;
   private pending = new Map<string, GatewayPending>();
   private port = 0;
@@ -601,6 +619,66 @@ class TuiGatewayClient {
   onEvent(handler: GatewayEventHandler): () => void {
     this.handlers.add(handler);
     return () => this.handlers.delete(handler);
+  }
+
+  /**
+   * Register a handler for server→client requests (approval, clarify,
+   * sudo/secret, …). The handler owns the reply: it returns a result payload
+   * (answered synchronously), a promise of one (answered when it settles), or
+   * `false` to decline — a declined or throwing handler makes the client
+   * answer `-32601` so the backend immediately withdraws the request instead
+   * of waiting out its deadline.
+   */
+  onServerRequest(handler: GatewayServerRequestHandler): () => void {
+    this.requestHandlers.add(handler);
+    return () => this.requestHandlers.delete(handler);
+  }
+
+  /** Subscribe to backend `request.cancel` notifications (withdrawn cards). */
+  onRequestCancel(handler: GatewayRequestCancelHandler): () => void {
+    this.cancelHandlers.add(handler);
+    return () => this.cancelHandlers.delete(handler);
+  }
+
+  private sendFrame(frame: Record<string, unknown>): void {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    try {
+      ws.send(JSON.stringify(frame));
+    } catch {
+      /* the generation is gone; the close handler resets */
+    }
+  }
+
+  private deliverServerRequest(
+    id: string,
+    method: string,
+    params: GatewayEvent | undefined,
+  ): void {
+    const payload = (params ?? {}) as Record<string, unknown>;
+    let settled = false;
+    const answer = (frame: Record<string, unknown>): void => {
+      if (settled) return;
+      settled = true;
+      this.sendFrame({ jsonrpc: "2.0", id, ...frame });
+    };
+    const decline = (): void =>
+      answer({ error: { code: -32601, message: "Method not found" } });
+    for (const handler of Array.from(this.requestHandlers)) {
+      let accepted: GatewayServerRequestResult;
+      try {
+        accepted = handler(method, payload, id);
+      } catch {
+        continue;
+      }
+      if (accepted === false) continue;
+      Promise.resolve(accepted).then(
+        (result) => answer({ result: result ?? {} }),
+        () => decline(),
+      );
+      return;
+    }
+    decline();
   }
 
   findRecentEvent(
@@ -767,6 +845,25 @@ class TuiGatewayClient {
 
       ws.on("open", () => {
         clearTimeout(timer);
+        // Tell the backend this client answers server→client requests
+        // (approvals, clarify, sudo/secret prompts). Without the
+        // advertisement the backend treats us as an old build and withdraws
+        // every approval with "the attached client cannot answer approval
+        // requests" — the agent then reports the command as blocked.
+        // MUST carry an id: the dispatcher only handles request frames, a
+        // notification (no id) is silently ignored and never advertises.
+        try {
+          ws.send(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: `r${++this.nextId}`,
+              method: "client.capabilities",
+              params: { server_requests: true },
+            }),
+          );
+        } catch {
+          /* the generation is gone; the close handler resets */
+        }
         resolve();
       });
       ws.on("message", (data) => this.handleFrame(wsDataToString(data)));
@@ -788,6 +885,30 @@ class TuiGatewayClient {
     try {
       frame = JSON.parse(raw) as GatewayRpcFrame;
     } catch {
+      return;
+    }
+
+    // Server→client request (approval, clarify, sudo/secret prompt): a frame
+    // carrying BOTH `id` and `method`. Our own request ids are `r<counter>`,
+    // so a server frame never collides with a pending entry. Route it to the
+    // registered handler; an unknown method is answered with -32601 so the
+    // backend never waits out its deadline against us.
+    if (frame.id != null && frame.method) {
+      this.deliverServerRequest(String(frame.id), frame.method, frame.params);
+      return;
+    }
+
+    // `request.cancel {id, method, reason}`: the backend withdrew a request
+    // (answered elsewhere, timeout, interrupt) — tear the card down.
+    if (frame.method === "request.cancel" && frame.id == null) {
+      const params = (frame.params ?? {}) as Record<string, unknown> | null;
+      for (const handler of this.cancelHandlers) {
+        try {
+          handler(params ?? {});
+        } catch {
+          /* one bad listener must not break the others */
+        }
+      }
       return;
     }
 
@@ -2192,6 +2313,171 @@ async function sendMessageViaTuiGateway(
     pendingApprovalIds.clear();
   }
 
+  /**
+   * Server→client `approval` request (the current core protocol; replaces the
+   * old `approval.request` event). Answers with `{choice, all}`; the renderer
+   * path (pendingApprovals + cb.onApproval) is shared with the event branch.
+   */
+  function handleServerApprovalRequest(
+    payload: Record<string, unknown>,
+    serverRequestId: string,
+  ): Promise<Record<string, unknown>> {
+    approvalInteraction = true;
+    const gatewayRequestId = gatewayApprovalRequestId(payload);
+    if (!gatewayRequestId) {
+      void client
+        .request("session.interrupt", { session_id: activeSessionId }, 5_000)
+        .catch(() => undefined);
+      finish(
+        "Hermes did not provide an addressable approval request. The turn was stopped without approving.",
+      );
+      return Promise.resolve({});
+    }
+    return new Promise<Record<string, unknown>>((resolve) => {
+      const normalized = normalizeApprovalRequest(payload, "");
+      let requestId = "";
+      const responder = async (choice: ApprovalChoice): Promise<boolean> => {
+        if (pendingApprovalIds.values().next().value !== requestId) {
+          resolve({});
+          return false;
+        }
+        // Answer the server request directly; the result frame is what
+        // resolves the backend's approval queue entry.
+        resolve({ choice, all: false });
+        pendingApprovalIds.delete(requestId);
+        return true;
+      };
+      requestId = registerPendingApproval(normalized.choices, responder);
+      pendingApprovalIds.add(requestId);
+      if (serverRequestId) {
+        approvalByServerRequest.set(serverRequestId, requestId);
+      }
+      const request = { ...normalized, requestId };
+      let delivered = false;
+      try {
+        delivered = cb.onApproval?.(request) !== false && !!cb.onApproval;
+      } catch {
+        delivered = false;
+      }
+      if (!delivered) {
+        clearPendingApproval(requestId);
+        pendingApprovalIds.delete(requestId);
+        void client
+          .request("session.interrupt", { session_id: activeSessionId }, 5_000)
+          .catch(() => undefined);
+        finish(
+          "Hermes requested approval, but no approval listener is available. The turn was stopped without approving.",
+        );
+        resolve({});
+      }
+    });
+  }
+
+  /**
+   * Server→client `clarify` request. The renderer's answer arrives via the
+   * clarify-respond IPC handler; resolve the server request with it.
+   */
+  function handleServerClarifyRequest(
+    payload: Record<string, unknown>,
+    serverRequestId: string,
+  ): Promise<Record<string, unknown>> {
+    const requestId =
+      typeof payload.request_id === "string" ? payload.request_id : "";
+    if (!requestId) {
+      void client
+        .request("session.interrupt", { session_id: activeSessionId }, 5_000)
+        .catch(() => undefined);
+      finish(
+        "Hermes requested clarify input, but the gateway provided no request_id to answer.",
+      );
+      return Promise.resolve({});
+    }
+    return new Promise<Record<string, unknown>>((resolve) => {
+      if (serverRequestId) clarifyServerRequestIds.add(serverRequestId);
+      pendingClarifyId = requestId;
+      registerPendingClarify(requestId, (answer: string) => {
+        if (pendingClarifyId === requestId) pendingClarifyId = null;
+        resolve({ answer });
+      });
+      cb.onClarify?.({
+        requestId,
+        question: String(payload.question ?? payload.prompt ?? ""),
+        choices: Array.isArray(payload.choices)
+          ? payload.choices.map((c) => String(c))
+          : [],
+      });
+    });
+  }
+
+  /**
+   * Server→client `sudo` / `secret` request: collect in the hardened askpass
+   * modal (never the chat transcript) and answer `{value}`. Cancel maps to ""
+   * (a safe skip the gateway handles).
+   */
+  function handleServerSecretRequest(
+    isSudo: boolean,
+    payload: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const envVar = String(payload.env_var ?? "");
+    const vaultValue = !isSudo && envVar ? getSecret(envVar, profile) : null;
+    const collect: Promise<string> =
+      vaultValue != null
+        ? Promise.resolve(vaultValue)
+        : isSudo
+          ? promptSudoPassword()
+          : promptSecretValue(envVar, String(payload.prompt ?? ""));
+    return collect.then((answer) => ({ value: answer }));
+  }
+
+  const cleanupServerRequests = client.onServerRequest(
+    (method, payload, serverRequestId): GatewayServerRequestResult => {
+      if (finished || fallbackStarted) return false;
+      if (payload.session_id && payload.session_id !== activeSessionId) {
+        return false;
+      }
+      if (method === "approval") {
+        return handleServerApprovalRequest(payload, serverRequestId);
+      }
+      if (method === "clarify") {
+        return handleServerClarifyRequest(payload, serverRequestId);
+      }
+      if (method === "sudo") {
+        return handleServerSecretRequest(true, payload);
+      }
+      if (method === "secret") {
+        return handleServerSecretRequest(false, payload);
+      }
+      return false;
+    },
+  );
+  // server request id → our pending approval renderer id, so a backend
+  // `request.cancel` can tear down exactly the card it withdraws.
+  const approvalByServerRequest = new Map<string, string>();
+  const clarifyServerRequestIds = new Set<string>();
+  const cleanupRequestCancel = client.onRequestCancel((payload) => {
+    // The backend withdrew a request (answered elsewhere / timeout /
+    // interrupt): drop the local card so it cannot approve a dead prompt.
+    const serverRequestId = typeof payload.id === "string" ? payload.id : "";
+    if (!serverRequestId) return;
+    const approvalId = approvalByServerRequest.get(serverRequestId);
+    if (approvalId) {
+      clearPendingApproval(approvalId);
+      pendingApprovalIds.delete(approvalId);
+      approvalByServerRequest.delete(serverRequestId);
+    }
+    if (clarifyServerRequestIds.has(serverRequestId)) {
+      if (pendingClarifyId) {
+        clearPendingClarify(pendingClarifyId);
+        pendingClarifyId = null;
+      }
+      clarifyServerRequestIds.delete(serverRequestId);
+    }
+  });
+  const cleanupServerHandlers = (): void => {
+    cleanupServerRequests();
+    cleanupRequestCancel();
+  };
+
   function finish(error?: string): void {
     if (finished) return;
     finished = true;
@@ -2200,6 +2486,7 @@ async function sendMessageViaTuiGateway(
       pendingClarifyId = null;
     }
     clearApprovals();
+    cleanupServerHandlers();
     cleanup();
     if (error) {
       cb.onError(
@@ -2218,6 +2505,7 @@ async function sendMessageViaTuiGateway(
       pendingClarifyId = null;
     }
     clearApprovals();
+    cleanupServerHandlers();
     cleanup();
   }
 

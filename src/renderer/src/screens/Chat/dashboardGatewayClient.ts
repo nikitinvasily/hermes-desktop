@@ -14,6 +14,20 @@ export interface DashboardGatewayClientOptions {
   onClose?: (event: CloseEvent) => void;
   onError?: (event: Event) => void;
   onEvent?: (event: DashboardRpcEvent) => void;
+  /**
+   * Handler for server→client requests (approval, clarify, sudo/secret, …).
+   * Return a result payload (or a promise of one) to answer with, or `false`
+   * to decline — declining answers `-32601` so the backend withdraws the
+   * request immediately instead of waiting out its deadline. A handler that
+   * throws also declines.
+   */
+  onServerRequest?: (
+    method: string,
+    params: Record<string, unknown>,
+  ) =>
+    | Record<string, unknown>
+    | Promise<Record<string, unknown> | void>
+    | false;
   requestTimeoutMs?: number;
 }
 
@@ -148,6 +162,25 @@ export class DashboardGatewayClient {
           settled = true;
           window.clearTimeout(timeout);
           socket.removeEventListener("error", failOpen);
+          // Tell the backend this client answers server→client requests
+          // (approvals, clarify, sudo/secret prompts). Without the
+          // advertisement the backend treats us as an old build and withdraws
+          // every approval with "the attached client cannot answer approval
+          // requests" — the agent then reports the command as blocked.
+          // MUST carry an id: the dispatcher only handles request frames, a
+          // notification (no id) is silently ignored and never advertises.
+          try {
+            socket.send(
+              JSON.stringify({
+                jsonrpc: "2.0",
+                id: this.nextRequestId++,
+                method: "client.capabilities",
+                params: { server_requests: true },
+              }),
+            );
+          } catch {
+            /* best-effort; the close handler resets */
+          }
           resolve();
         },
         { once: true },
@@ -220,6 +253,26 @@ export class DashboardGatewayClient {
       return;
     }
 
+    // Server→client request (approval, clarify, sudo/secret prompt): a frame
+    // carrying BOTH `id` and `method`. Route it to the registered handler and
+    // answer with a JSON-RPC result frame on the same id; an unknown method
+    // or a declined handler answers -32601 so the backend never waits out
+    // its deadline against us.
+    if (
+      isRecord(message) &&
+      "id" in message &&
+      typeof (message as { method?: unknown }).method === "string"
+    ) {
+      this.deliverServerRequest(
+        message as unknown as {
+          id: number | string;
+          method: string;
+          params?: unknown;
+        },
+      );
+      return;
+    }
+
     if (isRecord(message) && "id" in message && !("method" in message)) {
       this.resolveResponse(message as unknown as JsonRpcResponse);
       return;
@@ -227,6 +280,45 @@ export class DashboardGatewayClient {
 
     const normalized = normalizeDashboardNotification(message);
     if (normalized) this.options.onEvent?.(normalized);
+  }
+
+  private deliverServerRequest(request: {
+    id: number | string;
+    method: string;
+    params?: unknown;
+  }): void {
+    const handler = this.options.onServerRequest;
+    const params = isRecord(request.params) ? request.params : {};
+    const answer = (frame: Record<string, unknown>): void => {
+      try {
+        this.socket?.send(
+          JSON.stringify({ jsonrpc: "2.0", id: request.id, ...frame }),
+        );
+      } catch {
+        /* the socket closed; the backend withdraws the request itself */
+      }
+    };
+    if (!handler) {
+      answer({ error: { code: -32601, message: "Method not found" } });
+      return;
+    }
+    let accepted: ReturnType<
+      NonNullable<DashboardGatewayClientOptions["onServerRequest"]>
+    >;
+    try {
+      accepted = handler(request.method, params);
+    } catch {
+      answer({ error: { code: -32601, message: "Method not found" } });
+      return;
+    }
+    if (accepted === false) {
+      answer({ error: { code: -32601, message: "Method not found" } });
+      return;
+    }
+    Promise.resolve(accepted).then(
+      (result) => answer({ result: result ?? {} }),
+      () => answer({ error: { code: -32601, message: "Method not found" } }),
+    );
   }
 
   private resolveResponse(response: JsonRpcResponse): void {

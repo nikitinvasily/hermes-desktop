@@ -190,11 +190,13 @@ const remote = {
 } as ConnectionConfig;
 function callbacks(): ChatCallbacks & {
   onApproval: Mock<(approval: ChatApprovalRequest) => boolean>;
+  onClarify: Mock<(req: unknown) => void>;
 } {
   return {
     onChunk: vi.fn(),
     onDone: vi.fn(),
     onError: vi.fn(),
+    onClarify: vi.fn(),
     onApproval: vi.fn((approval: ChatApprovalRequest) =>
       bindPendingApproval(approval.requestId, {
         ownerId: 1,
@@ -382,5 +384,159 @@ describe("approval transport safety", () => {
           url.endsWith("/approval") || url.endsWith("/chat/completions"),
       ),
     ).toBe(false);
+  });
+});
+
+describe("server-to-client requests", () => {
+  function sentFrames(method?: string): Array<Record<string, unknown>> {
+    return transport.rpc.filter((frame) => !method || frame.method === method);
+  }
+
+  // @lat: [[chat-commands#Structured command approvals#Server request advertisement]]
+  it("advertises server_requests capability on connect", async () => {
+    const cb = callbacks();
+    await send(cb);
+    expect(sentFrames("client.capabilities")).toEqual([
+      expect.objectContaining({
+        id: expect.any(String),
+        params: { server_requests: true },
+      }),
+    ]);
+  });
+
+  // @lat: [[chat-commands#Structured command approvals#Approval server requests]]
+  it("renders an approval server request and answers it with the choice", async () => {
+    const cb = callbacks();
+    await send(cb);
+    const socket = transport.sockets.at(-1)!;
+    socket.emit(
+      "message",
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: "srq-approval1",
+        method: "approval",
+        params: {
+          session_id: "live-1",
+          request_id: "upstream-1",
+          command: "npm publish",
+          choices: ["once"],
+        },
+      }),
+    );
+    const approval = cb.onApproval.mock.calls[0][0];
+    expect(approval.requestId).not.toBe("upstream-1");
+    expect(
+      await resolvePendingApproval(approval.requestId, "once", {
+        ownerId: 1,
+        runId: "chat-run",
+      }),
+    ).toBe(true);
+    // The answer is the JSON-RPC result frame for the server request id —
+    // NOT a separate approval.respond call.
+    expect(transport.rpc).toContainEqual({
+      jsonrpc: "2.0",
+      id: "srq-approval1",
+      result: { choice: "once", all: false },
+    });
+    expect(
+      sentFrames("approval.respond").filter(
+        (frame) =>
+          (frame.params as Record<string, unknown>).request_id === "upstream-1",
+      ),
+    ).toEqual([]);
+  });
+
+  // @lat: [[chat-commands#Structured command approvals#Request cancel teardown]]
+  it("drops the local card on request.cancel", async () => {
+    const cb = callbacks();
+    await send(cb);
+    const socket = transport.sockets.at(-1)!;
+    socket.emit(
+      "message",
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: "srq-approval2",
+        method: "approval",
+        params: {
+          session_id: "live-1",
+          request_id: "upstream-2",
+          choices: ["once"],
+        },
+      }),
+    );
+    const approval = cb.onApproval.mock.calls[0][0];
+    expect(approval).toBeTruthy();
+    socket.emit(
+      "message",
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "request.cancel",
+        params: { id: "srq-approval2", method: "approval", reason: "timeout" },
+      }),
+    );
+    // The card's resolver is gone: a late approve cannot answer anymore.
+    expect(
+      await resolvePendingApproval(approval.requestId, "once", {
+        ownerId: 1,
+        runId: "chat-run",
+      }),
+    ).toBe(false);
+  });
+
+  // @lat: [[chat-commands#Structured command approvals#Clarify server requests]]
+  it("answers a clarify server request with the renderer's answer", async () => {
+    const cb = callbacks();
+    await send(cb);
+    const socket = transport.sockets.at(-1)!;
+    socket.emit(
+      "message",
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: "srq-clarify1",
+        method: "clarify",
+        params: {
+          session_id: "live-1",
+          request_id: "upstream-q1",
+          question: "Which region?",
+          choices: ["eu", "us"],
+        },
+      }),
+    );
+    expect(cb.onClarify).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: "upstream-q1" }),
+    );
+    // The renderer's IPC path (clarify-respond) resolves via the shared
+    // pendingClarify map — drive it directly.
+    const { resolvePendingClarify } = await import("../src/main/hermes");
+    expect(resolvePendingClarify("upstream-q1", "eu")).toBe(true);
+    await vi.waitFor(() =>
+      expect(transport.rpc).toContainEqual({
+        jsonrpc: "2.0",
+        id: "srq-clarify1",
+        result: { answer: "eu" },
+      }),
+    );
+  });
+
+  it("answers unknown methods with -32601", async () => {
+    const cb = callbacks();
+    await send(cb);
+    const socket = transport.sockets.at(-1)!;
+    socket.emit(
+      "message",
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: "srq-tour",
+        method: "tour",
+        params: { session_id: "live-1" },
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(transport.rpc).toContainEqual({
+        jsonrpc: "2.0",
+        id: "srq-tour",
+        error: expect.objectContaining({ code: -32601 }),
+      }),
+    );
   });
 });
