@@ -39,6 +39,7 @@ function baseToken(overrides: Record<string, unknown> = {}): MediaToken {
     isImage: false,
     isAudio: true,
     isVoice: false,
+    isDocument: false,
     name: "tts_1.ogg",
     ...overrides,
   };
@@ -119,6 +120,7 @@ describe("MediaSegmentView audio routing (issue #132)", () => {
           isImage: false,
           isAudio: false,
           isVoice: false,
+          isDocument: true,
           name: "report.pdf",
         }}
         raw="MEDIA:/tmp/report.pdf"
