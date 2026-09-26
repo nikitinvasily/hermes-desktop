@@ -15,6 +15,7 @@ const token: MediaToken = {
   isImage: true,
   isAudio: false,
   isVoice: false,
+  isDocument: false,
   name: "pic.png",
 };
 
