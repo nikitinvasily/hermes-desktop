@@ -695,7 +695,11 @@ export async function remoteGetSessionMessages(
 ): Promise<HistoryItem[]> {
   const response = await remoteRequestJson(
     config,
-    `/api/sessions/${encodeURIComponent(sessionId)}/messages`,
+    // include_compacted: the server collapses pre-compaction rows to
+    // active=0 and hides them from the default page — without the flag the
+    // transcript silently loses compacted assistant replies (and their
+    // MEDIA: photos) after any context compaction (issue #146).
+    `/api/sessions/${encodeURIComponent(sessionId)}/messages?include_compacted=true`,
   );
   const rows = asArray(asRecord(response).messages).map(normalizeMessageRow);
   return hydrateRemotePromptImageAttachments(config, expandRowsToHistory(rows));

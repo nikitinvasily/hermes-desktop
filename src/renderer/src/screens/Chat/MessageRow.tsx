@@ -212,7 +212,7 @@ export const MessageRow = memo(function MessageRow({
   onDeny,
   showAvatar = true,
   agent,
-}: MessageRowProps): React.JSX.Element {
+}: MessageRowProps): React.JSX.Element | null {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
 
@@ -297,6 +297,11 @@ export const MessageRow = memo(function MessageRow({
   if (isChatBubbleMessage(msg)) {
     const envelope = parseEnvelope(msg.content);
     if (envelope && envelope.suppressBubble) {
+      if (envelope.kind === "compaction") {
+        // Context-compaction handoff (issue #146): internal service prose,
+        // hidden entirely — the surrounding transcript is the display.
+        return null;
+      }
       return (
         <div className="chat-message chat-message-process-note">
           <span className="chat-process-note-headline">

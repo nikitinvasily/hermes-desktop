@@ -866,13 +866,57 @@ export function isSystemEventKind(value: unknown): value is SystemEventKind {
 }
 
 /**
+ * Collapse consecutive rows that are byte-identical transcripts of the same
+ * logical message (same role + content + timestamp). The server-side core
+ * can persist a message 2-3 times after context compaction or gateway
+ * restarts; without this the UI renders duplicate compaction blocks and
+ * repeated replies (issue #146). Timestamp equality keeps genuinely
+ * identical short messages (e.g. two "ok" replies) distinct in time.
+ */
+function dedupeConsecutiveRows(rows: RawMessageRow[]): RawMessageRow[] {
+  const out: RawMessageRow[] = [];
+  for (const r of rows) {
+    const prev = out[out.length - 1];
+    if (
+      prev &&
+      prev.role === r.role &&
+      (prev.content ?? "") === (r.content ?? "") &&
+      prev.timestamp === r.timestamp
+    ) {
+      continue;
+    }
+    out.push(r);
+  }
+  return out;
+}
+
+/**
+ * Stable chronological ordering by timestamp. The server orders compacted
+ * display history by row id, and the surviving copy of a duplicated row can
+ * carry a LATER id than the replies that answered it (the compactor
+ * re-writes inactive copies), which renders an answer above its own prompt
+ * (issue #146). Rows with equal timestamps keep their incoming order.
+ */
+function sortRowsChronologically(rows: RawMessageRow[]): RawMessageRow[] {
+  return rows
+    .map((row, index) => ({ row, index }))
+    .sort((a, b) => {
+      const ta = a.row.timestamp ?? 0;
+      const tb = b.row.timestamp ?? 0;
+      if (ta !== tb) return ta - tb;
+      return a.index - b.index;
+    })
+    .map((entry) => entry.row);
+}
+
+/**
  * Pure expansion of DB rows → renderer-facing HistoryItem list. Kept pure
  * (no I/O) so we can exercise the ordering and edge-case logic directly
  * without booting sqlite.
  */
 export function expandRowsToHistory(rows: RawMessageRow[]): HistoryItem[] {
   const items: HistoryItem[] = [];
-  for (const r of rows) {
+  for (const r of dedupeConsecutiveRows(sortRowsChronologically(rows))) {
     const decoded = decodeContent(r.content || "", r.id);
 
     if (r.role === "user") {

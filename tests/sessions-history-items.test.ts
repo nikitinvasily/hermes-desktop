@@ -166,6 +166,45 @@ describe("expandRowsToHistory", () => {
     expect(items[1]).toMatchObject({ kind: "assistant", content: "hello!" });
   });
 
+  it("collapses consecutive identical duplicate rows (server double-writes)", () => {
+    const items = expandRowsToHistory([
+      row({ id: 1, role: "user", content: "hi", timestamp: 1 }),
+      row({ id: 2, role: "user", content: "hi", timestamp: 1 }),
+      row({ id: 3, role: "user", content: "hi", timestamp: 1 }),
+      row({
+        id: 4,
+        role: "assistant",
+        content: "[CONTEXT COMPACTION — REFERENCE ONLY] summary text",
+        timestamp: 2,
+      }),
+      row({
+        id: 5,
+        role: "assistant",
+        content: "[CONTEXT COMPACTION — REFERENCE ONLY] summary text",
+        timestamp: 2,
+      }),
+    ]);
+    expect(kinds(items)).toEqual(["user", "assistant"]);
+  });
+
+  it("keeps identical messages distinct when timestamps differ", () => {
+    const items = expandRowsToHistory([
+      row({ id: 1, role: "assistant", content: "ok", timestamp: 1 }),
+      row({ id: 2, role: "assistant", content: "ok", timestamp: 2 }),
+    ]);
+    expect(kinds(items)).toEqual(["assistant", "assistant"]);
+  });
+
+  it("orders rows chronologically regardless of row id (compactor rewrites)", () => {
+    // The compactor can leave the surviving copy of a user row with a LATER
+    // id than the assistant replies that answered it (issue #146).
+    const items = expandRowsToHistory([
+      row({ id: 10, role: "assistant", content: "answer", timestamp: 200 }),
+      row({ id: 11, role: "user", content: "question", timestamp: 100 }),
+    ]);
+    expect(kinds(items)).toEqual(["user", "assistant"]);
+  });
+
   it("emits reasoning *before* the assistant bubble", () => {
     const items = expandRowsToHistory([
       row({ id: 1, role: "user", content: "?", timestamp: 1 }),
