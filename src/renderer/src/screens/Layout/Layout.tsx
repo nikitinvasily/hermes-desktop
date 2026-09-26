@@ -641,6 +641,66 @@ function Layout({
     window.hermesAPI.isRemoteOnlyMode().then(setRemoteMode);
   }, [view]);
 
+  // ---- Remote connection health (backlog #74/#75) ----
+  // The main process classifies every remote dashboard REST call at the
+  // remoteDashboardRequestJson boundary and pushes `remote-health-changed`.
+  // We match events against the ACTIVE remote connection's url; a non-matching
+  // url means the event came from a background probe for another connection
+  // and must not degrade the UI.
+  const [remoteHealth, setRemoteHealth] = useState<
+    "ok" | "authLost" | "unreachable"
+  >("ok");
+  // remoteUrl of the active connection, refreshed on connection changes so
+  // health events are matched against the right target.
+  const activeRemoteUrlRef = useRef<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void window.hermesAPI
+      .getConnectionRegistry()
+      .then((registry) => {
+        if (cancelled) return;
+        const active = registry.connections.find(
+          (c) => c.connectionId === registry.activeConnectionId,
+        );
+        const mode = active?.mode;
+        activeRemoteUrlRef.current =
+          mode === "remote" ? (active?.remoteUrl ?? null) : null;
+        if (activeRemoteUrlRef.current === null) setRemoteHealth("ok");
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [connectionId]);
+
+  // Nonce bumped when remote health transitions back to ok — the sidebar and
+  // data screens listen and force-refresh from the server (projects + chats
+  // with the persisted disclosure state, closing backlog #74's resync path).
+  const [remoteResyncNonce, setRemoteResyncNonce] = useState(0);
+  useEffect(
+    () =>
+      window.hermesAPI.onRemoteHealthChanged((event) => {
+        if (!activeRemoteUrlRef.current) return;
+        if (
+          event.remoteUrl &&
+          event.remoteUrl.replace(/\/+$/, "") !==
+            activeRemoteUrlRef.current.replace(/\/+$/, "")
+        )
+          return;
+        setRemoteHealth((prev) => {
+          if (prev === event.state) return prev;
+          if (event.state === "ok") setRemoteResyncNonce((n) => n + 1);
+          return event.state;
+        });
+      }),
+    [],
+  );
+  const remoteDegraded =
+    remoteHealth !== "ok" && activeRemoteUrlRef.current !== null;
+  const handleRemoteRelogin = useCallback((): void => {
+    void window.hermesAPI.remoteOAuthLogin().catch(() => undefined);
+  }, []);
+
   // Restore the last-activated profile on launch. The main process persists it
   // in ~/.hermes/active_profile (via `hermes profile use`), so the desktop
   // should reopen on that profile rather than always resetting to "default".
@@ -1134,6 +1194,8 @@ function Layout({
                   open={!sidebarCollapsed}
                   connectionId={connectionId}
                   activeProfile={activeProfile}
+                  degraded={remoteDegraded}
+                  resyncNonce={remoteResyncNonce}
                   currentSessionId={currentSessionId}
                   loadingSessionIds={loadingSessionIds}
                   approvalSessionIds={approvalSessionIds}
@@ -1171,6 +1233,44 @@ function Layout({
           </div>
 
           <div className="sidebar-footer">
+            {/* Remote connection lost (auth or network): the sidebar shows no
+                stale remote data and the user gets a one-click re-login /
+                retry affordance next to the update banner (backlog #74/#75). */}
+            {remoteDegraded && (
+              <div
+                className={`sidebar-remote-health ${remoteHealth}`}
+                role="alert"
+              >
+                <span className="sidebar-remote-health-text">
+                  {remoteHealth === "authLost"
+                    ? t("navigation.remoteAuthLost")
+                    : t("navigation.remoteUnreachable")}
+                </span>
+                {remoteHealth === "authLost" ? (
+                  <button
+                    type="button"
+                    className="sidebar-remote-health-btn"
+                    onClick={handleRemoteRelogin}
+                  >
+                    {t("navigation.remoteRelogin")}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="sidebar-remote-health-btn"
+                    onClick={() => {
+                      // Any click refreshes the health through a cheap REST
+                      // probe; recovery flips the banner off via the event.
+                      void window.hermesAPI
+                        .listProjects(connectionId, activeProfile)
+                        .catch(() => undefined);
+                    }}
+                  >
+                    {t("navigation.remoteRetry")}
+                  </button>
+                )}
+              </div>
+            )}
             {/* Show an upgrade affordance at startup when GitHub has a newer
               release; it becomes a restart action once downloaded. */}
             {updateState && (
@@ -1252,7 +1352,7 @@ function Layout({
           )}
         </aside>
 
-        <main className="content">
+        <main className={`content${remoteDegraded ? " remote-degraded" : ""}`}>
           {/* Doubles as the window drag strip — keep it first so it owns the top
             band; the warning banner (if any) sits just below it. */}
           <ActiveSessionsBar

@@ -1,4 +1,5 @@
 import type { ConnectionConfig } from "./config";
+import { reportRemoteHealth, reportRemoteHealthOk } from "./remote-health";
 import {
   probeRemoteAuthMode,
   RemoteOAuthError,
@@ -76,15 +77,19 @@ export async function remoteDashboardRequestJson<T>(
         ? (await probeRemoteAuthMode(connection.remoteUrl)).authMode
         : connection.remoteAuthMode;
 
+    let result: T;
     if (authMode === "oauth") {
-      return (await requestRemoteOAuthJson(
+      result = (await requestRemoteOAuthJson(
         dashboardApiUrl(config, path),
         options,
       )) as T;
+    } else {
+      result = await remoteRequestJson<T>(config, path, options);
     }
-
-    return await remoteRequestJson<T>(config, path, options);
+    reportRemoteHealthOk(connection);
+    return result;
   } catch (error) {
+    reportRemoteHealth(connection, error);
     throw normalizeRemoteDashboardError(error);
   }
 }
