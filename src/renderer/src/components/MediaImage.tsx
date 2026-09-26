@@ -8,6 +8,7 @@ import {
   FileText,
   Eye,
   ChevronDown,
+  Layers,
 } from "lucide-react";
 import { useLightboxClose } from "../hooks/useLightboxClose";
 import type { MediaToken } from "../screens/Chat/mediaUtils";
@@ -318,6 +319,33 @@ export function VisionNote({
         />
       </button>
       {open && <div className="chat-vision-note-body">{description}</div>}
+    </div>
+  );
+}
+
+/** A collapsed card for the core's context-compaction handoff block. */
+export function CompactionNote({
+  summary,
+}: {
+  summary: string;
+}): React.JSX.Element {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="chat-vision-note chat-compaction-note">
+      <button
+        className="chat-vision-note-toggle"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <Layers size={13} />
+        <span>{t("chat.media.compactionSummary")}</span>
+        <ChevronDown
+          size={13}
+          className={`chat-vision-note-chevron${open ? " open" : ""}`}
+        />
+      </button>
+      {open && <div className="chat-vision-note-body">{summary}</div>}
     </div>
   );
 }

@@ -866,13 +866,38 @@ export function isSystemEventKind(value: unknown): value is SystemEventKind {
 }
 
 /**
+ * Collapse consecutive rows that are byte-identical transcripts of the same
+ * logical message (same role + content + timestamp). The server-side core
+ * can persist a message 2-3 times after context compaction or gateway
+ * restarts; without this the UI renders duplicate compaction blocks and
+ * repeated replies (issue #146). Timestamp equality keeps genuinely
+ * identical short messages (e.g. two "ok" replies) distinct in time.
+ */
+function dedupeConsecutiveRows(rows: RawMessageRow[]): RawMessageRow[] {
+  const out: RawMessageRow[] = [];
+  for (const r of rows) {
+    const prev = out[out.length - 1];
+    if (
+      prev &&
+      prev.role === r.role &&
+      (prev.content ?? "") === (r.content ?? "") &&
+      prev.timestamp === r.timestamp
+    ) {
+      continue;
+    }
+    out.push(r);
+  }
+  return out;
+}
+
+/**
  * Pure expansion of DB rows → renderer-facing HistoryItem list. Kept pure
  * (no I/O) so we can exercise the ordering and edge-case logic directly
  * without booting sqlite.
  */
 export function expandRowsToHistory(rows: RawMessageRow[]): HistoryItem[] {
   const items: HistoryItem[] = [];
-  for (const r of rows) {
+  for (const r of dedupeConsecutiveRows(rows)) {
     const decoded = decodeContent(r.content || "", r.id);
 
     if (r.role === "user") {

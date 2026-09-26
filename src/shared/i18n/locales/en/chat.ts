@@ -134,6 +134,7 @@ export default {
     saveAs: "Save as…",
     saveImage: "Save image",
     photoDescription: "What the agent saw",
+    compactionSummary: "Context summary (compacted turns)",
     photoShow: "Show description",
     photoHide: "Hide description",
     voiceMessage: "Voice message",

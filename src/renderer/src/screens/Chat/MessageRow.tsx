@@ -5,7 +5,7 @@ import ProfileAvatar from "../../components/common/ProfileAvatar";
 import { OrbLoader } from "../../components/OrbLoader";
 import { AgentMarkdown } from "../../components/AgentMarkdown";
 import { AttachmentChip } from "../../components/AttachmentChip";
-import { MediaSegmentView, VisionNote } from "../../components/MediaImage";
+import { MediaSegmentView, VisionNote, CompactionNote } from "../../components/MediaImage";
 import { useI18n } from "../../components/useI18n";
 import {
   parseMediaTokens,
@@ -297,6 +297,9 @@ export const MessageRow = memo(function MessageRow({
   if (isChatBubbleMessage(msg)) {
     const envelope = parseEnvelope(msg.content);
     if (envelope && envelope.suppressBubble) {
+      if (envelope.kind === "compaction") {
+        return <CompactionNote summary={envelope.detail || msg.content} />;
+      }
       return (
         <div className="chat-message chat-message-process-note">
           <span className="chat-process-note-headline">

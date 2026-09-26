@@ -148,7 +148,7 @@ describe("remote session REST bridge", () => {
           return;
         }
 
-        if (req.url === "/api/sessions/sess-rich/messages") {
+        if (req.url === "/api/sessions/sess-rich/messages?include_compacted=true") {
           res.end(
             JSON.stringify({
               session_id: "sess-rich",
@@ -214,7 +214,7 @@ describe("remote session REST bridge", () => {
           return;
         }
 
-        if (req.url === "/api/sessions/sess-image/messages") {
+        if (req.url === "/api/sessions/sess-image/messages?include_compacted=true") {
           res.end(
             JSON.stringify({
               session_id: "sess-image",
@@ -236,7 +236,7 @@ describe("remote session REST bridge", () => {
           return;
         }
 
-        if (req.url === "/api/sessions/sess-image-missing/messages") {
+        if (req.url === "/api/sessions/sess-image-missing/messages?include_compacted=true") {
           res.end(
             JSON.stringify({
               session_id: "sess-image-missing",
@@ -605,7 +605,7 @@ describe("remote session REST bridge", () => {
     const user = items[0];
 
     expect(requests.map((request) => request.url)).toEqual([
-      "/api/sessions/sess-image/messages",
+      "/api/sessions/sess-image/messages?include_compacted=true",
       "/api/media?path=%2Fopt%2Fdata%2Fimages%2Fduck.png",
     ]);
     expect(user).toMatchObject({
@@ -684,7 +684,7 @@ describe("remote session REST bridge", () => {
     expect(requests.map((request) => request.url)).toEqual([
       "/api/sessions/search?q=Thinking%20aloud",
       "/api/profiles/sessions?limit=75&offset=0&min_messages=0&archived=exclude&order=recent&exclude_sources=cron&profile=all",
-      "/api/sessions/sess-rich/messages",
+      "/api/sessions/sess-rich/messages?include_compacted=true",
     ]);
     expect(results).toEqual([
       {

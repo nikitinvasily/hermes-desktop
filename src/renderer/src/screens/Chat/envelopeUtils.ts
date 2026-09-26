@@ -25,6 +25,7 @@ export type EnvelopeKind =
   | "delegation" // [ASYNC DELEGATION …] (COMPLETE / BATCH COMPLETE / TASK FAILED)
   | "out-of-band" // [OUT-OF-BAND USER MESSAGE …] — real user text inside
   | "system" // [System: …] / [System note: …] without a display_kind
+  | "compaction" // [CONTEXT COMPACTION — …] handoff (issue #146)
   | "note"; // [SILENT] and unknown caps envelopes
 
 export interface EnvelopeSummary {
@@ -177,6 +178,19 @@ export function parseEnvelope(content: string): EnvelopeSummary | null {
         .replace(/\]$/, ""),
       meta: [],
       detail: "",
+      suppressBubble: true,
+    };
+  }
+
+  if (text.startsWith("[CONTEXT COMPACTION")) {
+    // Core's context-compaction handoff (issue #146): service prose that
+    // must never render as a bubble — collapsed summary card instead.
+    const nl = text.indexOf("\n");
+    return {
+      kind: "compaction",
+      headline: "context compaction summary",
+      meta: [],
+      detail: nl === -1 ? "" : text.slice(nl + 1).trim(),
       suppressBubble: true,
     };
   }
