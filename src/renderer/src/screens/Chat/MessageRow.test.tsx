@@ -1,7 +1,16 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+// @ts-expect-error Node built-ins are available to Vitest, but intentionally
+// excluded from the renderer application's type environment.
+import { readFileSync } from "node:fs";
+// @ts-expect-error See the Vitest-only Node import above.
+import { join } from "node:path";
 import { I18nProvider } from "../../components/I18nProvider";
 import { APPROVAL_RE, MessageRow } from "./MessageRow";
+
+declare const __dirname: string;
+
+const mainCss = readFileSync(join(__dirname, "../../assets/main.css"), "utf8");
 
 const copyToClipboard = vi.fn(async () => undefined);
 
@@ -49,6 +58,42 @@ describe("MessageRow user Markdown", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /copy/i }));
     expect(copyToClipboard).toHaveBeenCalledWith(source);
+  });
+
+  it("renders user-bubble lists with visible markers (issue #142)", async () => {
+    // The bubble wrapper must carry the .chat-user-markdown class whose CSS
+    // block restores list-style (mirrors .chat-bubble-agent), so "- x" and
+    // "1. y" lines keep their bullets/numbers instead of collapsing.
+    render(
+      <I18nProvider>
+        <MessageRow
+          msg={{
+            id: "user-lists",
+            role: "user",
+            content:
+              "- первый пункт\n- второй пункт\n\n1. шаг один\n2. шаг два",
+          }}
+          isLast
+          isLoading={false}
+          onApprove={vi.fn()}
+          onDeny={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+
+    const wrapper = document.querySelector(".chat-user-markdown");
+    expect(wrapper).not.toBeNull();
+    const ul = wrapper?.querySelector("ul");
+    const ol = wrapper?.querySelector("ol");
+    expect(ul?.querySelectorAll("li")).toHaveLength(2);
+    expect(ol?.querySelectorAll("li")).toHaveLength(2);
+
+    // CSS contract: the stylesheet must restore list markers inside user
+    // bubbles (regression guard for the swallowed-marker bug).
+    const blockMatch = mainCss.match(
+      /\.chat-user-markdown ul,\s*\.chat-user-markdown ol\s*\{[^}]*list-style:\s*revert/,
+    );
+    expect(blockMatch).not.toBeNull();
   });
 });
 

@@ -5686,6 +5686,28 @@ body:has(.shell-vibrant),
   text-decoration: underline;
 }
 
+/* User bubbles go through the same markdown pipeline as agent bubbles, so
+   "- item" / "1. item" lines parse into ul/ol — without these rules the
+   global list-style resets swallow the markers entirely (issue #142).
+   Mirrors the .chat-bubble-agent list block. */
+.chat-user-markdown ul,
+.chat-user-markdown ol {
+  margin: 0.5em 0 0.75em 1.5em;
+  padding: 0;
+  list-style: revert;
+}
+.chat-user-markdown li {
+  margin: 0 0 2px;
+  padding: 0;
+}
+.chat-user-markdown li > p {
+  margin: 0;
+}
+.chat-user-markdown li > ul,
+.chat-user-markdown li > ol {
+  margin: 2px 0 2px 16px;
+}
+
 .chat-bubble-agent {
   background: var(--agent-bubble);
   color: var(--agent-bubble-text);
