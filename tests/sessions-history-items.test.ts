@@ -195,6 +195,16 @@ describe("expandRowsToHistory", () => {
     expect(kinds(items)).toEqual(["assistant", "assistant"]);
   });
 
+  it("orders rows chronologically regardless of row id (compactor rewrites)", () => {
+    // The compactor can leave the surviving copy of a user row with a LATER
+    // id than the assistant replies that answered it (issue #146).
+    const items = expandRowsToHistory([
+      row({ id: 10, role: "assistant", content: "answer", timestamp: 200 }),
+      row({ id: 11, role: "user", content: "question", timestamp: 100 }),
+    ]);
+    expect(kinds(items)).toEqual(["user", "assistant"]);
+  });
+
   it("emits reasoning *before* the assistant bubble", () => {
     const items = expandRowsToHistory([
       row({ id: 1, role: "user", content: "?", timestamp: 1 }),

@@ -7292,14 +7292,6 @@ body:has(.shell-vibrant),
   max-width: 480px;
 }
 
-/* Compaction handoff card reuses the vision-note skeleton; keep it modest
- * width so a long summary body does not span the whole chat column. */
-.chat-compaction-note .chat-vision-note-body {
-  max-height: 320px;
-  overflow-y: auto;
-  white-space: pre-wrap;
-}
-
 .chat-vision-note-toggle {
   display: flex;
   align-items: center;

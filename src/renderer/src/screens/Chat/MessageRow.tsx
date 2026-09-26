@@ -5,7 +5,7 @@ import ProfileAvatar from "../../components/common/ProfileAvatar";
 import { OrbLoader } from "../../components/OrbLoader";
 import { AgentMarkdown } from "../../components/AgentMarkdown";
 import { AttachmentChip } from "../../components/AttachmentChip";
-import { MediaSegmentView, VisionNote, CompactionNote } from "../../components/MediaImage";
+import { MediaSegmentView, VisionNote } from "../../components/MediaImage";
 import { useI18n } from "../../components/useI18n";
 import {
   parseMediaTokens,
@@ -212,7 +212,7 @@ export const MessageRow = memo(function MessageRow({
   onDeny,
   showAvatar = true,
   agent,
-}: MessageRowProps): React.JSX.Element {
+}: MessageRowProps): React.JSX.Element | null {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
 
@@ -298,7 +298,9 @@ export const MessageRow = memo(function MessageRow({
     const envelope = parseEnvelope(msg.content);
     if (envelope && envelope.suppressBubble) {
       if (envelope.kind === "compaction") {
-        return <CompactionNote summary={envelope.detail || msg.content} />;
+        // Context-compaction handoff (issue #146): internal service prose,
+        // hidden entirely — the surrounding transcript is the display.
+        return null;
       }
       return (
         <div className="chat-message chat-message-process-note">
