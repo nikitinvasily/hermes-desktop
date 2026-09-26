@@ -32,6 +32,7 @@ vi.mock("../../env", async (importOriginal) => ({
 
 // window.hermesAPI is injected by preload; provide the subset the sidebar uses.
 beforeEach(() => {
+  window.localStorage.clear();
   Object.defineProperty(window, "hermesAPI", {
     configurable: true,
     writable: true,
@@ -115,6 +116,8 @@ function renderSidebar(
       open
       connectionId="connection-main"
       activeProfile="default"
+      degraded={false}
+      resyncNonce={0}
       currentSessionId={null}
       loadingSessionIds={new Set()}
       approvalSessionIds={new Set()}
@@ -248,6 +251,8 @@ describe("SidebarRecentSessions projects-only groups (issue #68)", () => {
         open
         connectionId="connection-main"
         activeProfile="default"
+        degraded={false}
+        resyncNonce={0}
         currentSessionId={null}
         loadingSessionIds={new Set()}
         approvalSessionIds={new Set()}
@@ -276,6 +281,8 @@ describe("SidebarRecentSessions projects-only groups (issue #68)", () => {
         open
         connectionId="connection-main"
         activeProfile="default"
+        degraded={false}
+        resyncNonce={0}
         currentSessionId={null}
         loadingSessionIds={new Set()}
         approvalSessionIds={new Set()}
@@ -386,6 +393,8 @@ describe("SidebarRecentSessions ordering (issue #74)", () => {
         open
         connectionId="connection-main"
         activeProfile="default"
+        degraded={false}
+        resyncNonce={0}
         currentSessionId={null}
         loadingSessionIds={new Set()}
         approvalSessionIds={new Set()}
@@ -550,6 +559,8 @@ describe("SidebarRecentSessions delete vs the tree-derived groups (issue #80)", 
         open
         connectionId="connection-main"
         activeProfile="default"
+        degraded={false}
+        resyncNonce={0}
         currentSessionId={null}
         loadingSessionIds={new Set()}
         approvalSessionIds={new Set()}
@@ -619,6 +630,8 @@ describe("SidebarRecentSessions pending first-turn rows (issue #97 stage 2)", ()
         open
         connectionId="connection-main"
         activeProfile="default"
+        degraded={false}
+        resyncNonce={0}
         currentSessionId={null}
         loadingSessionIds={new Set()}
         approvalSessionIds={new Set()}
@@ -663,6 +676,8 @@ describe("SidebarRecentSessions pending first-turn rows (issue #97 stage 2)", ()
         open
         connectionId="connection-main"
         activeProfile="default"
+        degraded={false}
+        resyncNonce={0}
         currentSessionId={null}
         loadingSessionIds={new Set()}
         approvalSessionIds={new Set()}
@@ -694,6 +709,8 @@ describe("SidebarRecentSessions pending first-turn rows (issue #97 stage 2)", ()
         open
         connectionId="connection-main"
         activeProfile="default"
+        degraded={false}
+        resyncNonce={0}
         currentSessionId="session-real"
         loadingSessionIds={new Set()}
         approvalSessionIds={new Set()}
@@ -722,6 +739,8 @@ describe("SidebarRecentSessions pending first-turn rows (issue #97 stage 2)", ()
         open
         connectionId="connection-main"
         activeProfile="default"
+        degraded={false}
+        resyncNonce={0}
         currentSessionId={null}
         loadingSessionIds={new Set()}
         approvalSessionIds={new Set()}
@@ -761,6 +780,8 @@ describe("SidebarRecentSessions pending first-turn rows (issue #97 stage 2)", ()
         open
         connectionId="connection-main"
         activeProfile="default"
+        degraded={false}
+        resyncNonce={0}
         currentSessionId={null}
         loadingSessionIds={new Set()}
         approvalSessionIds={new Set()}
@@ -882,6 +903,8 @@ describe("SidebarRecentSessions state bullets", () => {
         open
         connectionId="connection-main"
         activeProfile="default"
+        degraded={false}
+        resyncNonce={0}
         currentSessionId={null}
         loadingSessionIds={new Set()}
         approvalSessionIds={new Set()}
@@ -930,6 +953,8 @@ describe("SidebarRecentSessions state bullets", () => {
         open
         connectionId="connection-main"
         activeProfile="default"
+        degraded={false}
+        resyncNonce={0}
         currentSessionId={null}
         loadingSessionIds={new Set()}
         approvalSessionIds={new Set(["session-approval"])}
@@ -973,6 +998,8 @@ describe("SidebarRecentSessions state bullets", () => {
         open
         connectionId="connection-main"
         activeProfile="default"
+        degraded={false}
+        resyncNonce={0}
         currentSessionId={null}
         loadingSessionIds={new Set(["session-running"])}
         approvalSessionIds={new Set()}
@@ -1017,6 +1044,8 @@ describe("SidebarRecentSessions state bullets", () => {
         open
         connectionId="connection-main"
         activeProfile="default"
+        degraded={false}
+        resyncNonce={0}
         currentSessionId={null}
         loadingSessionIds={new Set(["session-approval-running"])}
         approvalSessionIds={new Set(["session-approval-running"])}
@@ -1035,5 +1064,93 @@ describe("SidebarRecentSessions state bullets", () => {
     expect(dot?.getAttribute("class")).not.toContain(
       "sidebar-recent-session-spinner",
     );
+  });
+});
+
+describe("remote connection health (backlog #74/#75)", () => {
+  const chatsToggle = (): HTMLElement | null =>
+    [...document.querySelectorAll(".sidebar-recent-section-toggle")].find((b) =>
+      b.textContent?.includes("navigation.chats"),
+    ) as HTMLElement | null;
+
+  test("degraded clears stale rows and the sidebar renders its empty state", async () => {
+    const { rerender } = render(
+      <SidebarRecentSessions
+        open
+        connectionId="connection-main"
+        activeProfile="default"
+        degraded={false}
+        resyncNonce={0}
+        currentSessionId={null}
+        loadingSessionIds={new Set()}
+        approvalSessionIds={new Set()}
+        resumingSessionId={null}
+        onSelect={vi.fn()}
+        onSessionDeleted={vi.fn()}
+        scrollRootRef={{ current: null }}
+      />,
+    );
+    await screen.findByText("Project chat");
+    rerender(
+      <SidebarRecentSessions
+        open
+        connectionId="connection-main"
+        activeProfile="default"
+        degraded
+        resyncNonce={0}
+        currentSessionId={null}
+        loadingSessionIds={new Set()}
+        approvalSessionIds={new Set()}
+        resumingSessionId={null}
+        onSelect={vi.fn()}
+        onSessionDeleted={vi.fn()}
+        scrollRootRef={{ current: null }}
+      />,
+    );
+    expect(screen.queryByText("Project chat")).toBeNull();
+    expect(screen.queryByText("Loose chat")).toBeNull();
+  });
+
+  test("collapsed Chats stays collapsed across a forced resync (resyncNonce)", async () => {
+    localStorage.setItem("hermes.sidebar.chatsOpen", "false");
+    try {
+      const { rerender } = render(
+        <SidebarRecentSessions
+          open
+          connectionId="connection-main"
+          activeProfile="default"
+          degraded={false}
+          resyncNonce={0}
+          currentSessionId={null}
+          loadingSessionIds={new Set()}
+          approvalSessionIds={new Set()}
+          resumingSessionId={null}
+          onSelect={vi.fn()}
+          onSessionDeleted={vi.fn()}
+          scrollRootRef={{ current: null }}
+        />,
+      );
+      await screen.findByText("Project chat");
+      rerender(
+        <SidebarRecentSessions
+          open
+          connectionId="connection-main"
+          activeProfile="default"
+          degraded={false}
+          resyncNonce={1}
+          currentSessionId={null}
+          loadingSessionIds={new Set()}
+          approvalSessionIds={new Set()}
+          resumingSessionId={null}
+          onSelect={vi.fn()}
+          onSessionDeleted={vi.fn()}
+          scrollRootRef={{ current: null }}
+        />,
+      );
+      await screen.findByText("Project chat");
+      expect(chatsToggle()?.getAttribute("aria-expanded")).toBe("false");
+    } finally {
+      localStorage.removeItem("hermes.sidebar.chatsOpen");
+    }
   });
 });

@@ -68,10 +68,7 @@ interface RecentSession {
 /** Non-desktop channel icons (issue #140): shown in place of the neutral
  * gray bullet; state bullets (approval/spinner/unread/pin) keep priority.
  * Keep in sync with channelSourceLabel below. */
-const CHANNEL_ICONS: Record<
-  string,
-  { Icon: typeof Send; label: string }
-> = {
+const CHANNEL_ICONS: Record<string, { Icon: typeof Send; label: string }> = {
   telegram: { Icon: Send, label: "Telegram" },
   cron: { Icon: Clock, label: "Scheduler" },
   api: { Icon: Plug, label: "API" },
@@ -232,6 +229,8 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   open,
   connectionId,
   activeProfile,
+  degraded = false,
+  resyncNonce = 0,
   currentSessionId,
   loadingSessionIds,
   approvalSessionIds,
@@ -249,6 +248,13 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   connectionId: string;
   /** Active profile — the list is per-profile, so switching forces a reload. */
   activeProfile: string;
+  /** Remote connection is down (auth or network): render the empty state
+   * instead of a stale cached list (backlog #74/#75). */
+  degraded: boolean;
+  /** Bumped by Layout when remote health returns to ok — forces a full
+   * resync of sessions AND projects from the server, restoring group
+   * membership with the persisted disclosure state. */
+  resyncNonce: number;
   currentSessionId: string | null;
   /** Session ids of every run currently generating (multiple run at once). */
   loadingSessionIds: Set<string>;
@@ -629,6 +635,18 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     if (open) void refresh();
   }, [open, currentSessionId, refresh]);
 
+  // While the remote connection is degraded, drop the stale cached rows: the
+  // sidebar renders its empty state instead of "chats visible, projects gone"
+  // partial data (backlog #75). Recovery repopulates via the resync above.
+  useEffect(() => {
+    if (degraded) {
+      setSessions([]);
+      setHasMore(false);
+      setProjects(null);
+      setProjectGroupSessions({});
+    }
+  }, [degraded]);
+
   // Switching agent points the list at a different profile's DB. Force a
   // reload immediately (bypassing the throttle) so the list isn't stale.
   const prevProfileRef = useRef(activeProfile);
@@ -743,6 +761,15 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     const timer = setInterval(() => void refreshProjects(), RECENT_REFRESH_MS);
     return () => clearInterval(timer);
   }, [open, refreshProjects]);
+
+  // Remote health went back to ok (backlog #74/#75): force a FULL resync —
+  // sessions past the throttle AND the projects tree, so groups, names, and
+  // disclosure state are rebuilt from fresh server data.
+  useEffect(() => {
+    if (!open || resyncNonce === 0) return;
+    void refresh(true);
+    void refreshProjects();
+  }, [open, refresh, refreshProjects, resyncNonce]);
 
   const handleProjectMutate = useCallback(
     async (
@@ -1315,9 +1342,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     // gray bullet; state bullets above keep their priority.
     const channel = s.source ? CHANNEL_ICONS[s.source] : undefined;
     const channelLabel = channelSourceLabel(s.source);
-    const rowTitle = channelLabel
-      ? `${title} (via ${channelLabel})`
-      : title;
+    const rowTitle = channelLabel ? `${title} (via ${channelLabel})` : title;
 
     if (editing) {
       return (

@@ -418,6 +418,12 @@ interface HermesAPI {
   onConnectionConfigChanged: (
     callback: (config: PublicConnectionConfig) => void,
   ) => () => void;
+  onRemoteHealthChanged: (
+    callback: (event: {
+      remoteUrl: string | null;
+      state: "ok" | "authLost" | "unreachable";
+    }) => void,
+  ) => () => void;
   setSshConfig: (
     host: string,
     port: number,

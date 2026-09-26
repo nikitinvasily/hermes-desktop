@@ -4263,6 +4263,55 @@ body:has(.shell-vibrant),
   margin-bottom: 0;
 }
 
+/* Remote connection lost banner (backlog #74/#75): sits above the update
+   affordance in the sidebar footer. Reuses palette tokens — no new colors. */
+.sidebar-remote-health {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--approval-pending, #f59e0b);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--text-primary);
+}
+
+.sidebar-remote-health-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-remote-health-btn {
+  flex-shrink: 0;
+  background: var(--accent);
+  border: none;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.sidebar-collapsed .sidebar-remote-health {
+  width: 40px;
+  height: 40px;
+  justify-content: center;
+  padding: 0;
+  margin-bottom: 0;
+}
+
+.sidebar-collapsed .sidebar-remote-health-text,
+.sidebar-collapsed .sidebar-remote-health-btn {
+  display: none;
+}
+
 .sidebar-collapsed .sidebar-update-btn span {
   display: none;
 }
@@ -4328,6 +4377,20 @@ body:has(.shell-vibrant),
   /* Hairline seam so the content pane reads as a distinct material layer above
      the (darker / translucent) sidebar rather than one flat black field. */
   border-inline-start: 1px solid var(--border);
+  position: relative;
+}
+
+/* Remote connection lost (backlog #75): every remote data screen is dimmed
+   and input-blocked while the connection is down, so stale server data can
+   not be interacted with. The sidebar banner carries the recovery action. */
+.content.remote-degraded::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--bg-primary) 55%, transparent);
+  backdrop-filter: saturate(0.6);
+  z-index: 60;
+  pointer-events: auto;
 }
 
 /* ========================================================================

@@ -442,6 +442,23 @@ const hermesAPI = {
       ipcRenderer.removeListener("connection-config-changed", handler);
   },
 
+  onRemoteHealthChanged: (
+    callback: (event: {
+      remoteUrl: string | null;
+      state: "ok" | "authLost" | "unreachable";
+    }) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      event: {
+        remoteUrl: string | null;
+        state: "ok" | "authLost" | "unreachable";
+      },
+    ): void => callback(event);
+    ipcRenderer.on("remote-health-changed", handler);
+    return () => ipcRenderer.removeListener("remote-health-changed", handler);
+  },
+
   setSshConfig: (
     host: string,
     port: number,

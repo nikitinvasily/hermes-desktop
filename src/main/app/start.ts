@@ -16,6 +16,10 @@ import {
   isAllowedWebviewUrl,
 } from "../security";
 import { registerIpcHandlers } from "../ipc/register";
+import {
+  broadcastRemoteHealthToRenderer,
+  onRemoteHealthChanged,
+} from "../remote-health";
 import { setGatewayPromptParent } from "../gatewayPrompt";
 import { showChatContextMenu } from "./context-menu";
 import { buildMenu } from "./menu";
@@ -46,6 +50,11 @@ export function startMainProcess(): void {
     notifyCustomProvidersChanged,
     openExternalUrl,
   });
+
+  // Remote connection health: every remote dashboard REST call reports
+  // through the boundary (remote-api.ts); relay the verdict to the renderer
+  // so the UI can degrade loudly instead of silently showing stale data.
+  onRemoteHealthChanged(broadcastRemoteHealthToRenderer);
 
   setupUpdater({ getMainWindow: () => mainWindow });
 
