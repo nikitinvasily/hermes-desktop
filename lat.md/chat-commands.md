@@ -132,6 +132,26 @@ Dashboard regression tests simulate expired requests and lost acknowledgments wi
 
 WebSocket transport tests verify opaque renderer IDs map to gateway IDs, and missing IDs, disconnects, or lost prompt acknowledgments stop the turn without replaying it.
 
+### Server request advertisement
+
+The client must announce itself before the backend will send server→client requests.
+
+Newer agent cores deliver approvals, clarify questions and sudo/secret prompts as server→client JSON-RPC requests instead of `*.request` events. [[src/main/hermes.ts]] advertises `client.capabilities {server_requests: true}` once per WebSocket generation; without it the backend treats the app as an old build and withdraws every approval with "the attached client cannot answer approval requests", which the agent relays as a scanner block. The legacy `approval.request` / `clarify.request` event branches remain for older cores.
+
+### Approval server requests
+
+A server `approval` request frame reuses the renderer path and is answered with a JSON-RPC result frame.
+
+A server `approval` request frame (both `id` and `method` present) is routed through the same [[src/main/hermes.ts#registerPendingApproval]] renderer path as the legacy event; the user's choice is answered with a JSON-RPC result frame `{choice, all}` on the request id — no separate `approval.respond` RPC. A backend `request.cancel` notification (timeout, answered elsewhere, interrupt) tears down the matching card through a server-request-id → renderer-id map so a late click cannot answer a dead prompt.
+
+### Request cancel teardown
+
+Transport tests verify a withdrawn server request clears the pending approval card, making any later resolve attempt fail.
+
+### Clarify server requests
+
+A server `clarify` request resolves with `{answer}` when the renderer's clarify-respond IPC path fires the shared pendingClarify resolver; `sudo`/`secret` requests are answered `{value}` from the hardened askpass modal (vault-first for secrets).
+
 ### Runs approval fail-closed
 
 Runs transport tests verify approval events stop the original run with its captured credentials, never POST an approval, and never replay through chat completions.

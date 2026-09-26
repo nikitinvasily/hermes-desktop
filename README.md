@@ -31,6 +31,8 @@ Changes in this fork that are **not** in upstream.
 
 ### Fixes
 
+- **Command approvals work again after an agent update** — newer agent cores deliver approvals (and clarify questions, sudo/secret prompts) as direct requests to the app instead of stream events; the app used to silently ignore them, so the agent reported every flagged command as blocked with no way to approve it. Approvals, clarify cards and password prompts now arrive and can be answered as before, and a prompt withdrawn by the agent (timeout, answered elsewhere) disappears from the chat instead of lingering.
+
 - **List markers survive in your own messages** — lines starting with `-` or `1.` in what you send keep their bullets and numbers in the chat bubble instead of collapsing into plain text.
 
 - **`/moa` works on remote connections** — running a prompt through the Mixture-of-Agents preset no longer fails with a "did not switch to <model>" error: the chat used to force its configured model back while the one-shot MoA turn was still in flight, killing it. The turn now runs and the configured model is restored afterwards, as designed.

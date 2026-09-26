@@ -1672,6 +1672,8 @@ export function useDashboardChatTransport({
           }
           const client: DashboardGatewayClient = new DashboardGatewayClient({
             onEvent: handleGatewayEvent,
+            onServerRequest: (method, params) =>
+              handleServerRequestRef.current(method, params),
             onClose: () => {
               if (clientRef.current === client) {
                 expirePendingClarifyRef.current(true);
@@ -2156,6 +2158,20 @@ export function useDashboardChatTransport({
               : message,
           ),
         );
+        // Resolve a server→client clarify request waiting on this card (newer
+        // cores deliver clarify as JSON-RPC requests, not events).
+        const serverEntry = serverClarifyResolversRef.current.find(
+          (entry) => entry.requestId === requestId,
+        );
+        if (serverEntry) {
+          serverClarifyResolversRef.current =
+            serverClarifyResolversRef.current.filter(
+              (candidate) => candidate !== serverEntry,
+            );
+          serverEntry.resolve(
+            qid ? { answers: { [qid]: answer } } : { answer },
+          );
+        }
         return true;
       } catch {
         if (pendingClarifyRef.current === pending) {
@@ -2416,6 +2432,18 @@ export function useDashboardChatTransport({
           return false;
         }
         setPendingApprovals(pendingApprovalsRef.current.slice(1));
+        // Resolve a server→client approval request waiting on this card (newer
+        // cores deliver approvals as JSON-RPC requests, not events).
+        const serverEntry = serverApprovalResolversRef.current.find(
+          (entry) => entry.requestId === pending.requestId,
+        );
+        if (serverEntry) {
+          serverApprovalResolversRef.current =
+            serverApprovalResolversRef.current.filter(
+              (candidate) => candidate !== serverEntry,
+            );
+          serverEntry.resolve({ choice, all: false });
+        }
         return true;
       } catch {
         return false;
@@ -2614,6 +2642,95 @@ export function useDashboardChatTransport({
     },
     [],
   );
+
+  // Server→client requests (approval, clarify, sudo/secret) from a NEWER
+  // agent core, which replaced the old `*.request` events. The renderer-side
+  // answer path reuses respondApproval/respondClarify: their RPC round-trips
+  // (`approval.respond` / `clarify.respond`) also resolve the backend's open
+  // server request, so the promise resolves when the user answers the card.
+  const handleServerRequest = useCallback(
+    (
+      method: string,
+      params: Record<string, unknown>,
+    ):
+      | Record<string, unknown>
+      | Promise<Record<string, unknown> | void>
+      | false => {
+      if (method === "approval") {
+        // Surface the card through the same event pipeline the legacy
+        // approval.request event used, then wait for the user's answer.
+        const requestId =
+          typeof params.request_id === "string"
+            ? params.request_id
+            : `server-approval-${++approvalNonceRef.current}`;
+        handleGatewayEvent({
+          type: "approval.request",
+          session_id:
+            typeof params.session_id === "string"
+              ? params.session_id
+              : runtimeSessionIdRef.current || undefined,
+          payload: { ...params, request_id: requestId },
+        });
+        return new Promise<Record<string, unknown> | void>((resolve) => {
+          serverApprovalResolversRef.current.push({
+            requestId,
+            resolve,
+          });
+        });
+      }
+      if (method === "clarify") {
+        const requestId =
+          typeof params.request_id === "string" && params.request_id
+            ? params.request_id
+            : `server-clarify-${Date.now()}`;
+        handleGatewayEvent({
+          type: "clarify.request",
+          session_id:
+            typeof params.session_id === "string"
+              ? params.session_id
+              : runtimeSessionIdRef.current || undefined,
+          payload: {
+            ...params,
+            request_id: requestId,
+          },
+        });
+        return new Promise<Record<string, unknown> | void>((resolve) => {
+          serverClarifyResolversRef.current.push({ requestId, resolve });
+        });
+      }
+      // sudo / secret and other one-string prompts have no chat UI here;
+      // declining lets the backend withdraw them immediately rather than
+      // block the turn for the whole deadline.
+      return false;
+    },
+    [handleGatewayEvent],
+  );
+  const handleServerRequestRef = useRef(handleServerRequest);
+  handleServerRequestRef.current = handleServerRequest;
+  // Pending server-request answers, resolved by respondApproval/respondClarify
+  // when the user answers the card.
+  const serverApprovalResolversRef = useRef<
+    Array<{
+      requestId: string;
+      resolve: (
+        value:
+          | Record<string, unknown>
+          | void
+          | PromiseLike<Record<string, unknown> | void>,
+      ) => void;
+    }>
+  >([]);
+  const serverClarifyResolversRef = useRef<
+    Array<{
+      requestId: string;
+      resolve: (
+        value:
+          | Record<string, unknown>
+          | void
+          | PromiseLike<Record<string, unknown> | void>,
+      ) => void;
+    }>
+  >([]);
 
   return {
     abort,
