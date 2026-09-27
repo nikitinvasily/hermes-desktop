@@ -5,12 +5,28 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // remotes call and how they normalize responses — the IPC contract the
 // register.ts remote branches rely on (issue #51).
 
-const { remoteDashboardRequestJson, remoteGetHermesHome } = vi.hoisted(() => ({
-  remoteDashboardRequestJson: vi.fn(),
-  remoteGetHermesHome: vi.fn(),
-}));
+const { remoteDashboardRequestJson, remoteGetHermesHome, MockRemoteDashboardApiError } = vi.hoisted(() => {
+  class MockRemoteDashboardApiError extends Error {
+    readonly unsupported: boolean;
+    constructor(
+      message: string,
+      readonly statusCode?: number,
+    ) {
+      super(message);
+      this.unsupported = statusCode === 404;
+    }
+  }
+  return {
+    remoteDashboardRequestJson: vi.fn(),
+    remoteGetHermesHome: vi.fn(),
+    MockRemoteDashboardApiError,
+  };
+});
 
-vi.mock("./remote-api", () => ({ remoteDashboardRequestJson }));
+vi.mock("./remote-api", () => ({
+  remoteDashboardRequestJson,
+  RemoteDashboardApiError: MockRemoteDashboardApiError,
+}));
 vi.mock("./remote-sessions", () => ({ remoteRequestJson: vi.fn() }));
 vi.mock("./remote-metadata", () => ({ remoteGetHermesHome }));
 
@@ -267,30 +283,36 @@ describe("remote profiles", () => {
 });
 
 describe("remote config/env", () => {
-  it("reads a dotted key from the raw config.yaml", async () => {
-    fsText(
-      `${HOME}/config.yaml`,
-      "model:\n  provider: zai\n  default: glm-5.3\n",
+  it("reads a dotted key via GET /api/config?include_defaults=false", async () => {
+    remoteDashboardRequestJson.mockImplementation(
+      async (_c: unknown, path: string) => {
+        if (path.startsWith("/api/config")) {
+          expect(path).toContain("include_defaults=false");
+          return {
+            model: { provider: "zai", default: "glm-5.3" },
+            agent: { reasoning_effort: "medium" },
+          };
+        }
+        throw new Error(`unexpected route: ${path}`);
+      },
     );
     await expect(
       remoteGetConfigValue(remoteConnection(), "model.provider"),
     ).resolves.toBe("zai");
+    await expect(
+      remoteGetConfigValue(remoteConnection(), "agent.reasoning_effort"),
+    ).resolves.toBe("medium");
+    await expect(
+      remoteGetConfigValue(remoteConnection(), "agent.missing_key"),
+    ).resolves.toBe(null);
   });
 
-  it("falls back to /api/profiles when status omits hermes_home (gated bind)", async () => {
-    // A gated dashboard deliberately omits hermes_home from the public
-    // /api/status payload; the settings home must come from the authenticated
-    // profiles router instead (issue #53).
-    remoteGetHermesHome.mockResolvedValue("");
+  it("falls back to the fs YAML splice when /api/config is a 404", async () => {
     remoteDashboardRequestJson.mockImplementation(
       async (_c: unknown, path: string) => {
-        if (path === "/api/profiles")
-          return {
-            profiles: [
-              { name: "other", path: "/home/hermes/.hermes/profiles/other" },
-              { name: "default", path: HOME, is_default: true },
-            ],
-          };
+        if (path.startsWith("/api/config")) {
+          throw new MockRemoteDashboardApiError("Not Found", 404);
+        }
         if (path.startsWith("/api/fs/read-text")) {
           if (path.includes(encodeURIComponent(`${HOME}/config.yaml`)))
             return { text: "agent:\n  reasoning_effort: medium\n" };
@@ -302,17 +324,29 @@ describe("remote config/env", () => {
     await expect(
       remoteGetConfigValue(remoteConnection(), "agent.reasoning_effort"),
     ).resolves.toBe("medium");
-    // The fallback home is cached: a second read must not re-probe profiles.
-    remoteDashboardRequestJson.mockClear();
-    await expect(
-      remoteGetConfigValue(remoteConnection(), "agent.reasoning_effort"),
-    ).resolves.toBe("medium");
-    expect(remoteDashboardRequestJson).not.toHaveBeenCalledWith(
-      expect.anything(),
-      "/api/profiles",
-      expect.anything(),
-      expect.anything(),
+  });
+
+  it("PUTs a single nested key to /api/config (deep-merge write)", async () => {
+    remoteDashboardRequestJson.mockImplementation(
+      async (_c: unknown, path: string, options: { method?: string; body?: unknown }) => {
+        if (path === "/api/config" && options.method === "PUT") {
+          expect(options.body).toEqual({
+            config: { agent: { reasoning_effort: "high" } },
+            profile: null,
+          });
+          return { ok: true };
+        }
+        throw new Error(`unexpected route: ${path}`);
+      },
     );
+    const { remoteSetConfigValue } = await import("./remote-settings");
+    await expect(
+      remoteSetConfigValue(
+        remoteConnection(),
+        "agent.reasoning_effort",
+        "high",
+      ),
+    ).resolves.toBeUndefined();
   });
 
   it("parses the remote .env like the local reader", async () => {

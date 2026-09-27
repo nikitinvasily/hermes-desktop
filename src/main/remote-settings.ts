@@ -1,5 +1,8 @@
 import type { ConnectionConfig } from "./config";
-import { remoteDashboardRequestJson } from "./remote-api";
+import {
+  remoteDashboardRequestJson,
+  RemoteDashboardApiError,
+} from "./remote-api";
 import { remoteRequestJson } from "./remote-sessions";
 import { remoteGetHermesHome } from "./remote-metadata";
 import { parseMemoryLimitsConfig } from "./memory-limits";
@@ -11,9 +14,10 @@ import type { MemoryProviderInfo } from "./installer";
 // corresponding IPC handlers fell through to LOCAL files in remote mode, so
 // connected to a remote dashboard the app showed (and mutated!) the Mac's own
 // ~/.hermes — issue #51. The dashboard serves the real state over REST:
-//   config   → GET/PUT /api/config (deep-merge PUT; dotted paths unsupported —
-//              use /api/config/raw for reads + /api/fs/write-text for surgical
-//              writes, mirroring the YAML-splicing the SSH path does)
+//   config   → GET /api/config?include_defaults=false + PUT /api/config
+//              (deep-merge single-key writes; falls back to the legacy
+//              /api/fs read-text/write-text YAML splice on 404 — gated
+//              dashboards denylist config.yaml on fs routes)
 //   env      → GET /api/env (redacted) / GET /api/fs/read-text on the .env
 //   memory   → /api/fs/read-text + /api/fs/write-text on MEMORY.md/USER.md
 //   soul     → GET/PUT /api/profiles/{n}/soul (falling back to /api/fs)
@@ -555,23 +559,74 @@ export async function remoteListProfiles(
 
 // ── config / env ────────────────────────────────────────────────────────────
 
+function configApiParams(profile?: string): string {
+  return profile
+    ? `?include_defaults=false&profile=${encodeURIComponent(profile)}`
+    : "?include_defaults=false";
+}
+
+// Navigate a dotted config path ("agent.reasoning_effort") through the parsed
+// config document; returns undefined when any segment is missing.
+function lookupDottedPath(doc: unknown, key: string): unknown {
+  let node: unknown = doc;
+  for (const segment of key.split(".")) {
+    if (typeof node !== "object" || node === null) return undefined;
+    node = (node as Record<string, unknown>)[segment];
+  }
+  return node;
+}
+
+function buildNestedValue(key: string, value: string): Record<string, unknown> {
+  const segments = key.split(".");
+  const root: Record<string, unknown> = {};
+  let node: Record<string, unknown> = root;
+  segments.forEach((segment, index) => {
+    if (index === segments.length - 1) node[segment] = value;
+    else {
+      const next: Record<string, unknown> = {};
+      node[segment] = next;
+      node = next;
+    }
+  });
+  return root;
+}
+
 export async function remoteGetConfigValue(
   conn: ConnectionConfig,
   key: string,
   profile?: string,
 ): Promise<string | null> {
-  // The dashboard config GET deep-normalizes; for a single dotted key the raw
-  // YAML + the same indentation-aware reader the local path uses is both
-  // simpler and consistent across dashboards.
-  const home = await remoteHome(conn, profile);
-  const content = await remoteReadTextFile(
-    conn,
-    remoteConfigFilePath(home, profile),
-    profile,
-  ).catch(() => "");
-  if (!content) return null;
-  const { getYamlPath } = await import("./yaml-path");
-  return getYamlPath(content, key);
+  // Preferred path: the dashboard's own /api/config (works on gated servers
+  // where /api/fs/* denylists config.yaml as a sensitive file). include_defaults
+  // false returns the raw saved document, so a present key is a user choice.
+  try {
+    const data = await remoteDashboardRequestJson<unknown>(
+      conn,
+      `/api/config${configApiParams(profile)}`,
+      {},
+      profile,
+    );
+    const value = lookupDottedPath(data, key);
+    if (value !== undefined) {
+      return typeof value === "string" ? value : String(value);
+    }
+    return null;
+  } catch (error) {
+    if (!(error instanceof RemoteDashboardApiError) || !error.unsupported) {
+      throw error;
+    }
+    // Older backend without /api/config: raw YAML + the indentation-aware
+    // reader (works only on un-gated fs routes).
+    const home = await remoteHome(conn, profile);
+    const content = await remoteReadTextFile(
+      conn,
+      remoteConfigFilePath(home, profile),
+      profile,
+    ).catch(() => "");
+    if (!content) return null;
+    const { getYamlPath } = await import("./yaml-path");
+    return getYamlPath(content, key);
+  }
 }
 
 export async function remoteSetConfigValue(
@@ -580,34 +635,52 @@ export async function remoteSetConfigValue(
   value: string,
   profile?: string,
 ): Promise<void> {
-  // Mirrors sshSetConfigValue's surgical YAML splice: read raw, splice the
-  // single value, write back. /api/config PUT deep-merges unknown nested keys
-  // dangerously for a single-key setter.
+  // Preferred path: PUT /api/config deep-merges the incoming document over
+  // disk, so sending just the changed key surgically updates it — the same
+  // guarantee the fs splice below tried to give, but on a route gated servers
+  // actually serve (config.yaml is in their fs denylist).
   if (/["\\\n\r]/.test(value)) {
     throw new Error(
       'Config value contains illegal characters: ", \\, or newline',
     );
   }
-  const home = await remoteHome(conn, profile);
-  const path = remoteConfigFilePath(home, profile);
-  const content = await remoteReadTextFile(conn, path, profile);
-  if (!content) return;
-  const { locateInYaml } = await import("./ssh-remote");
-  const hit = locateInYaml(content, key);
-  let updated: string;
-  if (hit) {
-    updated =
-      content.slice(0, hit.valueStart) +
-      `"${value}"` +
-      content.slice(hit.valueEnd);
-  } else if (!key.includes(".")) {
-    const sep = content.endsWith("\n") || content === "" ? "" : "\n";
-    updated = `${content}${sep}${key}: "${value}"\n`;
-  } else {
-    // Missing nested path — don't guess where to materialize a parent block.
+  try {
+    await remoteDashboardRequestJson(
+      conn,
+      `/api/config${profile ? `?profile=${encodeURIComponent(profile)}` : ""}`,
+      {
+        method: "PUT",
+        body: { config: buildNestedValue(key, value), profile: null },
+      },
+      profile,
+    );
     return;
+  } catch (error) {
+    if (!(error instanceof RemoteDashboardApiError) || !error.unsupported) {
+      throw error;
+    }
+    // Older backend without /api/config: surgical YAML splice via the fs API.
+    const home = await remoteHome(conn, profile);
+    const path = remoteConfigFilePath(home, profile);
+    const content = await remoteReadTextFile(conn, path, profile);
+    if (!content) return;
+    const { locateInYaml } = await import("./ssh-remote");
+    const hit = locateInYaml(content, key);
+    let updated: string;
+    if (hit) {
+      updated =
+        content.slice(0, hit.valueStart) +
+        `"${value}"` +
+        content.slice(hit.valueEnd);
+    } else if (!key.includes(".")) {
+      const sep = content.endsWith("\n") || content === "" ? "" : "\n";
+      updated = `${content}${sep}${key}: "${value}"\n`;
+    } else {
+      // Missing nested path — don't guess where to materialize a parent block.
+      return;
+    }
+    await remoteWriteTextFile(conn, path, updated, profile);
   }
-  await remoteWriteTextFile(conn, path, updated, profile);
 }
 
 export async function remoteReadEnv(

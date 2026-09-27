@@ -32,6 +32,7 @@ Changes in this fork that are **not** in upstream.
 
 ### Fixes
 
+- **Settings save over remote connections** — changing the reasoning level (or any single config value) while connected to a remote agent no longer fails with "Could not save": the app used to edit the server's config.yaml through the dashboard's file API, which security-hardened servers block, so the picker always fell back to Auto. Config reads and writes now use the dashboard's own settings API, which works on any server.
 - **Command approvals work again after an agent update** — newer agent cores deliver approvals (and clarify questions, sudo/secret prompts) as direct requests to the app instead of stream events; the app used to silently ignore them, so the agent reported every flagged command as blocked with no way to approve it. Approvals, clarify cards and password prompts now arrive and can be answered as before, and a prompt withdrawn by the agent (timeout, answered elsewhere) disappears from the chat instead of lingering.
 
 - **List markers survive in your own messages** — lines starting with `-` or `1.` in what you send keep their bullets and numbers in the chat bubble instead of collapsing into plain text.
