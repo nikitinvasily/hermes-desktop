@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronRight } from "../../assets/icons";
 import { useI18n } from "../../components/useI18n";
+import { useShowMore, ShowMoreRow } from "../../components/useShowMore";
 import type { TodoSnapshot } from "./todoState";
 
 /** Status marker for one todo item (matches the agent tool's statuses). */
@@ -26,6 +27,7 @@ export function TodoSection({
   onToggle: () => void;
 }): React.JSX.Element | null {
   const { t } = useI18n();
+  const list = useShowMore(snapshot?.items ?? [], { resetKey: open });
   if (!snapshot || snapshot.items.length === 0) return null;
   const openCount = snapshot.items.filter(
     (i) => i.status === "pending" || i.status === "in_progress",
@@ -53,7 +55,7 @@ export function TodoSection({
       </button>
       <div className={`sidebar-recent-collapse ${open ? "expanded" : ""}`}>
         <div className="sidebar-recent-collapse-inner">
-          {snapshot.items.map((item) => (
+          {list.visible.map((item) => (
             <div
               key={item.id}
               className={`chat-context-panel-todo chat-context-panel-todo--${item.status}`}
@@ -67,6 +69,11 @@ export function TodoSection({
               </span>
             </div>
           ))}
+          <ShowMoreRow
+            hiddenCount={list.hiddenCount}
+            onShowMore={list.showMore}
+            tabIndex={open ? 0 : -1}
+          />
         </div>
       </div>
     </div>

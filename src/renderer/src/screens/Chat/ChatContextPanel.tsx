@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight } from "../../assets/icons";
 import { useI18n } from "../../components/useI18n";
+import { useShowMore, ShowMoreRow } from "../../components/useShowMore";
 import { TodoSection } from "./TodoSection";
 import type { TodoSnapshot } from "./todoState";
 
@@ -25,6 +26,57 @@ export interface SubagentRow {
  * chevron, grid-rows collapse) and lists the delegate children of the ACTIVE
  * chat session by `parent_session_id` + `_delegate_from` (issue #122).
  */
+/**
+ * Subagent rows, capped at 5 with a chunked "Show more" (task #82). Own
+ * component so the cap hook reuses the panel's hooks block cleanly.
+ */
+function SubagentRows({
+  rows,
+  open,
+  onOpenSession,
+}: {
+  rows: SubagentRow[];
+  open: boolean;
+  onOpenSession: (sessionId: string) => void;
+}): React.JSX.Element {
+  const { t } = useI18n();
+  const list = useShowMore(rows, { resetKey: open });
+  return (
+    <>
+      {list.visible.map((row) => {
+        const running = row.endedAt == null && !row.died;
+        return (
+          <button
+            key={row.id}
+            type="button"
+            className="chat-context-panel-row"
+            onClick={() => onOpenSession(row.id)}
+            title={
+              row.died
+                ? `${row.title} (${t("navigation.subagentDied")})`
+                : row.title
+            }
+          >
+            {running ? (
+              <span className="sidebar-recent-session-spinner" aria-hidden />
+            ) : (
+              <span className="sidebar-recent-session-dot" aria-hidden />
+            )}
+            <span className="chat-context-panel-row-title">
+              {row.title || row.id.slice(-8)}
+            </span>
+          </button>
+        );
+      })}
+      <ShowMoreRow
+        hiddenCount={list.hiddenCount}
+        onShowMore={list.showMore}
+        tabIndex={open ? 0 : -1}
+      />
+    </>
+  );
+}
+
 export function ChatContextPanel({
   sessionId,
   connectionId,
@@ -118,37 +170,11 @@ export function ChatContextPanel({
             className={`sidebar-recent-collapse ${subagentsOpen ? "expanded" : ""}`}
           >
             <div className="sidebar-recent-collapse-inner">
-              {rows.map((row) => {
-                const running = row.endedAt == null && !row.died;
-                return (
-                  <button
-                    key={row.id}
-                    type="button"
-                    className="chat-context-panel-row"
-                    onClick={() => onOpenSession(row.id)}
-                    title={
-                      row.died
-                        ? `${row.title} (${t("navigation.subagentDied")})`
-                        : row.title
-                    }
-                  >
-                    {running ? (
-                      <span
-                        className="sidebar-recent-session-spinner"
-                        aria-hidden
-                      />
-                    ) : (
-                      <span
-                        className="sidebar-recent-session-dot"
-                        aria-hidden
-                      />
-                    )}
-                    <span className="chat-context-panel-row-title">
-                      {row.title || row.id.slice(-8)}
-                    </span>
-                  </button>
-                );
-              })}
+              <SubagentRows
+                rows={rows}
+                open={subagentsOpen}
+                onOpenSession={onOpenSession}
+              />
             </div>
           </div>
         </div>

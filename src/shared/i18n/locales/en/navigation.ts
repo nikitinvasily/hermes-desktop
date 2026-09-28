@@ -40,6 +40,7 @@ export default {
   showRecentSessions: "Show recent sessions",
   hideRecentSessions: "Hide recent sessions",
   showMore: "Show more",
+  showMoreCount: "Show more ({{count}})",
   sessionMenu: {
     options: "Options",
     pin: "Pin",

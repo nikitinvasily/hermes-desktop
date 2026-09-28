@@ -10,6 +10,11 @@ import {
 import { createPortal } from "react-dom";
 import { useI18n } from "../../components/useI18n";
 import {
+  useShowMore,
+  ShowMoreRow,
+  SHOW_MORE_CHUNK,
+} from "../../components/useShowMore";
+import {
   ArchiveBox,
   ChevronDown,
   ChevronRight,
@@ -225,6 +230,41 @@ function groupSessionsByWorkspace(sessions: RecentSession[]): {
  *  - while open: refresh on window focus and on a slow interval, throttled
  *  - closed (collapsed section or icon-only sidebar): zero work, renders null
  */
+/**
+ * Sessions inside one expanded project folder, capped at 5 with a chunked
+ * "Show more" (task #82). A separate component because the cap hook cannot
+ * live inside the parent's map over groups.
+ */
+function ProjectSessionList({
+  sessions,
+  projectOpen,
+  visible,
+  renderSessionButton,
+}: {
+  sessions: RecentSession[];
+  /** Folder disclosure state — collapsing rewinds the cap to the top 5. */
+  projectOpen: boolean;
+  /** Row-level visibility (parent's expanded && projectsOpen && projectOpen). */
+  visible: boolean;
+  renderSessionButton: (
+    s: RecentSession,
+    inProject: boolean,
+    visible: boolean,
+  ) => React.JSX.Element;
+}): React.JSX.Element {
+  const list = useShowMore(sessions, { resetKey: projectOpen });
+  return (
+    <>
+      {list.visible.map((s) => renderSessionButton(s, true, visible))}
+      <ShowMoreRow
+        hiddenCount={list.hiddenCount}
+        onShowMore={list.showMore}
+        tabIndex={visible ? 0 : -1}
+      />
+    </>
+  );
+}
+
 const SidebarRecentSessions = memo(function SidebarRecentSessions({
   open,
   connectionId,
@@ -1006,6 +1046,16 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     [projectGroups, displayName],
   );
 
+  // Task #82: every expanded sidebar list caps at 5 items with a chunked
+  // "Show more" row. resetKey=false (section collapsed) rewinds to the top 5,
+  // so reopening a section never starts mid-list. Per-project caps live with
+  // the project rows (one disclosure per folder path).
+  const pinnedList = useShowMore(pinnedSessions, { resetKey: pinnedOpen });
+  const projectsList = useShowMore(sortedProjectGroups, {
+    resetKey: projectsOpen,
+  });
+  const chatsList = useShowMore(chats, { resetKey: chatsOpen });
+
   // Choices for "Move to project": EVERY loaded agent project (zero-session
   // ones included — the same source as the Projects section, issue #36).
   // Projects-only (issue #68): session-derived folders with no project
@@ -1509,9 +1559,14 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
               }`}
             >
               <div className="sidebar-recent-collapse-inner">
-                {pinnedSessions.map((s) =>
+                {pinnedList.visible.map((s) =>
                   renderSessionButton(s, false, expanded && pinnedOpen, true),
                 )}
+                <ShowMoreRow
+                  hiddenCount={pinnedList.hiddenCount}
+                  onShowMore={pinnedList.showMore}
+                  tabIndex={expanded && pinnedOpen ? 0 : -1}
+                />
               </div>
             </div>
           </div>
@@ -1560,7 +1615,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
               }`}
             >
               <div className="sidebar-recent-collapse-inner">
-                {sortedProjectGroups.map((group) => {
+                {projectsList.visible.map((group) => {
                   const projectOpen = !closedProjectFolders.has(group.path);
                   const visible = expanded && projectsOpen && projectOpen;
                   // The agent-side project record for this group, when the
@@ -1670,9 +1725,12 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
                       >
                         <div className="sidebar-recent-collapse-inner">
                           {group.sessions.length > 0 ? (
-                            group.sessions.map((s) =>
-                              renderSessionButton(s, true, visible),
-                            )
+                            <ProjectSessionList
+                              sessions={group.sessions}
+                              projectOpen={projectOpen}
+                              visible={visible}
+                              renderSessionButton={renderSessionButton}
+                            />
                           ) : (
                             <div className="sidebar-recent-empty">
                               {t("navigation.projectDialog.noSessions")}
@@ -1743,9 +1801,20 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
           >
             <div className="sidebar-recent-collapse-inner">
               {chats.length > 0 ? (
-                chats.map((s) =>
-                  renderSessionButton(s, false, expanded && chatsOpen),
-                )
+                <>
+                  {chatsList.visible.map((s) =>
+                    renderSessionButton(s, false, expanded && chatsOpen),
+                  )}
+                  <ShowMoreRow
+                    hiddenCount={chatsList.hiddenCount}
+                    onShowMore={() => {
+                      chatsList.showMore();
+                      if (chatsList.hiddenCount <= SHOW_MORE_CHUNK)
+                        void loadNextPage();
+                    }}
+                    tabIndex={expanded && chatsOpen ? 0 : -1}
+                  />
+                </>
               ) : (
                 <div className="sidebar-recent-empty">
                   {t("navigation.noChats")}
