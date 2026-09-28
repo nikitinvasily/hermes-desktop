@@ -50,6 +50,12 @@ The inline list lazily loads cached sessions in pages as the user scrolls, so th
 
 [[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx]] fetches `RECENT_SESSIONS_PAGE_SIZE + 1` rows from the `sessions.json` cache to detect whether another page exists. [[src/renderer/src/screens/Layout/Layout.tsx#Layout]] passes the chat scroll container ref down, and the sidebar loads the next page when that container nears the bottom. The initial sync still refreshes `state.db`, then paints the first page.
 
+## Chunked Show more caps
+
+Every expandable list shows only its first 5 items plus a "Show more (N)" row; each click reveals the next chunk of 5, and collapsing the section rewinds the cap (task backlog #82).
+
+[[src/renderer/src/components/useShowMore.tsx]] owns the policy: `useShowMore` slices the items to the revealed count (clamped when the source list shrinks) and resets on `resetKey=false`, while `ShowMoreRow` renders the localized `navigation.showMoreCount` button (null when nothing is hidden). The cap applies to the sidebar's Pinned, Projects, per-project session, and Chats sections ([[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx]], per-project caps in the `ProjectSessionList` wrapper), and to the floating context panel's Subagents and TODO sections ([[src/renderer/src/screens/Chat/ChatContextPanel.tsx]], [[src/renderer/src/screens/Chat/TodoSection.tsx]]). Chats keeps its 30-item background paging: the external page load fires when the cap is about to exhaust the locally loaded rows, preserving the infinite-scroll behavior behind the 5-row cap. [[src/renderer/src/components/useShowMore.test.tsx]] covers chunking, reset-on-collapse, and shrink clamping.
+
 Session titles in the inline list are constrained to the sidebar width and truncate with ellipses, while the chat section only scrolls vertically. This keeps long generated titles from creating a horizontal scrollbar.
 
 The native sidebar scrollbar is hidden to avoid layout shifts. [[src/renderer/src/screens/Layout/Layout.tsx#Layout]] measures the chat scroll container and renders an absolutely positioned overlay thumb only while the user is scrolling, so showing or hiding the scrollbar never changes row width.
