@@ -3010,6 +3010,37 @@ body:has(.shell-vibrant),
   font-size: 12px;
 }
 
+/* Task #82: chunked "Show more (N)" row capping expanded lists at 5.
+   Indented to line up with the list BULLETS (task follow-up): each host
+   section overrides the left padding to match its rows' bullet column. */
+.sidebar-show-more {
+  display: block;
+  width: 100%;
+  padding: 4px 10px 4px 10px;
+  margin-top: 1px;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sidebar-show-more:hover {
+  color: var(--text-primary);
+}
+
+/* Project session rows indent 28px; their bullets start at that column. */
+.sidebar-recent-project .sidebar-show-more {
+  padding-left: 28px;
+}
+
+/* Floating panel rows (Subagents/TODO) indent 14px. */
+.chat-context-panel .sidebar-show-more {
+  padding-left: 14px;
+}
+
 .sidebar-recent-loading {
   display: flex;
   align-items: center;
