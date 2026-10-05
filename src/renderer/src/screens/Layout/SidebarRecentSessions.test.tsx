@@ -377,8 +377,7 @@ describe("SidebarRecentSessions projects-only groups (issue #68)", () => {
     // First chunk: 5 of the 7 headings paint; the remaining 2 do not. Order
     // is alphabetical by display name (issue #74), so derive both sets.
     const sorted = [...names].sort((a, b) => a.localeCompare(b, undefined));
-    const cap = (n: string): string =>
-      n.charAt(0).toUpperCase() + n.slice(1);
+    const cap = (n: string): string => n.charAt(0).toUpperCase() + n.slice(1);
     expect(await screen.findByText(cap(sorted[0]))).toBeTruthy();
     for (const name of sorted.slice(0, 5)) {
       expect(screen.getByText(cap(name)));
@@ -1108,6 +1107,128 @@ describe("SidebarRecentSessions state bullets", () => {
       "sidebar-recent-session-dot--approval",
     );
     expect(dot?.getAttribute("class")).not.toContain(
+      "sidebar-recent-session-spinner",
+    );
+  });
+});
+
+describe("project bullet child-activity aggregation (task #89)", () => {
+  function projectBullet(): Element | null {
+    const heading = document.querySelector(".sidebar-recent-project-heading");
+    return (
+      heading?.querySelector(
+        ".sidebar-recent-session-dot, .sidebar-recent-session-spinner, svg",
+      ) ?? null
+    );
+  }
+
+  function renderProjectSidebar(props: {
+    loadingSessionIds?: Set<string>;
+    approvalSessionIds?: Set<string>;
+    resumingSessionId?: string | null;
+  }): void {
+    render(
+      <SidebarRecentSessions
+        open
+        connectionId="connection-main"
+        activeProfile="default"
+        degraded={false}
+        resyncNonce={0}
+        currentSessionId={null}
+        loadingSessionIds={props.loadingSessionIds ?? new Set()}
+        approvalSessionIds={props.approvalSessionIds ?? new Set()}
+        resumingSessionId={props.resumingSessionId ?? null}
+        onSelect={vi.fn()}
+        onSessionDeleted={vi.fn()}
+        scrollRootRef={{ current: null }}
+      />,
+    );
+  }
+
+  it("renders the Folder icon when no child is active", async () => {
+    renderProjectSidebar({});
+    await screen.findByText("Project chat");
+    // The default bullet is the lucide Folder svg (no state classes).
+    const bullet = projectBullet();
+    expect(bullet?.getAttribute("class")).not.toContain(
+      "sidebar-recent-session-spinner",
+    );
+    expect(bullet?.getAttribute("class")).not.toContain(
+      "sidebar-recent-session-dot--approval",
+    );
+  });
+
+  it("renders the running spinner when a child session is loading", async () => {
+    renderProjectSidebar({ loadingSessionIds: new Set(["session-proj"]) });
+    await screen.findByText("Project chat");
+    expect(projectBullet()?.getAttribute("class")).toContain(
+      "sidebar-recent-session-spinner",
+    );
+  });
+
+  it("renders the approval dot when a child session awaits approval", async () => {
+    renderProjectSidebar({
+      approvalSessionIds: new Set(["session-proj"]),
+    });
+    await screen.findByText("Project chat");
+    expect(projectBullet()?.getAttribute("class")).toContain(
+      "sidebar-recent-session-dot--approval",
+    );
+  });
+
+  it("aggregates over ANY child, not just the first", async () => {
+    listCachedSessions.mockImplementation(async () => [
+      {
+        id: "session-proj-a",
+        title: "Project chat A",
+        contextFolder: "/tmp/proj",
+      },
+      {
+        id: "session-proj-b",
+        title: "Project chat B",
+        contextFolder: "/tmp/proj",
+      },
+    ]);
+    syncSessionCache.mockImplementation(async () => [
+      {
+        id: "session-proj-a",
+        title: "Project chat A",
+        contextFolder: "/tmp/proj",
+      },
+      {
+        id: "session-proj-b",
+        title: "Project chat B",
+        contextFolder: "/tmp/proj",
+      },
+    ]);
+    renderProjectSidebar({
+      loadingSessionIds: new Set(["session-proj-b"]),
+    });
+    await screen.findByText("Project chat B");
+    expect(projectBullet()?.getAttribute("class")).toContain(
+      "sidebar-recent-session-spinner",
+    );
+  });
+
+  it("approval wins over running for the project bullet", async () => {
+    renderProjectSidebar({
+      loadingSessionIds: new Set(["session-proj"]),
+      approvalSessionIds: new Set(["session-proj"]),
+    });
+    await screen.findByText("Project chat");
+    const bullet = projectBullet();
+    expect(bullet?.getAttribute("class")).toContain(
+      "sidebar-recent-session-dot--approval",
+    );
+    expect(bullet?.getAttribute("class")).not.toContain(
+      "sidebar-recent-session-spinner",
+    );
+  });
+
+  it("ignores a child that is only resuming (history fetch, not activity)", async () => {
+    renderProjectSidebar({ resumingSessionId: "session-proj" });
+    await screen.findByText("Project chat");
+    expect(projectBullet()?.getAttribute("class")).not.toContain(
       "sidebar-recent-session-spinner",
     );
   });

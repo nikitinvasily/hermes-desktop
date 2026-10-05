@@ -1618,6 +1618,21 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
                 {projectsList.visible.map((group) => {
                   const projectOpen = !closedProjectFolders.has(group.path);
                   const visible = expanded && projectsOpen && projectOpen;
+                  // Task #89: aggregated child activity for the project
+                  // bullet — same states and priority as session rows
+                  // (approval > running), computed over ALL children so a
+                  // collapsed folder/section still reveals activity. The
+                  // transient resume spinner is NOT activity (history fetch).
+                  const projectApproval = group.sessions.some((s) =>
+                    approvalSessionIds.has(s.id),
+                  );
+                  const projectRunning =
+                    !projectApproval &&
+                    group.sessions.some((s) =>
+                      s.pendingRunId !== undefined
+                        ? (s.pendingLoading ?? true)
+                        : loadingSessionIds.has(s.id),
+                    );
                   // The agent-side project record for this group, when the
                   // project list has loaded (issue #27) — enables edit/delete.
                   const projectRecord = projects?.find(
@@ -1636,7 +1651,22 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
                           aria-expanded={projectOpen}
                           tabIndex={expanded && projectsOpen ? 0 : -1}
                         >
-                          <Folder size={13} />
+                          {projectApproval ? (
+                            <Circle
+                              className="sidebar-recent-session-dot sidebar-recent-session-dot--approval"
+                              size={7}
+                              fill="currentColor"
+                              strokeWidth={0}
+                            />
+                          ) : projectRunning ? (
+                            <span
+                              className="sidebar-recent-session-spinner"
+                              role="img"
+                              aria-label={t("sessions.running")}
+                            />
+                          ) : (
+                            <Folder size={13} />
+                          )}
                           <span>{displayName(group.path)}</span>
                         </button>
                         {projectRecord && (
