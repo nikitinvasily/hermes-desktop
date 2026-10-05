@@ -511,6 +511,7 @@ describe("ensureDashboardRuntimeSession", () => {
     ).resolves.toEqual({
       created: false,
       info: { desktop_contract: 6 },
+      openRequests: [],
       runtimeSessionId: "live-resumed",
       storedSessionId: "stored-1",
     });

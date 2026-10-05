@@ -37,6 +37,14 @@ interface SessionResponse {
   status?: string;
   session_id: string;
   stored_session_id?: string | null;
+  /** Server→client requests still unanswered on the gateway (clarify cards,
+   *  approvals): re-delivered here on resume so a reconnecting client can
+   *  re-register answer resolvers for them. */
+  open_requests?: Array<{
+    id: string | number;
+    method: string;
+    params?: unknown;
+  }>;
 }
 
 interface ModelOptionsResponse {
@@ -94,6 +102,13 @@ interface EnsureDashboardRuntimeSessionResult {
   running?: boolean;
   runtimeSessionId: string;
   storedSessionId: string;
+  /** Server→client requests still open on the gateway after a resume — the
+   *  caller re-registers answer resolvers for them (issue #158). */
+  openRequests?: Array<{
+    id: string | number;
+    method: string;
+    params?: unknown;
+  }>;
 }
 
 interface UseDashboardChatTransportArgs {
@@ -313,6 +328,9 @@ export async function ensureDashboardRuntimeSession(
         ...(resumed.running !== undefined ? { running: resumed.running } : {}),
         runtimeSessionId: resumed.session_id,
         storedSessionId: resumed.stored_session_id || resumed.resumed || stored,
+        openRequests: Array.isArray(resumed.open_requests)
+          ? resumed.open_requests
+          : [],
       };
     } catch (err) {
       if (!isDashboardSessionNotFoundError(err)) {
@@ -1616,6 +1634,18 @@ export function useDashboardChatTransport({
     ],
   );
 
+  // Latest-ref to the server-request handler: declared before its consumers
+  // (ensureClient, ensureRuntimeSession) and re-bound every render below.
+  const handleServerRequestRef = useRef<
+    (
+      method: string,
+      params: Record<string, unknown>,
+      frameId?: number | string,
+    ) =>
+      | Record<string, unknown>
+      | Promise<Record<string, unknown> | void>
+      | false
+  >((_method, _params) => false);
   const ensureClient =
     useCallback(async (): Promise<DashboardGatewayClient> => {
       const existing = clientRef.current;
@@ -1672,8 +1702,8 @@ export function useDashboardChatTransport({
           }
           const client: DashboardGatewayClient = new DashboardGatewayClient({
             onEvent: handleGatewayEvent,
-            onServerRequest: (method, params) =>
-              handleServerRequestRef.current(method, params),
+            onServerRequest: (method, params, frameId) =>
+              handleServerRequestRef.current(method, params, frameId),
             onClose: () => {
               if (clientRef.current === client) {
                 expirePendingClarifyRef.current(true);
@@ -1832,6 +1862,35 @@ export function useDashboardChatTransport({
           // restart, post-detach resync): restore the spinner/Stop state the
           // renderer lost (issue #109).
           seedRunStateFromResume(true);
+        }
+        if (
+          !justCreated &&
+          Array.isArray(response.openRequests) &&
+          response.openRequests.length > 0
+        ) {
+          // Unanswered server→client requests (a clarify card the gateway is
+          // still waiting on): re-deliver each through the server-request
+          // pipeline as if it had just arrived, so the card gets a live
+          // answer resolver even after an app restart (issue #158).
+          for (const request of response.openRequests) {
+            if (
+              request &&
+              typeof request.method === "string" &&
+              request.params &&
+              typeof request.params === "object"
+            ) {
+              try {
+                handleServerRequestRef.current(request.method, {
+                  ...(request.params as Record<string, unknown>),
+                  ...(request.id !== undefined
+                    ? { __requestId: request.id }
+                    : {}),
+                });
+              } catch {
+                /* a broken replayed frame must not break the resume */
+              }
+            }
+          }
         }
         if (justCreated && contextFolder) {
           lastSyncedCwdRef.current = contextFolder;
@@ -2076,6 +2135,44 @@ export function useDashboardChatTransport({
     [],
   );
 
+  /**
+   * Answer a clarify card through a live server→client JSON-RPC request. The
+   * resolver is bound to the request id, NOT the runtime session, so this path
+   * still delivers when the pending slot is gone or its session went stale
+   * (model switch / error recovery recreated the runtime session, issue #158).
+   * Returns true when a matching resolver consumed the answer.
+   */
+  const resolveServerClarify = useCallback(
+    (requestId: string, answer: string, qid?: string): boolean => {
+      const entry = serverClarifyResolversRef.current.find(
+        (candidate) => candidate.requestId === requestId,
+      );
+      if (!entry) return false;
+      serverClarifyResolversRef.current =
+        serverClarifyResolversRef.current.filter(
+          (candidate) => candidate !== entry,
+        );
+      entry.resolve(qid ? { answers: { [qid]: answer } } : { answer });
+      setMessages((current) =>
+        current.map((message) =>
+          message.kind === "clarify" &&
+          message.responsePath === "dashboard" &&
+          message.requestId === requestId
+            ? {
+                ...message,
+                answer:
+                  message.qid === qid || !message.qid ? answer : message.answer,
+                resolved: true,
+                unavailable: false,
+              }
+            : message,
+        ),
+      );
+      return true;
+    },
+    [setMessages],
+  );
+
   const respondClarify = useCallback(
     async (
       requestId: string,
@@ -2084,29 +2181,90 @@ export function useDashboardChatTransport({
     ): Promise<boolean> => {
       const pending = pendingClarifyRef.current;
       const client = clientRef.current;
-      if (
-        !enabled ||
-        !pending ||
-        pending.requestId !== requestId ||
-        pending.responding ||
-        pending.sessionId !== runtimeSessionIdRef.current ||
-        !client?.connected
-      )
+      if (!enabled || !pending || pending.requestId !== requestId) {
+        // No pending slot at all: the card may still be answerable through a
+        // live server→client request (the resolver is bound to the JSON-RPC
+        // request id, not the runtime session). Fall through to it below.
+        return resolveServerClarify(requestId, answer, qid);
+      }
+      // A concurrent answer for the same card is already in flight.
+      if (pending.responding) return false;
+      // The runtime session was recreated (model switch, error recovery) after
+      // the question was asked. The gateway clarify.respond RPC answers by
+      // request_id and is not session-bound, but the pending slot's stale
+      // session guard used to return a silent false here — leaving the card
+      // interactive forever with "Couldn't deliver your answer" (issue #158).
+      // Try the server-request resolver first; without one, retire the slot
+      // and flip the card to unavailable so the composer sends a normal prompt.
+      if (pending.sessionId !== runtimeSessionIdRef.current) {
+        const delivered = resolveServerClarify(requestId, answer, qid);
+        if (delivered) {
+          if (pendingClarifyRef.current === pending)
+            pendingClarifyRef.current = null;
+          return true;
+        }
+        expirePendingClarifyRef.current();
         return false;
+      }
+      if (!client?.connected) {
+        // Socket gone: the card cannot deliver; retire it (the close handler
+        // usually does this, but a racing reconnect can leave the slot alive).
+        expirePendingClarifyRef.current();
+        return false;
+      }
       pending.responding = true;
       activeTurnRef.current = pending.activeTurn;
       setIsLoading(true);
       try {
-        // Batch answers carry the question's wire id so the backend locks one
-        // question at a time; a single-question answer omits it.
+        // Prefer the live server→client request: newer cores have NO
+        // `clarify.respond` RPC (it is method-not-found there) — the answer is
+        // a JSON-RPC result frame on the request id for a single question, or
+        // `clarify.lock` per question for a batch. The legacy event path
+        // (older cores) keeps the RPC below.
+        const liveServerEntry = serverClarifyResolversRef.current.find(
+          (entry) => entry.requestId === requestId,
+        );
+        if (liveServerEntry && !qid) {
+          serverClarifyResolversRef.current =
+            serverClarifyResolversRef.current.filter(
+              (candidate) => candidate !== liveServerEntry,
+            );
+          liveServerEntry.resolve({ answer });
+          if (pendingClarifyRef.current === pending)
+            pendingClarifyRef.current = null;
+          setMessages((current) =>
+            current.map((message) =>
+              message.kind === "clarify" &&
+              message.responsePath === "dashboard" &&
+              message.requestId === requestId
+                ? {
+                    ...message,
+                    answer:
+                      !message.qid || message.qid === qid
+                        ? answer
+                        : message.answer,
+                    resolved: true,
+                    unavailable: false,
+                  }
+                : message,
+            ),
+          );
+          return true;
+        }
         const result = await client.request<{
           status?: string;
           remaining?: string[];
-        }>("clarify.respond", {
-          request_id: requestId,
-          answer,
-          ...(qid ? { question_id: qid } : {}),
-        });
+        }>(
+          // Newer cores lock batch answers via clarify.lock; the legacy
+          // single-question RPC is clarify.respond. Try lock first when the
+          // answer carries a qid, else the legacy name.
+          qid ? "clarify.lock" : "clarify.respond",
+          {
+            request_id: requestId,
+            answer,
+            ...(qid ? { question_id: qid } : {}),
+          },
+        );
         if (
           !pendingClarifyRef.current ||
           pending.sessionId !== runtimeSessionIdRef.current ||
@@ -2183,7 +2341,7 @@ export function useDashboardChatTransport({
         pending.responding = false;
       }
     },
-    [enabled, setMessages, activeTurnRef, setIsLoading],
+    [enabled, setMessages, activeTurnRef, setIsLoading, resolveServerClarify],
   );
 
   const sendMessage = useCallback(
@@ -2646,17 +2804,27 @@ export function useDashboardChatTransport({
     (
       method: string,
       params: Record<string, unknown>,
+      frameId?: number | string,
     ):
       | Record<string, unknown>
       | Promise<Record<string, unknown> | void>
       | false => {
+      // The frame's JSON-RPC id (`srq-…`) is the request identity the backend
+      // knows: batch answers lock through `clarify.lock {request_id}` and the
+      // resume replay keys open requests by it, so prefer it over any
+      // synthetic id whenever the transport can supply it.
+      const wireId =
+        (typeof frameId === "string" && frameId) ||
+        (typeof params.__requestId === "string" && params.__requestId) ||
+        (typeof frameId === "number" && String(frameId)) ||
+        "";
       if (method === "approval") {
         // Surface the card through the same event pipeline the legacy
         // approval.request event used, then wait for the user's answer.
         const requestId =
           typeof params.request_id === "string"
             ? params.request_id
-            : `server-approval-${++approvalNonceRef.current}`;
+            : wireId || `server-approval-${++approvalNonceRef.current}`;
         handleGatewayEvent({
           type: "approval.request",
           session_id:
@@ -2676,7 +2844,7 @@ export function useDashboardChatTransport({
         const requestId =
           typeof params.request_id === "string" && params.request_id
             ? params.request_id
-            : `server-clarify-${Date.now()}`;
+            : wireId || `server-clarify-${Date.now()}`;
         handleGatewayEvent({
           type: "clarify.request",
           session_id:
@@ -2699,7 +2867,6 @@ export function useDashboardChatTransport({
     },
     [handleGatewayEvent],
   );
-  const handleServerRequestRef = useRef(handleServerRequest);
   handleServerRequestRef.current = handleServerRequest;
   // Pending server-request answers, resolved by respondApproval/respondClarify
   // when the user answers the card.

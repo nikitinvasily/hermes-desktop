@@ -24,6 +24,7 @@ export interface DashboardGatewayClientOptions {
   onServerRequest?: (
     method: string,
     params: Record<string, unknown>,
+    frameId?: number | string,
   ) =>
     | Record<string, unknown>
     | Promise<Record<string, unknown> | void>
@@ -306,7 +307,7 @@ export class DashboardGatewayClient {
       NonNullable<DashboardGatewayClientOptions["onServerRequest"]>
     >;
     try {
-      accepted = handler(request.method, params);
+      accepted = handler(request.method, params, request.id);
     } catch {
       answer({ error: { code: -32601, message: "Method not found" } });
       return;

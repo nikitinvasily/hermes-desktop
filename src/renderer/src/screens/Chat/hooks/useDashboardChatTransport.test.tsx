@@ -27,6 +27,13 @@ const dashboardMock = vi.hoisted(() => ({
   }>,
   onClose: null as (() => void) | null,
   onEvent: null as ((event: DashboardRpcEvent) => void) | null,
+  onServerRequest: null as
+    | ((
+        method: string,
+        params: Record<string, unknown>,
+        frameId?: number | string,
+      ) => unknown)
+    | null,
   request: vi.fn(),
 }));
 
@@ -41,10 +48,15 @@ vi.mock("../dashboardGatewayClient", () => ({
       options: {
         onEvent?: (event: DashboardRpcEvent) => void;
         onClose?: () => void;
+        onServerRequest?: (
+          method: string,
+          params: Record<string, unknown>,
+        ) => unknown;
       } = {},
     ) {
       dashboardMock.onEvent = options.onEvent ?? null;
       dashboardMock.onClose = options.onClose ?? null;
+      dashboardMock.onServerRequest = options.onServerRequest ?? null;
       dashboardMock.instances.push(this);
     }
   },
@@ -468,6 +480,180 @@ describe("useDashboardChatTransport recovery", () => {
     });
     expect(api.isLoading).toBe(false);
     expect(api.activeTurnRef?.current).toBeNull();
+  });
+
+  // @lat: [[dashboard-clarify#Gateway answer delivery]]
+  it("delivers a clarify answer after the runtime session changed (issue #158)", async () => {
+    const api = await clarifyHarness();
+    // Simulate a model switch / error recovery recreating the runtime session
+    // while the question is pending: the pending slot's sessionId goes stale.
+    await act(async () => {
+      dashboardMock.onEvent?.({
+        type: "message.complete",
+        session_id: "live",
+        payload: { text: "Done" },
+      });
+      await api.send?.("next turn after model switch");
+    });
+    // The card must either deliver (true) or retire to unavailable (false +
+    // card closed) — never a silent false leaving the card interactive forever.
+    const result = await act(async () => api.respondClarify?.("q1", "staging"));
+    const card = api.messages?.find((m) => m.kind === "clarify");
+    expect(result === true || card?.unavailable === true).toBe(true);
+  });
+
+  // @lat: [[dashboard-clarify#Gateway answer delivery]]
+  it("re-registers an unanswered clarify card from session.resume open_requests (issue #158)", async () => {
+    const api: HarnessApi = {};
+    // First send: session created; then the app "restarts" (new harness) and
+    // resumes with the clarify request still open on the gateway.
+    dashboardMock.request.mockImplementation(async (method) => {
+      if (method === "session.create")
+        return { session_id: "live", stored_session_id: "stored" };
+      if (method === "session.resume")
+        return {
+          session_id: "live-2",
+          stored_session_id: "stored",
+          running: true,
+          open_requests: [
+            {
+              id: "srq-replay-1",
+              method: "clarify",
+              params: {
+                session_id: "live-2",
+                request_id: "q-replay",
+                question: "Where?",
+                choices: ["staging"],
+              },
+            },
+          ],
+        };
+      if (method === "model.options")
+        return { model: "bad-model", provider: "bad-provider", providers: [] };
+      if (method === "clarify.respond") return { status: "ok" };
+      return {};
+    });
+    render(<Harness api={api} hermesSessionId="stored" />);
+    await act(async () => {
+      await api.send?.("hello");
+    });
+    // The replayed request re-delivered through the server-request pipeline
+    // must surface an answerable card with a live resolver.
+    await act(async () => {
+      expect(await api.respondClarify?.("q-replay", "staging")).toBe(true);
+    });
+    expect(api.messages?.find((m) => m.kind === "clarify")).toMatchObject({
+      resolved: true,
+      answer: "staging",
+    });
+  });
+
+  // @lat: [[dashboard-clarify#Gateway answer delivery]]
+  it("answers a server-request clarify without the legacy clarify.respond RPC (issue #158)", async () => {
+    // Newer cores: clarify arrives as a server→client JSON-RPC request and the
+    // gateway has NO clarify.respond method — the answer is the result frame.
+    dashboardMock.request.mockImplementation(async (method) => {
+      if (method === "session.create")
+        return { session_id: "live", stored_session_id: "stored" };
+      if (method === "model.options")
+        return { model: "bad-model", provider: "bad-provider", providers: [] };
+      if (method === "clarify.respond")
+        throw new Error("Method not found: clarify.respond");
+      return {};
+    });
+    const api: HarnessApi = {};
+    render(<Harness api={api} />);
+    await act(async () => {
+      await api.send?.("hello");
+    });
+    let resolved: unknown = null;
+    await act(async () => {
+      const answer = dashboardMock.onServerRequest?.("clarify", {
+        session_id: "live",
+        request_id: "q-srq",
+        question: "Where?",
+        choices: ["staging"],
+      });
+      void Promise.resolve(answer).then((result) => {
+        resolved = result;
+      });
+    });
+    // The card is interactive; answering must resolve the server request with
+    // the result frame payload and never touch the dead RPC.
+    await act(async () => {
+      expect(await api.respondClarify?.("q-srq", "staging")).toBe(true);
+    });
+    expect(resolved).toEqual({ answer: "staging" });
+    expect(
+      dashboardMock.request.mock.calls.some(
+        ([method]) => method === "clarify.respond",
+      ),
+    ).toBe(false);
+    expect(api.messages?.find((m) => m.kind === "clarify")).toMatchObject({
+      resolved: true,
+      answer: "staging",
+    });
+  });
+
+  // @lat: [[dashboard-clarify#Batch server-request delivery]]
+  it("answers a batch server-request clarify via clarify.lock with the frame id (issue #158)", async () => {
+    // Newer cores send batch clarify as a server→client request whose frame id
+    // (`srq-…`) is the only request identity: answers must lock through
+    // `clarify.lock {request_id, question_id}` keyed by that id, never by a
+    // synthetic one.
+    dashboardMock.request.mockImplementation(async (method, params) => {
+      if (method === "session.create")
+        return { session_id: "live", stored_session_id: "stored" };
+      if (method === "model.options")
+        return { model: "bad-model", provider: "bad-provider", providers: [] };
+      if (method === "clarify.lock") {
+        if (params?.request_id !== "srq-live1") return { status: "expired" };
+        return { status: "ok", remaining: [] };
+      }
+      if (method === "clarify.respond")
+        throw new Error("Method not found: clarify.respond");
+      return {};
+    });
+    const api: HarnessApi = {};
+    render(<Harness api={api} />);
+    await act(async () => {
+      await api.send?.("hello");
+    });
+    let resolved: unknown = null;
+    await act(async () => {
+      const answer = dashboardMock.onServerRequest?.(
+        "clarify",
+        {
+          session_id: "live",
+          questions: [
+            { qid: "q0", question: "When?", choices: ["am", "pm"] },
+          ],
+        },
+        "srq-live1",
+      );
+      void Promise.resolve(answer).then((result) => {
+        resolved = result;
+      });
+    });
+    const card = api.messages?.find(
+      (m) => m.kind === "clarify" && m.qid === "q0",
+    ) as { requestId?: string } | undefined;
+    expect(card?.requestId).toBe("srq-live1");
+    await act(async () => {
+      expect(await api.respondClarify?.("srq-live1", "am", "q0")).toBe(true);
+    });
+    expect(
+      dashboardMock.request.mock.calls.some(
+        ([method, params]) =>
+          method === "clarify.lock" &&
+          (params as Record<string, unknown>)?.request_id === "srq-live1" &&
+          (params as Record<string, unknown>)?.question_id === "q0",
+      ),
+    ).toBe(true);
+    expect(api.messages?.find((m) => m.kind === "clarify")).toMatchObject({
+      resolved: true,
+      answer: "am",
+    });
   });
 
   // @lat: [[dashboard-clarify#Composer fallback]]

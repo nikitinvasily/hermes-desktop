@@ -154,6 +154,8 @@ A server `clarify` request resolves with `{answer}` when the renderer's clarify-
 
 The pending clarify resolver SURVIVES turn end (`finish`/`cancel` in [[src/main/hermes.ts]]): the backend's clarify request is the authority for when it is withdrawn, and only a `request.cancel` notification clears it — a late answer to a question whose turn already ended is still delivered (issue #154, TODO #83). On withdrawal the renderer is notified via the `chat-clarify-cancel` IPC event and flips the card to unavailable. On the dashboard transport, a clarify answer that fails delivery retires the pending slot so the composer's next message goes out as a normal prompt instead of being swallowed by the clarify intercept.
 
+On the dashboard transport the pending slot's session guard no longer strands a card: when the runtime session was recreated after the question was asked (model switch, error recovery), `respondClarify` first answers through the live server→client request resolver (bound to the JSON-RPC request id, not the runtime session) and otherwise retires the slot to unavailable — never a silent false that leaves the card interactive forever (issue #158).
+
 ### Runs approval fail-closed
 
 Runs transport tests verify approval events stop the original run with its captured credentials, never POST an approval, and never replay through chat completions.
