@@ -8830,6 +8830,20 @@ body:has(.shell-vibrant),
   color: var(--text-muted);
   font-size: 12px;
 }
+.chat-model-load-error {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+}
+.chat-model-load-error-detail {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
 .chat-model-configure {
   flex-shrink: 0;
   width: 100%;

@@ -1269,6 +1269,7 @@ function Chat({
                   currentBaseUrl={chatCurrentBaseUrl}
                   modelGroups={modelConfig.modelGroups}
                   displayModel={chatDisplayModel}
+                  loadError={modelConfig.loadError}
                   onOpen={reloadModelConfig}
                   onSelectModel={handleSelectModel}
                 />

@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   appendConfigFixLog: vi.fn(),
   upsertBlockChild: vi.fn(),
   maskKey: vi.fn((v: string) => v.slice(0, 4) + "***"),
+  getConnectionConfig: vi.fn(() => ({ mode: "local" })),
   fakeVault: {} as Record<string, string>,
   fakeEnv: {} as Record<string, string>,
 }));
@@ -28,6 +29,7 @@ vi.mock("./config", () => ({
   appendConfigFixLog: mocks.appendConfigFixLog,
   upsertBlockChild: mocks.upsertBlockChild,
   maskKey: mocks.maskKey,
+  getConnectionConfig: mocks.getConnectionConfig,
 }));
 
 vi.mock("./utils", async () => {
@@ -260,7 +262,22 @@ describe("config-health audit - vault awareness", () => {
       report = runConfigHealthCheck("default");
       expect(report.issues.map((i) => i.code)).toContain("MODEL_KEY_MISSING");
     });
+  });
 
+  describe("connection-mode gating (issue #156)", () => {
+    it("does NOT fire EMPTY_API_SERVER_KEY when the active connection is remote", async () => {
+      mocks.getConnectionConfig.mockReturnValueOnce({
+        mode: "remote",
+      } as unknown as Parameters<typeof mocks.getConnectionConfig>[0]);
+      mockedReadEnv.mockReturnValue({});
+      const report = runConfigHealthCheck("default");
+      expect(report.issues.map((i) => i.code)).not.toContain(
+        "EMPTY_API_SERVER_KEY",
+      );
+    });
+  });
+
+  describe("vault precedence (AIR-008)", () => {
     it("resolves precedence process.env > .env > provider on a key CONFLICT (AIR-008)", () => {
       mocks.fakeVault = { API_SERVER_KEY: "from-vault" };
       mocks.fakeEnv = { API_SERVER_KEY: "from-dotenv" };

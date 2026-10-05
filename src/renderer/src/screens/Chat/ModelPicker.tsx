@@ -11,6 +11,9 @@ interface ModelPickerProps {
   currentBaseUrl: string;
   modelGroups: ModelGroup[];
   displayModel: string;
+  /** Non-empty when the last model/config load failed — shown in place of
+   *  the plain "no models" empty state so remote/auth failures are visible. */
+  loadError?: string;
   onOpen: () => void;
   onSelectModel: (provider: string, model: string, baseUrl: string) => void;
 }
@@ -22,6 +25,7 @@ export const ModelPicker = memo(function ModelPicker({
   currentBaseUrl,
   modelGroups,
   displayModel,
+  loadError = "",
   onOpen,
   onSelectModel,
 }: ModelPickerProps): React.JSX.Element {
@@ -237,7 +241,19 @@ export const ModelPicker = memo(function ModelPicker({
             <div className="chat-model-list">
               {visibleRows.length === 0 ? (
                 <div className="chat-model-list-empty">
-                  {t("chat.noModelsMatch")}
+                  {loadError ? (
+                    <span className="chat-model-load-error">
+                      {t("chat.modelLoadFailed")}
+                      <span
+                        className="chat-model-load-error-detail"
+                        title={loadError}
+                      >
+                        {loadError}
+                      </span>
+                    </span>
+                  ) : (
+                    t("chat.noModelsMatch")
+                  )}
                 </div>
               ) : (
                 visibleRows.map((m) => {

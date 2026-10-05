@@ -19,6 +19,7 @@ import {
   type ApiKeySource,
   appendConfigFixLog,
   customEndpointKeyResolvable,
+  getConnectionConfig,
   getConfigValue,
   getModelConfig,
   hasOAuthCredentials,
@@ -169,6 +170,10 @@ export function autoFixIssue(
  */
 function checkApiServerKeyPlacement(profile?: string): ConfigHealthIssue[] {
   const issues: ConfigHealthIssue[] = [];
+  // API_SERVER_KEY authenticates the LOCAL agent's API server. In remote/ssh
+  // mode chat runs on the gateway machine, whose key lives in its own .env —
+  // warning about the local one is noise (issue #156).
+  if (getConnectionConfig().mode !== "local") return issues;
   const { envFile, configFile } = profilePaths(profile);
 
   const env = readEnv(profile);
