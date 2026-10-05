@@ -1022,6 +1022,7 @@ const hermesAPI = {
     folder: string | null,
     connectionId?: string,
     profile?: string,
+    sessionKey?: string | null,
   ): Promise<boolean> =>
     ipcRenderer.invoke(
       "set-session-context-folder",
@@ -1029,6 +1030,7 @@ const hermesAPI = {
       folder,
       connectionId,
       profile,
+      sessionKey,
     ),
 
   listRecentSessionContextFolders: (limit?: number): Promise<string[]> =>

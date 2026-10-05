@@ -8,6 +8,12 @@ The folder isn't part of hermes-agent's session schema, so it lives in a desktop
 
 [[src/main/session-context-folder-store.ts]] holds `desktop_session_context_folders` (mirroring [[src/main/session-continuation-store.ts]]): [[src/main/session-context-folder-store.ts#setSessionContextFolder]] upserts or, for a null folder, deletes the row; [[src/main/session-context-folder-store.ts#getSessionContextFolder]] reads it. The row is dropped with the rest of a session's data in [[src/main/sessions.ts#deleteSessionRows]] so a deleted session leaves no orphan binding.
 
+### Session-key bindings survive id rotation (issue #168)
+
+Gateway conversations (Telegram topics, Discord threads) rotate the session id on every reset cycle while keeping a stable routing `session_key`, so an id-only binding dies with the old row and the chat falls back into Chats.
+
+The store keeps a SECOND table, `desktop_session_key_context_folders`, keyed by the routing key: [[src/main/session-context-folder-store.ts#setSessionContextFolder]] writes BOTH rows (id and key) when a key is known, including empty-string sentinels for deliberate unlinks. The routing key flows through every list path — [[src/main/remote-sessions.ts]] reads `session_key` off the dashboard REST rows, [[src/main/session-cache.ts#syncSessionCache]] selects it behind a `PRAGMA` column guard, and the SSH python fallback emits it per row. Precedence everywhere: id binding > key binding > empty sentinel > derived `git_repo_root || cwd`. [[src/main/session-cache.ts#getSessionKeyById]] resolves a key by session id so the `set-session-context-folder` IPC can write the key row even when the renderer only knows the id. Tests: [[tests/session-cache-sync.test.ts]], [[tests/project-names.test.ts]].
+
 ## Restore and save in the chat
 
 The chat loads the stored folder when resuming a session and saves it whenever it changes, once the conversation has a gateway session id.

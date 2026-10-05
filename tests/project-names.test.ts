@@ -210,4 +210,58 @@ describe("mergeDesktopBindingsIntoRemoteList", () => {
       sessions,
     );
   });
+
+  it("inherits a project through the routing key when the id has no binding (issue #168)", () => {
+    const key = "agent:main:telegram:dm:216887199:88885";
+    // Fresh session row of an already-bound conversation: new id, no id
+    // binding, derived folder null (topic sessions start cwd-less).
+    const fresh = { ...session("tg-new-id", null), sessionKey: key };
+    // Older generation of the same conversation, now superseded in the list.
+    const older = {
+      ...session("tg-old-id", "/workspace/investments"),
+      sessionKey: key,
+    };
+    const merged = mergeDesktopBindingsIntoRemoteList(
+      [fresh, older],
+      new Map(),
+      new Map([[key, "/workspace/investments"]]),
+    );
+
+    expect(merged[0].contextFolder).toBe("/workspace/investments");
+    expect(merged[1].contextFolder).toBe("/workspace/investments");
+  });
+
+  it("a key sentinel unlinks every session of the conversation (issue #168)", () => {
+    const key = "agent:main:telegram:dm:216887199:88903";
+    const rows = [
+      { ...session("tg-a", "/workspace/shopping"), sessionKey: key },
+    ];
+    const merged = mergeDesktopBindingsIntoRemoteList(
+      rows,
+      new Map(),
+      new Map([[key, ""]]),
+    );
+    expect(merged[0].contextFolder).toBeNull();
+  });
+
+  it("an id binding beats the key binding (issue #168)", () => {
+    const key = "agent:main:telegram:dm:216887199:92537";
+    const rows = [{ ...session("tg-moved", null), sessionKey: key }];
+    const merged = mergeDesktopBindingsIntoRemoteList(
+      rows,
+      new Map([["tg-moved", "/workspace/diy"]]),
+      new Map([[key, "/workspace/trading"]]),
+    );
+    expect(merged[0].contextFolder).toBe("/workspace/diy");
+  });
+
+  it("rows without a routing key ignore key bindings entirely (local desktop sessions)", () => {
+    const rows = [session("desktop-session", null)];
+    const merged = mergeDesktopBindingsIntoRemoteList(
+      rows,
+      new Map(),
+      new Map([["agent:main:telegram:dm:1:2", "/workspace/trading"]]),
+    );
+    expect(merged[0].contextFolder).toBeNull();
+  });
 });

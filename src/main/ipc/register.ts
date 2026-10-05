@@ -39,6 +39,7 @@ import {
   setSessionContextFolder,
   getRecentSessionContextFolders,
   getAllSessionContextFolders,
+  getAllSessionKeyContextFolders,
 } from "../session-context-folder-store";
 import {
   localProjectFolderNames,
@@ -250,6 +251,7 @@ import {
 import {
   syncSessionCache,
   listCachedSessions,
+  getSessionKeyById,
   updateSessionTitle,
   type CachedSession,
 } from "../session-cache";
@@ -2572,8 +2574,26 @@ export function registerIpcHandlers(context: IpcContext): void {
       folder: string | null,
       connectionId?: string,
       profile?: string,
+      sessionKey?: string | null,
     ) => {
-      setSessionContextFolder(sessionId, folder);
+      // Resolve the conversation's routing key (issue #168): the key-keyed
+      // binding survives the gateway's session-id rotation. Renderer callers
+      // that already hold the row (sidebar Move-to-project) pass it through;
+      // otherwise look it up in the synced cache for this connection's profile.
+      let resolvedKey = sessionKey?.trim() || null;
+      if (!resolvedKey) {
+        try {
+          const conn = sessionConnection(connectionId);
+          const scopedProfile =
+            conn.mode === "ssh" || conn.mode === "remote"
+              ? activeSshProfile(profile)
+              : profile;
+          resolvedKey = getSessionKeyById(sessionId, scopedProfile);
+        } catch {
+          resolvedKey = getSessionKeyById(sessionId, profile);
+        }
+      }
+      setSessionContextFolder(sessionId, folder, resolvedKey);
       // Re-home the session's workspace ON THE AGENT too, so the chat's
       // working directory (not just the sidebar grouping) follows the
       // Move-to-project choice (issue #23). Local agent sessions get the
@@ -2834,13 +2854,18 @@ export function registerIpcHandlers(context: IpcContext): void {
       // with LOCAL homes and known project folders (order mirrors
       // syncSessionCache).
       const mergeBindings = <
-        T extends { id: string; contextFolder: string | null },
+        T extends {
+          id: string;
+          contextFolder: string | null;
+          sessionKey?: string | null;
+        },
       >(
         rows: T[],
       ): T[] =>
         mergeDesktopBindingsIntoRemoteList(
           rows,
           getAllSessionContextFolders(scopedProfile),
+          getAllSessionKeyContextFolders(scopedProfile),
         );
 
       if (conn.mode === "remote") {
@@ -3191,6 +3216,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     return mergeDesktopBindingsIntoRemoteList(
       sessions,
       getAllSessionContextFolders(undefined),
+      getAllSessionKeyContextFolders(undefined),
     );
   }
 
@@ -3217,6 +3243,7 @@ export function registerIpcHandlers(context: IpcContext): void {
         regroupTreeSessionsByBindings(
           groups,
           getAllSessionContextFolders(undefined),
+          getAllSessionKeyContextFolders(undefined),
         );
       if (conn.mode === "remote")
         return remoteProjectGroupSessions(

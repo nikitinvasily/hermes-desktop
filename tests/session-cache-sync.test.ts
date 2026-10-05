@@ -107,6 +107,7 @@ vi.mock("better-sqlite3", () => {
     messages: MessageRow[];
     nextMessageId: number;
     contextFolders?: Map<string, string>;
+    keyContextFolders?: Map<string, string>;
   }
 
   const stores = new Map<string, Store>();
@@ -142,8 +143,17 @@ vi.mock("better-sqlite3", () => {
 
     run(...args: unknown[]): { changes: number } {
       if (this.sql.includes("INSERT OR REPLACE INTO sessions")) {
-        const [id, source, startedAt, messageCount, model, title, cwd, repo] =
-          args;
+        const [
+          id,
+          source,
+          startedAt,
+          messageCount,
+          model,
+          title,
+          cwd,
+          repo,
+          sessionKey,
+        ] = args;
         this.store.sessions.set(String(id), {
           id: String(id),
           source: String(source),
@@ -154,6 +164,7 @@ vi.mock("better-sqlite3", () => {
           title: title === null || title === undefined ? null : String(title),
           cwd: cwd ? String(cwd) : null,
           git_repo_root: repo ? String(repo) : null,
+          session_key: sessionKey ? String(sessionKey) : null,
         });
         return { changes: 1 };
       }
@@ -173,6 +184,24 @@ vi.mock("better-sqlite3", () => {
               : String(folderPath),
           );
         }
+        return { changes: 1 };
+      }
+
+      if (
+        this.sql.includes("INSERT INTO desktop_session_key_context_folders")
+      ) {
+        // Key-keyed binding write (issue #168): args are
+        // (session_key, folder_path). Keyed rows live independently of the
+        // id-keyed table — a binding may exist before any session row does.
+        const [sessionKey, folderPath] = args;
+        this.store.keyContextFolders =
+          this.store.keyContextFolders ?? new Map();
+        this.store.keyContextFolders.set(
+          String(sessionKey),
+          folderPath === null || folderPath === undefined
+            ? ""
+            : String(folderPath),
+        );
         return { changes: 1 };
       }
 
@@ -240,12 +269,28 @@ vi.mock("better-sqlite3", () => {
         );
       }
 
+      if (this.sql.includes("desktop_session_key_context_folders")) {
+        const folders =
+          this.store.keyContextFolders ?? new Map<string, string>();
+        return Array.from(folders.entries()).map(
+          ([session_key, folder_path]) => ({
+            session_key,
+            folder_path,
+          }),
+        );
+      }
+
       throw new Error(`Unhandled fake all SQL: ${this.sql}`);
     }
 
     get(
       ...args: unknown[]
-    ): { content: string } | { id: string } | { name: string } | undefined {
+    ):
+      | { content: string }
+      | { id: string }
+      | { name: string }
+      | { session_key: string | null }
+      | undefined {
       // `tableExists` probes sqlite_master before reading context folders
       // (issue #27). Report the context-folder table absent unless a binding
       // was actually written — the batch read above then returns [] and the
@@ -260,7 +305,22 @@ vi.mock("better-sqlite3", () => {
         ) {
           return { name: "desktop_session_context_folders" };
         }
+        if (
+          args[0] === "desktop_session_key_context_folders" &&
+          this.store.keyContextFolders
+        ) {
+          return { name: "desktop_session_key_context_folders" };
+        }
         return undefined;
+      }
+
+      // Routing-key lookup by id (issue #168): the sessions fixture stores
+      // session_key on the row when the test provides one.
+      if (this.sql.includes("SELECT session_key FROM sessions")) {
+        const row = this.store.sessions.get(String(args[0]));
+        return row
+          ? { session_key: (row.session_key as string) ?? null }
+          : undefined;
       }
 
       if (this.sql.includes("SELECT content FROM messages")) {
@@ -345,6 +405,7 @@ function seedDb(
     firstUserMessage?: string;
     cwd?: string | null;
     git_repo_root?: string | null;
+    session_key?: string | null;
   }>,
   profile = "default",
 ): void {
@@ -359,7 +420,8 @@ function seedDb(
       model TEXT,
       title TEXT,
       cwd TEXT,
-      git_repo_root TEXT
+      git_repo_root TEXT,
+      session_key TEXT
     );
     CREATE TABLE IF NOT EXISTS messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -370,8 +432,8 @@ function seedDb(
     );
   `);
   const insSession = db.prepare(
-    `INSERT OR REPLACE INTO sessions (id, source, started_at, ended_at, message_count, model, title, cwd, git_repo_root)
-     VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO sessions (id, source, started_at, ended_at, message_count, model, title, cwd, git_repo_root, session_key)
+     VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
   );
   const insMessage = db.prepare(
     `INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)`,
@@ -386,6 +448,7 @@ function seedDb(
       s.title ?? null,
       s.cwd ?? null,
       s.git_repo_root ?? null,
+      s.session_key ?? null,
     );
     if (s.firstUserMessage) {
       insMessage.run(s.id, "user", s.firstUserMessage, s.started_at);
@@ -875,6 +938,99 @@ describe("syncSessionCache", () => {
 
     expect(syncSessionCache()[0]?.contextFolder).toBe(
       "/Users/me/Documents/Hermes/mac",
+    );
+  });
+
+  it("inherits the project binding through the routing key when the session id rotates (issue #168)", () => {
+    const future = Math.floor(Date.now() / 1000) + 600;
+    const key = "agent:main:telegram:dm:216887199:88885";
+    // Generation 1: the topic session carries the key and a cwd.
+    seedDb([
+      {
+        id: "tg-topic-1",
+        started_at: future,
+        firstUserMessage: "topic chat bound to investments",
+        cwd: "/home/hermes/.hermes/workspace/investments",
+        session_key: key,
+      },
+    ]);
+    // The user moves it into a project: the binding is written for BOTH the
+    // id and the conversation's routing key.
+    setSessionContextFolder(
+      "tg-topic-1",
+      "/home/hermes/.hermes/workspace/investments",
+      key,
+    );
+
+    // Generation 2: the gateway reset cycle mints a NEW session id for the
+    // same routing key; the fresh row has no cwd yet.
+    seedDb([
+      {
+        id: "tg-topic-2",
+        started_at: future + 10,
+        firstUserMessage: "same topic, new session id",
+        cwd: null,
+        session_key: key,
+      },
+    ]);
+
+    const byId = new Map(syncSessionCache().map((s) => [s.id, s] as const));
+    expect(byId.get("tg-topic-2")?.contextFolder).toBe(
+      "/home/hermes/.hermes/workspace/investments",
+    );
+    expect(byId.get("tg-topic-2")?.sessionKey).toBe(key);
+  });
+
+  it("a key sentinel (deliberate unlink) suppresses inheritance for the next session of the same key (issue #168)", () => {
+    const future = Math.floor(Date.now() / 1000) + 600;
+    const key = "agent:main:telegram:dm:216887199:88903";
+    seedDb([
+      {
+        id: "tg-unlink-1",
+        started_at: future,
+        firstUserMessage: "topic chat the user unlinked",
+        cwd: "/home/hermes/.hermes/workspace/shopping",
+        session_key: key,
+      },
+    ]);
+    setSessionContextFolder("tg-unlink-1", null, key);
+
+    seedDb([
+      {
+        id: "tg-unlink-2",
+        started_at: future + 10,
+        firstUserMessage: "same topic after reset",
+        cwd: null,
+        session_key: key,
+      },
+    ]);
+
+    const byId = new Map(syncSessionCache().map((s) => [s.id, s] as const));
+    expect(byId.get("tg-unlink-2")?.contextFolder).toBeNull();
+  });
+
+  it("an id binding wins over the key binding for the same session (issue #168)", () => {
+    const future = Math.floor(Date.now() / 1000) + 600;
+    const key = "agent:main:telegram:dm:216887199:92537";
+    seedDb([
+      {
+        id: "tg-id-wins",
+        started_at: future,
+        firstUserMessage: "session moved away after the key was bound",
+        cwd: null,
+        session_key: key,
+      },
+    ]);
+    // Key says trading, but the user moved THIS session elsewhere.
+    setSessionContextFolder(
+      "tg-id-wins",
+      "/home/hermes/.hermes/workspace/trading",
+      key,
+    );
+    setSessionContextFolder("tg-id-wins", "/home/hermes/.hermes/workspace/diy");
+
+    expect(syncSessionCache()[0]?.contextFolder).toBe(
+      "/home/hermes/.hermes/workspace/diy",
     );
   });
 });

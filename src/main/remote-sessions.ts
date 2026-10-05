@@ -308,6 +308,9 @@ function normalizeCachedSession(row: RemoteRecord): CachedSession {
     source: summary.source,
     messageCount: summary.messageCount,
     model: summary.model,
+    // Routing key of gateway conversations (Telegram topics, Discord threads):
+    // stable across session-id rotation (issue #168), NULL for desktop sessions.
+    sessionKey: nullableString(row.session_key)?.trim() || null,
     contextFolder: workspaceFolder(row),
   };
 }

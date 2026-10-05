@@ -733,6 +733,7 @@ interface HermesAPI {
     folder: string | null,
     connectionId?: string,
     profile?: string,
+    sessionKey?: string | null,
   ) => Promise<boolean>;
   listRecentSessionContextFolders: (limit?: number) => Promise<string[]>;
   listProjectFolderNames: (
@@ -755,6 +756,9 @@ interface HermesAPI {
         messageCount: number;
         model: string;
         contextFolder: string | null;
+        /** Routing key of gateway conversations (issue #168); null on
+         * desktop/CLI sessions. */
+        sessionKey?: string | null;
       }>
     >
   >;
@@ -934,6 +938,9 @@ interface HermesAPI {
       messageCount: number;
       model: string;
       contextFolder: string | null;
+      /** Routing key of gateway conversations (issue #168); null on
+       * desktop/CLI sessions. */
+      sessionKey?: string | null;
     }>
   >;
   syncSessionCache: (
@@ -951,6 +958,9 @@ interface HermesAPI {
       messageCount: number;
       model: string;
       contextFolder: string | null;
+      /** Routing key of gateway conversations (issue #168); null on
+       * desktop/CLI sessions. */
+      sessionKey?: string | null;
     }>
   >;
   updateSessionTitle: (

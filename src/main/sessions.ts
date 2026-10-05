@@ -311,6 +311,14 @@ export function hasLastReadColumn(db: Database.Database): boolean {
   return columns.some((column) => column.name === "last_read_at");
 }
 
+/** Routing-key column guard (issue #168); desktop-only DBs read as null. */
+export function hasSessionKeyColumn(db: Database.Database): boolean {
+  const columns = db.prepare("PRAGMA table_info(sessions)").all() as Array<{
+    name: string;
+  }>;
+  return columns.some((column) => column.name === "session_key");
+}
+
 /**
  * Unread flag mirroring hermes-agent's `SessionDB.session_unread`:
  * `last_read_at` is a watermark — NULL = never tracked = read, and a row is

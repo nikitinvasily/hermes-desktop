@@ -66,8 +66,11 @@ interface RecentSession {
    *  send (never created a session, not loading) shows the neutral dot. */
   pendingLoading?: boolean;
   /** Channel the session originated from (issue #140): non-desktop sources
-   *  render a channel icon instead of the neutral bullet. */
+   * render a channel icon instead of the neutral bullet. */
   source?: string;
+  /** Routing key of gateway conversations (issue #168): forwarded with
+   * Move-to-project so the binding survives session-id rotation. */
+  sessionKey?: string | null;
 }
 
 /** Non-desktop channel icons (issue #140): shown in place of the neutral
@@ -461,6 +464,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         lastActivityAt?: number;
         unread?: boolean;
         source?: string;
+        sessionKey?: string | null;
       }>,
       limit = RECENT_SESSIONS_PAGE_SIZE,
     ): RecentSession[] =>
@@ -475,6 +479,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
             lastActivityAt,
             unread,
             source,
+            sessionKey,
           }) => ({
             id,
             title,
@@ -483,6 +488,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
             lastActivityAt: lastActivityAt ?? startedAt,
             unread: unread === true,
             source,
+            sessionKey: sessionKey ?? null,
           }),
         ),
     [],
@@ -794,6 +800,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
               startedAt: s.startedAt,
               lastActivityAt: s.lastActivityAt,
               source: s.source,
+              sessionKey: s.sessionKey,
             });
           }
         }
@@ -1268,6 +1275,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
           normalized,
           connectionId,
           activeProfile,
+          current?.sessionKey ?? null,
         );
         // Other surfaces (chat view, Sessions screen) listen for this to
         // refresh their own grouping.
