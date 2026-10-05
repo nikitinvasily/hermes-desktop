@@ -2913,6 +2913,14 @@ body:has(.shell-vibrant),
   white-space: nowrap;
 }
 
+/* Task #89: the aggregated activity spinner is a span too — the title rule
+   above (flex: 1 1 auto, higher specificity by element order) would stretch
+   the 13px ring across the row into a "stick". Re-pin its footprint. */
+.sidebar-recent-project-heading .sidebar-recent-session-spinner {
+  flex: 0 0 13px;
+  width: 13px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .sidebar-recent-sessions-wrap,
   .sidebar-recent-collapse {

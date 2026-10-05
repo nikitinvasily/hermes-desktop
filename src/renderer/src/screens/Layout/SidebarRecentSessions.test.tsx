@@ -1,6 +1,12 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import SidebarRecentSessions from "./SidebarRecentSessions";
+
+declare const __dirname: string;
+
+const mainCss = readFileSync(join(__dirname, "../../assets/main.css"), "utf8");
 
 // The component owns its data fetching; stub the hermesAPI bridge so no
 // profile DB is touched and the list stays whatever the tests seed.
@@ -377,8 +383,7 @@ describe("SidebarRecentSessions projects-only groups (issue #68)", () => {
     // First chunk: 5 of the 7 headings paint; the remaining 2 do not. Order
     // is alphabetical by display name (issue #74), so derive both sets.
     const sorted = [...names].sort((a, b) => a.localeCompare(b, undefined));
-    const cap = (n: string): string =>
-      n.charAt(0).toUpperCase() + n.slice(1);
+    const cap = (n: string): string => n.charAt(0).toUpperCase() + n.slice(1);
     expect(await screen.findByText(cap(sorted[0]))).toBeTruthy();
     for (const name of sorted.slice(0, 5)) {
       expect(screen.getByText(cap(name)));
@@ -1110,6 +1115,139 @@ describe("SidebarRecentSessions state bullets", () => {
     expect(dot?.getAttribute("class")).not.toContain(
       "sidebar-recent-session-spinner",
     );
+  });
+});
+
+describe("project bullet child-activity aggregation (task #89)", () => {
+  function projectBullet(): Element | null {
+    const heading = document.querySelector(".sidebar-recent-project-heading");
+    return (
+      heading?.querySelector(
+        ".sidebar-recent-session-dot, .sidebar-recent-session-spinner, svg",
+      ) ?? null
+    );
+  }
+
+  function renderProjectSidebar(props: {
+    loadingSessionIds?: Set<string>;
+    approvalSessionIds?: Set<string>;
+    resumingSessionId?: string | null;
+  }): void {
+    render(
+      <SidebarRecentSessions
+        open
+        connectionId="connection-main"
+        activeProfile="default"
+        degraded={false}
+        resyncNonce={0}
+        currentSessionId={null}
+        loadingSessionIds={props.loadingSessionIds ?? new Set()}
+        approvalSessionIds={props.approvalSessionIds ?? new Set()}
+        resumingSessionId={props.resumingSessionId ?? null}
+        onSelect={vi.fn()}
+        onSessionDeleted={vi.fn()}
+        scrollRootRef={{ current: null }}
+      />,
+    );
+  }
+
+  it("renders the Folder icon when no child is active", async () => {
+    renderProjectSidebar({});
+    await screen.findByText("Project chat");
+    // The default bullet is the lucide Folder svg (no state classes).
+    const bullet = projectBullet();
+    expect(bullet?.getAttribute("class")).not.toContain(
+      "sidebar-recent-session-spinner",
+    );
+    expect(bullet?.getAttribute("class")).not.toContain(
+      "sidebar-recent-session-dot--approval",
+    );
+  });
+
+  it("renders the running spinner when a child session is loading", async () => {
+    renderProjectSidebar({ loadingSessionIds: new Set(["session-proj"]) });
+    await screen.findByText("Project chat");
+    expect(projectBullet()?.getAttribute("class")).toContain(
+      "sidebar-recent-session-spinner",
+    );
+  });
+
+  it("renders the approval dot when a child session awaits approval", async () => {
+    renderProjectSidebar({
+      approvalSessionIds: new Set(["session-proj"]),
+    });
+    await screen.findByText("Project chat");
+    expect(projectBullet()?.getAttribute("class")).toContain(
+      "sidebar-recent-session-dot--approval",
+    );
+  });
+
+  it("aggregates over ANY child, not just the first", async () => {
+    listCachedSessions.mockImplementation(async () => [
+      {
+        id: "session-proj-a",
+        title: "Project chat A",
+        contextFolder: "/tmp/proj",
+      },
+      {
+        id: "session-proj-b",
+        title: "Project chat B",
+        contextFolder: "/tmp/proj",
+      },
+    ]);
+    syncSessionCache.mockImplementation(async () => [
+      {
+        id: "session-proj-a",
+        title: "Project chat A",
+        contextFolder: "/tmp/proj",
+      },
+      {
+        id: "session-proj-b",
+        title: "Project chat B",
+        contextFolder: "/tmp/proj",
+      },
+    ]);
+    renderProjectSidebar({
+      loadingSessionIds: new Set(["session-proj-b"]),
+    });
+    await screen.findByText("Project chat B");
+    expect(projectBullet()?.getAttribute("class")).toContain(
+      "sidebar-recent-session-spinner",
+    );
+  });
+
+  it("approval wins over running for the project bullet", async () => {
+    renderProjectSidebar({
+      loadingSessionIds: new Set(["session-proj"]),
+      approvalSessionIds: new Set(["session-proj"]),
+    });
+    await screen.findByText("Project chat");
+    const bullet = projectBullet();
+    expect(bullet?.getAttribute("class")).toContain(
+      "sidebar-recent-session-dot--approval",
+    );
+    expect(bullet?.getAttribute("class")).not.toContain(
+      "sidebar-recent-session-spinner",
+    );
+  });
+
+  it("ignores a child that is only resuming (history fetch, not activity)", async () => {
+    renderProjectSidebar({ resumingSessionId: "session-proj" });
+    await screen.findByText("Project chat");
+    expect(projectBullet()?.getAttribute("class")).not.toContain(
+      "sidebar-recent-session-spinner",
+    );
+  });
+
+  it("keeps the spinner footprint square inside the project heading (CSS contract)", async () => {
+    renderProjectSidebar({ loadingSessionIds: new Set(["session-proj"]) });
+    await screen.findByText("Project chat");
+    // The heading's title rule (.sidebar-recent-project-heading span with
+    // flex: 1 1 auto) also matches the spinner span — without the explicit
+    // re-pin the 13px ring stretches into a horizontal bar ("stick").
+    const re =
+      /\.sidebar-recent-project-heading \.sidebar-recent-session-spinner\s*\{[^}]*flex:\s*0 0 13px[^}]*\}/;
+    expect(mainCss).toMatch(re);
   });
 });
 

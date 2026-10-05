@@ -15,6 +15,7 @@ export default {
   noResultsHint: "Try different search terms",
   empty: "No sessions yet",
   newConversation: "New conversation",
+  running: "Agent is working",
   newChat: "New Chat",
   closeTab: "Close tab",
   today: "Today",

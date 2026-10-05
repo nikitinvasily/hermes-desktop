@@ -32,6 +32,12 @@ Approval state lifts out of the chat transport: [[src/renderer/src/screens/Chat/
 
 A finished turn may flip its session to unread on the agent, so `handleRunLoading` fires a `hermes-sessions-maybe-changed` renderer event on the true→false loading edge; the sidebar listens for it and refreshes past its throttle instead of waiting for the 60s interval.
 
+### Project bullet aggregation
+
+The project heading bullet aggregates the session state bullets over the group's children (task #89), so a collapsed Projects section still reveals activity.
+
+When any child session awaits an approval, the heading's Folder icon is replaced by the filled `--warning` dot; when any child is generating (pending rows count while `pendingLoading` is true, loaded rows via the `loadingSessionIds` set), it is replaced by the 13px accent ring spinner; otherwise the Folder icon stays. Approval wins over running, mirroring the row priority; the transient `resumingSessionId` history fetch is deliberately NOT activity and does not light the project bullet. Only locally known runs participate — the same limitation as the session bullets themselves.
+
 ## Session channel icons
 
 Non-desktop session sources replace the neutral gray bullet with a small channel icon, so a Telegram (or cron/api/web) session is recognizable at a glance without opening it (issue #140).
