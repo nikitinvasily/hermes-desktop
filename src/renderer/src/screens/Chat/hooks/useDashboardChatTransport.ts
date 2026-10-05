@@ -37,6 +37,14 @@ interface SessionResponse {
   status?: string;
   session_id: string;
   stored_session_id?: string | null;
+  /** Server→client requests still unanswered on the gateway (clarify cards,
+   *  approvals): re-delivered here on resume so a reconnecting client can
+   *  re-register answer resolvers for them. */
+  open_requests?: Array<{
+    id: string | number;
+    method: string;
+    params?: unknown;
+  }>;
 }
 
 interface ModelOptionsResponse {
@@ -94,6 +102,13 @@ interface EnsureDashboardRuntimeSessionResult {
   running?: boolean;
   runtimeSessionId: string;
   storedSessionId: string;
+  /** Server→client requests still open on the gateway after a resume — the
+   *  caller re-registers answer resolvers for them (issue #158). */
+  openRequests?: Array<{
+    id: string | number;
+    method: string;
+    params?: unknown;
+  }>;
 }
 
 interface UseDashboardChatTransportArgs {
@@ -313,6 +328,9 @@ export async function ensureDashboardRuntimeSession(
         ...(resumed.running !== undefined ? { running: resumed.running } : {}),
         runtimeSessionId: resumed.session_id,
         storedSessionId: resumed.stored_session_id || resumed.resumed || stored,
+        openRequests: Array.isArray(resumed.open_requests)
+          ? resumed.open_requests
+          : [],
       };
     } catch (err) {
       if (!isDashboardSessionNotFoundError(err)) {
@@ -1616,6 +1634,17 @@ export function useDashboardChatTransport({
     ],
   );
 
+  // Latest-ref to the server-request handler: declared before its consumers
+  // (ensureClient, ensureRuntimeSession) and re-bound every render below.
+  const handleServerRequestRef = useRef<
+    (
+      method: string,
+      params: Record<string, unknown>,
+    ) =>
+      | Record<string, unknown>
+      | Promise<Record<string, unknown> | void>
+      | false
+  >((_method, _params) => false);
   const ensureClient =
     useCallback(async (): Promise<DashboardGatewayClient> => {
       const existing = clientRef.current;
@@ -1832,6 +1861,35 @@ export function useDashboardChatTransport({
           // restart, post-detach resync): restore the spinner/Stop state the
           // renderer lost (issue #109).
           seedRunStateFromResume(true);
+        }
+        if (
+          !justCreated &&
+          Array.isArray(response.openRequests) &&
+          response.openRequests.length > 0
+        ) {
+          // Unanswered server→client requests (a clarify card the gateway is
+          // still waiting on): re-deliver each through the server-request
+          // pipeline as if it had just arrived, so the card gets a live
+          // answer resolver even after an app restart (issue #158).
+          for (const request of response.openRequests) {
+            if (
+              request &&
+              typeof request.method === "string" &&
+              request.params &&
+              typeof request.params === "object"
+            ) {
+              try {
+                handleServerRequestRef.current(request.method, {
+                  ...(request.params as Record<string, unknown>),
+                  ...(request.id !== undefined
+                    ? { __requestId: request.id }
+                    : {}),
+                });
+              } catch {
+                /* a broken replayed frame must not break the resume */
+              }
+            }
+          }
         }
         if (justCreated && contextFolder) {
           lastSyncedCwdRef.current = contextFolder;
@@ -2759,7 +2817,6 @@ export function useDashboardChatTransport({
     },
     [handleGatewayEvent],
   );
-  const handleServerRequestRef = useRef(handleServerRequest);
   handleServerRequestRef.current = handleServerRequest;
   // Pending server-request answers, resolved by respondApproval/respondClarify
   // when the user answers the card.

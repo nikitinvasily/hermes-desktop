@@ -490,6 +490,52 @@ describe("useDashboardChatTransport recovery", () => {
     expect(result === true || card?.unavailable === true).toBe(true);
   });
 
+  // @lat: [[dashboard-clarify#Gateway answer delivery]]
+  it("re-registers an unanswered clarify card from session.resume open_requests (issue #158)", async () => {
+    const api: HarnessApi = {};
+    // First send: session created; then the app "restarts" (new harness) and
+    // resumes with the clarify request still open on the gateway.
+    dashboardMock.request.mockImplementation(async (method) => {
+      if (method === "session.create")
+        return { session_id: "live", stored_session_id: "stored" };
+      if (method === "session.resume")
+        return {
+          session_id: "live-2",
+          stored_session_id: "stored",
+          running: true,
+          open_requests: [
+            {
+              id: "srq-replay-1",
+              method: "clarify",
+              params: {
+                session_id: "live-2",
+                request_id: "q-replay",
+                question: "Where?",
+                choices: ["staging"],
+              },
+            },
+          ],
+        };
+      if (method === "model.options")
+        return { model: "bad-model", provider: "bad-provider", providers: [] };
+      if (method === "clarify.respond") return { status: "ok" };
+      return {};
+    });
+    render(<Harness api={api} hermesSessionId="stored" />);
+    await act(async () => {
+      await api.send?.("hello");
+    });
+    // The replayed request re-delivered through the server-request pipeline
+    // must surface an answerable card with a live resolver.
+    await act(async () => {
+      expect(await api.respondClarify?.("q-replay", "staging")).toBe(true);
+    });
+    expect(api.messages?.find((m) => m.kind === "clarify")).toMatchObject({
+      resolved: true,
+      answer: "staging",
+    });
+  });
+
   // @lat: [[dashboard-clarify#Composer fallback]]
   it("uses the same delivery path when answering through the composer", async () => {
     const api = await clarifyHarness();
