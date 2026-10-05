@@ -14,6 +14,12 @@ The chat loads the stored folder when resuming a session and saves it whenever i
 
 In [[src/renderer/src/screens/Chat/Chat.tsx#Chat]] a load effect fetches the folder for `initialSessionId` on mount; a save effect writes `contextFolder` via `setSessionContextFolder` on every change. The save is gated on a "loaded" ref so the initial null can't overwrite a resumed session's stored folder before the load resolves. A brand-new chat saves once its session id resolves after the first message, binding the pre-selected folder to the new session.
 
+### Save dedupe keys on the session id too
+
+The save effect's no-op guard compares the `(sessionId, folder)` PAIR, never the folder alone.
+
+After a WebSocket drop mid-send the transport recreates the runtime session (id A → B) while the folder stays the same, and a folder-only guard would skip the write for the live session B — a remote chat created from a project's `+` then silently loses its binding and lands in flat Chats (issue #162). The policy lives in [[src/renderer/src/screens/Chat/sessionFolderPersist.ts#shouldPersistSessionFolder]]; tests: [[src/renderer/src/screens/Chat/sessionFolderPersist.test.ts]].
+
 ## Projects dropdown
 
 The context folder picker offers projects (issue #29): picking a project binds its primary folder as the session cwd, so users choose a project rather than a raw path.
