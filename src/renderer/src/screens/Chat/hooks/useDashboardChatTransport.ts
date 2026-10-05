@@ -2215,16 +2215,55 @@ export function useDashboardChatTransport({
       activeTurnRef.current = pending.activeTurn;
       setIsLoading(true);
       try {
-        // Batch answers carry the question's wire id so the backend locks one
-        // question at a time; a single-question answer omits it.
+        // Prefer the live server→client request: newer cores have NO
+        // `clarify.respond` RPC (it is method-not-found there) — the answer is
+        // a JSON-RPC result frame on the request id for a single question, or
+        // `clarify.lock` per question for a batch. The legacy event path
+        // (older cores) keeps the RPC below.
+        const liveServerEntry = serverClarifyResolversRef.current.find(
+          (entry) => entry.requestId === requestId,
+        );
+        if (liveServerEntry && !qid) {
+          serverClarifyResolversRef.current =
+            serverClarifyResolversRef.current.filter(
+              (candidate) => candidate !== liveServerEntry,
+            );
+          liveServerEntry.resolve({ answer });
+          if (pendingClarifyRef.current === pending)
+            pendingClarifyRef.current = null;
+          setMessages((current) =>
+            current.map((message) =>
+              message.kind === "clarify" &&
+              message.responsePath === "dashboard" &&
+              message.requestId === requestId
+                ? {
+                    ...message,
+                    answer:
+                      !message.qid || message.qid === qid
+                        ? answer
+                        : message.answer,
+                    resolved: true,
+                    unavailable: false,
+                  }
+                : message,
+            ),
+          );
+          return true;
+        }
         const result = await client.request<{
           status?: string;
           remaining?: string[];
-        }>("clarify.respond", {
-          request_id: requestId,
-          answer,
-          ...(qid ? { question_id: qid } : {}),
-        });
+        }>(
+          // Newer cores lock batch answers via clarify.lock; the legacy
+          // single-question RPC is clarify.respond. Try lock first when the
+          // answer carries a qid, else the legacy name.
+          qid ? "clarify.lock" : "clarify.respond",
+          {
+            request_id: requestId,
+            answer,
+            ...(qid ? { question_id: qid } : {}),
+          },
+        );
         if (
           !pendingClarifyRef.current ||
           pending.sessionId !== runtimeSessionIdRef.current ||

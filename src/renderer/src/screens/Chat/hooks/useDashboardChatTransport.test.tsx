@@ -27,6 +27,9 @@ const dashboardMock = vi.hoisted(() => ({
   }>,
   onClose: null as (() => void) | null,
   onEvent: null as ((event: DashboardRpcEvent) => void) | null,
+  onServerRequest: null as
+    | ((method: string, params: Record<string, unknown>) => unknown)
+    | null,
   request: vi.fn(),
 }));
 
@@ -41,10 +44,15 @@ vi.mock("../dashboardGatewayClient", () => ({
       options: {
         onEvent?: (event: DashboardRpcEvent) => void;
         onClose?: () => void;
+        onServerRequest?: (
+          method: string,
+          params: Record<string, unknown>,
+        ) => unknown;
       } = {},
     ) {
       dashboardMock.onEvent = options.onEvent ?? null;
       dashboardMock.onClose = options.onClose ?? null;
+      dashboardMock.onServerRequest = options.onServerRequest ?? null;
       dashboardMock.instances.push(this);
     }
   },
@@ -530,6 +538,53 @@ describe("useDashboardChatTransport recovery", () => {
     await act(async () => {
       expect(await api.respondClarify?.("q-replay", "staging")).toBe(true);
     });
+    expect(api.messages?.find((m) => m.kind === "clarify")).toMatchObject({
+      resolved: true,
+      answer: "staging",
+    });
+  });
+
+  // @lat: [[dashboard-clarify#Gateway answer delivery]]
+  it("answers a server-request clarify without the legacy clarify.respond RPC (issue #158)", async () => {
+    // Newer cores: clarify arrives as a server→client JSON-RPC request and the
+    // gateway has NO clarify.respond method — the answer is the result frame.
+    dashboardMock.request.mockImplementation(async (method) => {
+      if (method === "session.create")
+        return { session_id: "live", stored_session_id: "stored" };
+      if (method === "model.options")
+        return { model: "bad-model", provider: "bad-provider", providers: [] };
+      if (method === "clarify.respond")
+        throw new Error("Method not found: clarify.respond");
+      return {};
+    });
+    const api: HarnessApi = {};
+    render(<Harness api={api} />);
+    await act(async () => {
+      await api.send?.("hello");
+    });
+    let resolved: unknown = null;
+    await act(async () => {
+      const answer = dashboardMock.onServerRequest?.("clarify", {
+        session_id: "live",
+        request_id: "q-srq",
+        question: "Where?",
+        choices: ["staging"],
+      });
+      void Promise.resolve(answer).then((result) => {
+        resolved = result;
+      });
+    });
+    // The card is interactive; answering must resolve the server request with
+    // the result frame payload and never touch the dead RPC.
+    await act(async () => {
+      expect(await api.respondClarify?.("q-srq", "staging")).toBe(true);
+    });
+    expect(resolved).toEqual({ answer: "staging" });
+    expect(
+      dashboardMock.request.mock.calls.some(
+        ([method]) => method === "clarify.respond",
+      ),
+    ).toBe(false);
     expect(api.messages?.find((m) => m.kind === "clarify")).toMatchObject({
       resolved: true,
       answer: "staging",
