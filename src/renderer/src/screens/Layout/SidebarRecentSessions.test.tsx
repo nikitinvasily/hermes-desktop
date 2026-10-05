@@ -1,6 +1,12 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import SidebarRecentSessions from "./SidebarRecentSessions";
+
+declare const __dirname: string;
+
+const mainCss = readFileSync(join(__dirname, "../../assets/main.css"), "utf8");
 
 // The component owns its data fetching; stub the hermesAPI bridge so no
 // profile DB is touched and the list stays whatever the tests seed.
@@ -1231,6 +1237,17 @@ describe("project bullet child-activity aggregation (task #89)", () => {
     expect(projectBullet()?.getAttribute("class")).not.toContain(
       "sidebar-recent-session-spinner",
     );
+  });
+
+  it("keeps the spinner footprint square inside the project heading (CSS contract)", async () => {
+    renderProjectSidebar({ loadingSessionIds: new Set(["session-proj"]) });
+    await screen.findByText("Project chat");
+    // The heading's title rule (.sidebar-recent-project-heading span with
+    // flex: 1 1 auto) also matches the spinner span — without the explicit
+    // re-pin the 13px ring stretches into a horizontal bar ("stick").
+    const re =
+      /\.sidebar-recent-project-heading \.sidebar-recent-session-spinner\s*\{[^}]*flex:\s*0 0 13px[^}]*\}/;
+    expect(mainCss).toMatch(re);
   });
 });
 
