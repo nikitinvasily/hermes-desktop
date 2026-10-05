@@ -61,6 +61,10 @@ interface UseModelConfigResult {
   currentBaseUrl: string;
   modelGroups: ModelGroup[];
   displayModel: string;
+  /** Set when the last model/config load failed (remote down, auth expired,
+   *  gateway error). Cleared on the next successful reload. Empty string
+   *  when the library loaded fine but is simply empty. */
+  loadError: string;
   reload: () => Promise<void>;
   selectModel: (
     provider: string,
@@ -102,6 +106,7 @@ export function useModelConfig(profile?: string): UseModelConfigResult {
   const [currentBaseUrl, setCurrentBaseUrl] = useState("");
   const [modelGroups, setModelGroups] = useState<ModelGroup[]>([]);
   const [savedModels, setSavedModels] = useState<SavedModelForPicker[]>([]);
+  const [loadError, setLoadError] = useState("");
   const loadSeqRef = useRef(0);
 
   const ollamaCloudDiscovery = useDiscoveredModels({
@@ -122,15 +127,29 @@ export function useModelConfig(profile?: string): UseModelConfigResult {
 
   const reload = useCallback(async (): Promise<void> => {
     const seq = ++loadSeqRef.current;
-    const [mc, savedModels] = await Promise.all([
-      window.hermesAPI.getModelConfig(profile),
-      window.hermesAPI.listModels(),
-    ]);
+    let mc: Awaited<ReturnType<typeof window.hermesAPI.getModelConfig>>;
+    let models: SavedModelForPicker[];
+    try {
+      [mc, models] = await Promise.all([
+        window.hermesAPI.getModelConfig(profile),
+        window.hermesAPI.listModels(),
+      ]);
+    } catch (err) {
+      if (seq !== loadSeqRef.current) return;
+      // A failed load (remote down, OAuth cookie expired, dashboard 503 …)
+      // used to escape as an unhandled rejection and leave the picker
+      // silently empty. Keep the previous rows and surface the reason.
+      setLoadError(
+        err instanceof Error ? err.message : String(err ?? "unknown error"),
+      );
+      return;
+    }
     if (seq !== loadSeqRef.current) return;
+    setLoadError("");
     setCurrentModel(mc.model);
     setCurrentProvider(mc.provider);
     setCurrentBaseUrl(mc.baseUrl);
-    setSavedModels(savedModels);
+    setSavedModels(models);
   }, [profile]);
 
   // Initial load + reload whenever the profile changes (canonical
@@ -213,6 +232,7 @@ export function useModelConfig(profile?: string): UseModelConfigResult {
     currentBaseUrl,
     modelGroups,
     displayModel,
+    loadError,
     reload,
     selectModel,
   };

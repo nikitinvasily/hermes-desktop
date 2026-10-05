@@ -12,6 +12,7 @@ export default {
   custom: "Custom",
   allModels: "All models",
   noModelsMatch: "No models match",
+  modelLoadFailed: "Could not load models",
   configure: "Configure",
   typeModelName: "Type model name...",
   reasoningEffort: {
