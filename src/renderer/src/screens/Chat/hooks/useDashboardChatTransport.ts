@@ -2076,6 +2076,44 @@ export function useDashboardChatTransport({
     [],
   );
 
+  /**
+   * Answer a clarify card through a live server→client JSON-RPC request. The
+   * resolver is bound to the request id, NOT the runtime session, so this path
+   * still delivers when the pending slot is gone or its session went stale
+   * (model switch / error recovery recreated the runtime session, issue #158).
+   * Returns true when a matching resolver consumed the answer.
+   */
+  const resolveServerClarify = useCallback(
+    (requestId: string, answer: string, qid?: string): boolean => {
+      const entry = serverClarifyResolversRef.current.find(
+        (candidate) => candidate.requestId === requestId,
+      );
+      if (!entry) return false;
+      serverClarifyResolversRef.current =
+        serverClarifyResolversRef.current.filter(
+          (candidate) => candidate !== entry,
+        );
+      entry.resolve(qid ? { answers: { [qid]: answer } } : { answer });
+      setMessages((current) =>
+        current.map((message) =>
+          message.kind === "clarify" &&
+          message.responsePath === "dashboard" &&
+          message.requestId === requestId
+            ? {
+                ...message,
+                answer:
+                  message.qid === qid || !message.qid ? answer : message.answer,
+                resolved: true,
+                unavailable: false,
+              }
+            : message,
+        ),
+      );
+      return true;
+    },
+    [setMessages],
+  );
+
   const respondClarify = useCallback(
     async (
       requestId: string,
@@ -2084,15 +2122,37 @@ export function useDashboardChatTransport({
     ): Promise<boolean> => {
       const pending = pendingClarifyRef.current;
       const client = clientRef.current;
-      if (
-        !enabled ||
-        !pending ||
-        pending.requestId !== requestId ||
-        pending.responding ||
-        pending.sessionId !== runtimeSessionIdRef.current ||
-        !client?.connected
-      )
+      if (!enabled || !pending || pending.requestId !== requestId) {
+        // No pending slot at all: the card may still be answerable through a
+        // live server→client request (the resolver is bound to the JSON-RPC
+        // request id, not the runtime session). Fall through to it below.
+        return resolveServerClarify(requestId, answer, qid);
+      }
+      // A concurrent answer for the same card is already in flight.
+      if (pending.responding) return false;
+      // The runtime session was recreated (model switch, error recovery) after
+      // the question was asked. The gateway clarify.respond RPC answers by
+      // request_id and is not session-bound, but the pending slot's stale
+      // session guard used to return a silent false here — leaving the card
+      // interactive forever with "Couldn't deliver your answer" (issue #158).
+      // Try the server-request resolver first; without one, retire the slot
+      // and flip the card to unavailable so the composer sends a normal prompt.
+      if (pending.sessionId !== runtimeSessionIdRef.current) {
+        const delivered = resolveServerClarify(requestId, answer, qid);
+        if (delivered) {
+          if (pendingClarifyRef.current === pending)
+            pendingClarifyRef.current = null;
+          return true;
+        }
+        expirePendingClarifyRef.current();
         return false;
+      }
+      if (!client?.connected) {
+        // Socket gone: the card cannot deliver; retire it (the close handler
+        // usually does this, but a racing reconnect can leave the slot alive).
+        expirePendingClarifyRef.current();
+        return false;
+      }
       pending.responding = true;
       activeTurnRef.current = pending.activeTurn;
       setIsLoading(true);
@@ -2183,7 +2243,7 @@ export function useDashboardChatTransport({
         pending.responding = false;
       }
     },
-    [enabled, setMessages, activeTurnRef, setIsLoading],
+    [enabled, setMessages, activeTurnRef, setIsLoading, resolveServerClarify],
   );
 
   const sendMessage = useCallback(

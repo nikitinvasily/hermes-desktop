@@ -470,6 +470,26 @@ describe("useDashboardChatTransport recovery", () => {
     expect(api.activeTurnRef?.current).toBeNull();
   });
 
+  // @lat: [[dashboard-clarify#Gateway answer delivery]]
+  it("delivers a clarify answer after the runtime session changed (issue #158)", async () => {
+    const api = await clarifyHarness();
+    // Simulate a model switch / error recovery recreating the runtime session
+    // while the question is pending: the pending slot's sessionId goes stale.
+    await act(async () => {
+      dashboardMock.onEvent?.({
+        type: "message.complete",
+        session_id: "live",
+        payload: { text: "Done" },
+      });
+      await api.send?.("next turn after model switch");
+    });
+    // The card must either deliver (true) or retire to unavailable (false +
+    // card closed) — never a silent false leaving the card interactive forever.
+    const result = await act(async () => api.respondClarify?.("q1", "staging"));
+    const card = api.messages?.find((m) => m.kind === "clarify");
+    expect(result === true || card?.unavailable === true).toBe(true);
+  });
+
   // @lat: [[dashboard-clarify#Composer fallback]]
   it("uses the same delivery path when answering through the composer", async () => {
     const api = await clarifyHarness();
