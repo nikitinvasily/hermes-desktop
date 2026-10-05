@@ -62,6 +62,11 @@ export function ShowMoreRow({
 }): React.JSX.Element | null {
   const { t } = useI18n();
   if (hiddenCount <= 0 && !externalMore) return null;
+  // Backlog #92: while the server may have more rows, the hidden count is
+  // provisional (a prefetch can grow it) — show the uncounted label so the
+  // number never jumps upward mid-reveal. The exact count shows only once
+  // the list end is known (local mode, or last page loaded).
+  const counted = hiddenCount > 0 && !externalMore;
   return (
     <button
       type="button"
@@ -70,7 +75,7 @@ export function ShowMoreRow({
       tabIndex={tabIndex}
       aria-label={ariaLabel}
     >
-      {hiddenCount > 0
+      {counted
         ? t("navigation.showMoreCount", { count: hiddenCount })
         : t("common.showMore")}
     </button>

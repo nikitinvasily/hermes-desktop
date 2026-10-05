@@ -443,22 +443,26 @@ describe("SidebarRecentSessions single pagination (backlog #92)", () => {
     renderSidebar(() => undefined);
 
     await screen.findByText("Chat 0");
-    // Chunk cap 5, 31 loaded: 6 clicks reveal all of them. After the last
-    // reveal hiddenCount hits 0, but hasMore is still true → the row must
-    // survive, relabeled without a count (matcher accepts both labels).
-    const row = (): HTMLElement =>
-      screen.getByText(/navigation\.showMoreCount|common\.showMore/);
+    // While hasMore is true the label carries NO count at all: the hidden
+    // count is provisional (a prefetch can grow it), and a number that
+    // jumps upward mid-reveal reads as a bug (user report on #92).
+    const row = (): HTMLElement => screen.getByText("common.showMore");
+    expect(screen.queryByText("navigation.showMoreCount")).toBeNull();
     // 6 chunks of 5 reveal all 30 loaded rows; the 31st lives only on the
-    // server (hasMore), so the row persists with the uncounted label.
+    // server (hasMore), so the row persists uncounted.
     for (let i = 0; i < 6; i++) {
       fireEvent.click(row());
     }
-    expect(await screen.findByText("common.showMore")).toBeTruthy();
+    expect(screen.getByText("common.showMore")).toBeTruthy();
     expect(screen.queryByText("Chat 29")).toBeTruthy();
     expect(screen.queryByText("Chat 30")).toBeNull();
 
     // Clicking it again fetches the next page (prefetch path — the append
     // lands asynchronously; the fetch itself is the deterministic check).
+    // Flush first: the previous click's prefetch may still be in flight
+    // (loadingMoreRef guards reentry) and would swallow this click's fetch.
+    await waitFor(() => {});
+    await waitFor(() => {});
     const callsBefore = listCachedSessions.mock.calls.length;
     fireEvent.click(screen.getByText("common.showMore"));
     await waitFor(() => {
@@ -477,10 +481,9 @@ describe("SidebarRecentSessions single pagination (backlog #92)", () => {
     await screen.findByText("Chat 0");
 
     // Reveal chunks until the loaded remainder runs low → prefetch fires and
-    // the loaded list grows past the initial sync window (the label switches
-    // to the uncounted form while rows remain only on the server).
-    const row = (): HTMLElement =>
-      screen.getByText(/navigation\.showMoreCount|common\.showMore/);
+    // the loaded list grows past the initial sync window (uncounted label
+    // throughout: the server may always have more rows).
+    const row = (): HTMLElement => screen.getByText("common.showMore");
     for (let i = 0; i < 9; i++) {
       fireEvent.click(row());
     }
