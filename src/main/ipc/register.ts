@@ -3272,25 +3272,36 @@ export function registerIpcHandlers(context: IpcContext): void {
   );
   ipcMain.handle(
     "sync-session-cache",
-    (_event, connectionId?: string, profile?: string) => {
+    (_event, connectionId?: string, profile?: string, windowRows?: number) => {
       const conn = sessionConnection(connectionId);
       const scopedProfile = activeSshProfile(profile);
+      // Backlog #92: the sidebar's window follows its loaded list size so a
+      // refresh cannot shrink a grown list; default 50 preserves the old
+      // behavior for other callers (Sessions screen, tests). The dashboard
+      // caps `limit` at 100 — clamp here so a grown window never 422s.
+      const boundedWindow = Math.max(
+        1,
+        Math.min(Number.isFinite(windowRows) ? Number(windowRows) : 50, 100),
+      );
       if (conn.mode === "remote")
         return remoteListCachedSessions(
           scopedRemoteSessionConfig(conn, scopedProfile),
-          50,
+          boundedWindow,
         ).then((list) => mergeRemoteBindings(list));
       if (conn.mode === "ssh" && conn.ssh)
         return withSshDashboardSessions(
           conn,
           (config) =>
-            remoteListCachedSessions(config, 50).then((list) =>
+            remoteListCachedSessions(config, boundedWindow).then((list) =>
               mergeRemoteBindings(list),
             ),
           () =>
-            sshListCachedSessions(conn.ssh!, 50, 0, scopedProfile).then(
-              (list) => mergeRemoteBindings(list),
-            ),
+            sshListCachedSessions(
+              conn.ssh!,
+              boundedWindow,
+              0,
+              scopedProfile,
+            ).then((list) => mergeRemoteBindings(list)),
           scopedProfile,
         );
       try {
