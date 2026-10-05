@@ -432,6 +432,8 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   const sessionsRef = useRef<RecentSession[]>([]);
   const hasMoreRef = useRef(false);
   const loadingMoreRef = useRef(false);
+  // Consecutive full pages that appended zero new rows (backlog #92).
+  const duplicatePageStreakRef = useRef(0);
 
   useEffect(() => {
     sessionsRef.current = sessions;
@@ -525,10 +527,11 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
       const windowWasCapped =
         sessionsRef.current.length >= SYNC_WINDOW_MAX_ROWS &&
         list.length < sessionsRef.current.length;
-      setHasMore(
-        list.length > loadedLimit ||
-          (windowWasCapped && list.length >= SYNC_WINDOW_MAX_ROWS),
-      );
+      // A capped window carries NO information about rows beyond it: keep
+      // the current hasMore (appendPage's end-detection stands) instead of
+      // resurrecting the Show more row on every refresh after the user
+      // already expanded the whole list (user report on #92).
+      if (!windowWasCapped) setHasMore(list.length > loadedLimit);
       const next = normalizeRows(list, loadedLimit);
       setSessions((prev) => {
         if (sameSessions(prev, next)) return prev;
@@ -556,18 +559,24 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         title: string;
         contextFolder?: string | null;
       }>,
-    ): void => {
+    ): boolean => {
       setHasMore(list.length > RECENT_SESSIONS_PAGE_SIZE);
       const page = normalizeRows(list);
-      if (page.length === 0) return;
+      if (page.length === 0) return false;
+      // Compute against the committed list (sessionsRef) — a side effect
+      // inside the setSessions updater would run after this function
+      // returns (React defers updaters), reading the flag as always-false.
+      const seen = new Set(sessionsRef.current.map((s) => s.id));
+      const appended = page.some((session) => !seen.has(session.id));
       setSessions((prev) => {
-        const seen = new Set(prev.map((s) => s.id));
+        const prevSeen = new Set(prev.map((s) => s.id));
         const next = [...prev];
         for (const session of page) {
-          if (!seen.has(session.id)) next.push(session);
+          if (!prevSeen.has(session.id)) next.push(session);
         }
         return sameSessions(prev, next) ? prev : next;
       });
+      return appended;
     },
     [normalizeRows],
   );
@@ -604,9 +613,21 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         connectionId,
         activeProfile,
       );
-      appendPage(nextPage);
+      const appended = appendPage(nextPage);
+      // End-detection for the recency-reorder race (backlog #92, kin to
+      // #71): a FULL page that appended nothing means recency shifted rows
+      // we already hold into this offset window. One such page proves
+      // nothing (a busy server reorders constantly); TWO consecutive ones
+      // mean the offset walk cannot find new rows — treat the list as
+      // exhausted so the row dies instead of resurrecting forever.
+      if (!appended && nextPage.length > RECENT_SESSIONS_PAGE_SIZE) {
+        duplicatePageStreakRef.current += 1;
+        if (duplicatePageStreakRef.current >= 2) setHasMore(false);
+      } else {
+        duplicatePageStreakRef.current = 0;
+      }
     } catch {
-      // keep the current list; scrolling can retry on the next event
+      // keep the current list; the next click retries
     } finally {
       loadingMoreRef.current = false;
       setLoadingMore(false);
@@ -1879,11 +1900,12 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
                     onShowMore={() => {
                       chatsList.showMore();
                       // Backlog #92: prefetch the next 30-row page while the
-                      // server may have more, as soon as the loaded remainder
-                      // drops below a chunk — the row must never dead-end.
+                      // server may have more, as soon as the CHATS remainder
+                      // (not the combined list — sessions includes project
+                      // rows the cap never reveals) drops below a chunk.
                       if (
                         hasMore &&
-                        sessions.length - (chatsList.shown + SHOW_MORE_CHUNK) <
+                        chats.length - (chatsList.shown + SHOW_MORE_CHUNK) <
                           SHOW_MORE_CHUNK
                       )
                         void loadNextPage();
