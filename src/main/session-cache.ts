@@ -18,9 +18,13 @@ import {
 import {
   hasLastActivityColumn,
   hasLastReadColumn,
+  hasSessionKeyColumn,
   sessionUnread,
 } from "./sessions";
-import { getSessionContextFolders } from "./session-context-folder-store";
+import {
+  getAllSessionKeyContextFolders,
+  getSessionContextFolders,
+} from "./session-context-folder-store";
 import {
   filterDerivedWorkspaceFolders,
   localKnownProjectFolders,
@@ -56,6 +60,10 @@ export interface CachedSession {
   messageCount: number;
   model: string;
   contextFolder: string | null;
+  /** Routing key of gateway conversations (issue #168): stable across
+   * session-id rotation, NULL for desktop/CLI sessions. Lets a project
+   * binding survive the gateway's reset cycle for the same conversation. */
+  sessionKey?: string | null;
 }
 
 interface CacheData {
@@ -119,6 +127,7 @@ function readCache(profile?: unknown): CacheData {
             unread: s.unread === true,
             contextFolder:
               typeof s.contextFolder === "string" ? s.contextFolder : null,
+            sessionKey: typeof s.sessionKey === "string" ? s.sessionKey : null,
           }))
         : [],
     };
@@ -168,10 +177,17 @@ function attachContextFolders(
   sessions: CachedSession[],
   folders: Map<string, string>,
   derived: Map<string, string | null>,
+  keyFolders?: Map<string, string>,
 ): CachedSession[] {
   return sessions.map((session) => {
     if (folders.has(session.id)) {
       return { ...session, contextFolder: folders.get(session.id) || null };
+    }
+    // Key-keyed binding (issue #168): the conversation's routing key carries
+    // the project across id rotations; sentinel rows unlink it the same way.
+    const key = session.sessionKey?.trim();
+    if (key && keyFolders?.has(key)) {
+      return { ...session, contextFolder: keyFolders.get(key) || null };
     }
     return { ...session, contextFolder: derived.get(session.id) ?? null };
   });
@@ -219,6 +235,7 @@ export function syncSessionCache(profile?: unknown): CachedSession[] {
                 s.cwd, s.git_repo_root
                 ${hasLastActivityColumn(db) ? ", s.last_activity_at" : ""}
                 ${hasLastReadColumn(db) ? ", s.last_read_at" : ""}
+                ${hasSessionKeyColumn(db) ? ", s.session_key" : ""}
          FROM sessions s
          WHERE ${sessionVisibilityPredicate(db)}
            AND ${sessionSubagentPredicate(db)}
@@ -239,6 +256,7 @@ export function syncSessionCache(profile?: unknown): CachedSession[] {
       git_repo_root: string | null;
       last_activity_at?: number | null;
       last_read_at?: number | null;
+      session_key?: string | null;
     }>;
 
     // Index existing sessions by id once so the per-row update below is
@@ -262,6 +280,7 @@ export function syncSessionCache(profile?: unknown): CachedSession[] {
             row.last_read_at,
             row.last_activity_at ?? row.started_at ?? 0,
           ),
+          sessionKey: row.session_key?.trim() || null,
         });
         continue;
       }
@@ -296,6 +315,7 @@ export function syncSessionCache(profile?: unknown): CachedSession[] {
         source: row.source,
         messageCount: row.message_count,
         model: row.model || "",
+        sessionKey: row.session_key?.trim() || null,
         // Filled in below by the single batched `attachContextFolders` pass
         // over the merged set, so we don't query the store once per new row.
         contextFolder: null,
@@ -308,10 +328,16 @@ export function syncSessionCache(profile?: unknown): CachedSession[] {
       visibleSessions.map((s) => s.id),
       profile,
     );
+    const keyBindings = getAllSessionKeyContextFolders(profile);
     const derived = new Map<string, string | null>(
       rows.map((row) => [row.id, workspaceFolderFromRow(row)]),
     );
-    let allSessions = attachContextFolders(visibleSessions, bindings, derived);
+    let allSessions = attachContextFolders(
+      visibleSessions,
+      bindings,
+      derived,
+      keyBindings,
+    );
     // Derived folders pointing at never-a-workspace dirs (agent home, `/`,
     // `/home`, HERMES_HOME) must not clump sessions into a pseudo-project:
     // they fall back to the flat Chats list. Explicit bindings already won
@@ -346,6 +372,31 @@ export function listCachedSessions(
 ): CachedSession[] {
   const cache = readCache(profile);
   return cache.sessions.slice(offset, offset + limit);
+}
+
+/**
+ * Routing key of a stored session by id (issue #168), so a Move-to-project can
+ * write the key-keyed binding even when the renderer only knows the id.
+ * Cache-first; falls back to a direct DB read behind the column guard. Returns
+ * null for desktop/CLI sessions (no session_key) and unknown ids.
+ */
+export function getSessionKeyById(
+  sessionId: string,
+  profile?: unknown,
+): string | null {
+  if (!sessionId) return null;
+  const cached = readCache(profile).sessions.find((s) => s.id === sessionId);
+  if (cached) return cached.sessionKey?.trim() || null;
+  const db = getDb(profile);
+  if (!db || !hasSessionKeyColumn(db)) return null;
+  try {
+    const row = db
+      .prepare("SELECT session_key FROM sessions WHERE id = ?")
+      .get(sessionId) as { session_key: string | null } | undefined;
+    return row?.session_key?.trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 /**

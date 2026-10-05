@@ -1399,6 +1399,7 @@ if "parent_session_id" in cols and "model_config" in cols:
 order = "COALESCE(last_activity_at, started_at)" if "last_activity_at" in cols else "started_at"
 sel = ", last_activity_at" if "last_activity_at" in cols else ""
 sel += ", last_read_at" if "last_read_at" in cols else ""
+sel += ", session_key" if "session_key" in cols else ""
 rows = conn.execute(
     f"SELECT id, source, started_at{sel}, ended_at, message_count, model, title, cwd, git_repo_root "
     f"FROM sessions {vis} ORDER BY {order} DESC LIMIT ? OFFSET ?",
@@ -1435,7 +1436,8 @@ for r in rows:
                    and ((r["last_activity_at"] if "last_activity_at" in r.keys() else 0) or (r["started_at"] or 0)) > r["last_read_at"]),
         "endedAt": r["ended_at"],
         "messageCount": r["message_count"] or 0, "model": r["model"] or "",
-        "title": r["title"], "preview": "", "contextFolder": folder
+        "title": r["title"], "preview": "", "contextFolder": folder,
+        "sessionKey": (r["session_key"] or "").strip() if "session_key" in r.keys() else None
     })
 print(json.dumps(result))
 conn.close()
@@ -1568,6 +1570,7 @@ if "archived" not in cols:
 order = "COALESCE(last_activity_at, started_at)" if "last_activity_at" in cols else "started_at"
 sel = ", last_activity_at" if "last_activity_at" in cols else ""
 sel += ", last_read_at" if "last_read_at" in cols else ""
+sel += ", session_key" if "session_key" in cols else ""
 # Subagent parity (issue #95): archived delegate-subagent rows stay hidden,
 # mirroring the active-list fallback and the dashboard REST output.
 vis = "archived = 1"
@@ -1605,7 +1608,8 @@ for r in rows:
                    and ((r["last_activity_at"] if "last_activity_at" in r.keys() else 0) or (r["started_at"] or 0)) > r["last_read_at"]),
         "endedAt": r["ended_at"],
         "messageCount": r["message_count"] or 0, "model": r["model"] or "",
-        "title": r["title"], "preview": "", "contextFolder": folder
+        "title": r["title"], "preview": "", "contextFolder": folder,
+        "sessionKey": (r["session_key"] or "").strip() if "session_key" in r.keys() else None
     })
 print(json.dumps(result))
 conn.close()

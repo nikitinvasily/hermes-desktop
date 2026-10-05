@@ -148,7 +148,9 @@ describe("remote session REST bridge", () => {
           return;
         }
 
-        if (req.url === "/api/sessions/sess-rich/messages?include_compacted=true") {
+        if (
+          req.url === "/api/sessions/sess-rich/messages?include_compacted=true"
+        ) {
           res.end(
             JSON.stringify({
               session_id: "sess-rich",
@@ -214,7 +216,9 @@ describe("remote session REST bridge", () => {
           return;
         }
 
-        if (req.url === "/api/sessions/sess-image/messages?include_compacted=true") {
+        if (
+          req.url === "/api/sessions/sess-image/messages?include_compacted=true"
+        ) {
           res.end(
             JSON.stringify({
               session_id: "sess-image",
@@ -236,7 +240,10 @@ describe("remote session REST bridge", () => {
           return;
         }
 
-        if (req.url === "/api/sessions/sess-image-missing/messages?include_compacted=true") {
+        if (
+          req.url ===
+          "/api/sessions/sess-image-missing/messages?include_compacted=true"
+        ) {
           res.end(
             JSON.stringify({
               session_id: "sess-image-missing",
@@ -442,6 +449,8 @@ describe("remote session REST bridge", () => {
         // Workspace folder derived from the dashboard row's cwd so remote
         // sessions group by project like local ones (issue #15).
         contextFolder: "/home/hermes/.hermes/workspace/diy",
+        // No session_key in the dashboard row → null (desktop/CLI session).
+        sessionKey: null,
       },
     ]);
   });

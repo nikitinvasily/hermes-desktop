@@ -27,6 +27,7 @@ vi.mock("../src/main/utils", () => ({
 }));
 vi.mock("../src/main/session-context-folder-store", () => ({
   getSessionContextFolders: () => new Map(),
+  getAllSessionKeyContextFolders: () => new Map(),
 }));
 vi.mock("better-sqlite3", () => ({
   default: class {

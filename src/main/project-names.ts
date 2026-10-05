@@ -80,17 +80,39 @@ export function localProjectFolderNames(profile?: unknown): ProjectFolderNames {
  *
  * Generic over any row carrying an id + contextFolder so the archived list
  * (issue #64) reuses the exact same precedence.
+ *
+ * `keyBindings` (issue #168): session_key-keyed bindings consulted AFTER the
+ * id map. Gateway conversations (Telegram topics) rotate the session id on
+ * every reset cycle while keeping the routing key stable — a fresh row with
+ * no id-binding inherits its conversation's project through the key row.
  */
 export function mergeDesktopBindingsIntoRemoteList<
-  T extends { id: string; contextFolder: string | null },
->(sessions: T[], bindings: Map<string, string>): T[] {
-  if (bindings.size === 0) return sessions;
+  T extends {
+    id: string;
+    contextFolder: string | null;
+    sessionKey?: string | null;
+  },
+>(
+  sessions: T[],
+  bindings: Map<string, string>,
+  keyBindings?: Map<string, string>,
+): T[] {
+  if (bindings.size === 0 && (keyBindings?.size ?? 0) === 0) return sessions;
   return sessions.map((session) => {
-    if (!bindings.has(session.id)) return session;
-    const bound = bindings.get(session.id) || null;
-    return bound === session.contextFolder
-      ? session
-      : { ...session, contextFolder: bound };
+    if (bindings.has(session.id)) {
+      const bound = bindings.get(session.id) || null;
+      return bound === session.contextFolder
+        ? session
+        : { ...session, contextFolder: bound };
+    }
+    const key = session.sessionKey?.trim();
+    if (key && keyBindings?.has(key)) {
+      const bound = keyBindings.get(key) || null;
+      return bound === session.contextFolder
+        ? session
+        : { ...session, contextFolder: bound };
+    }
+    return session;
   });
 }
 

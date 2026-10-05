@@ -10,8 +10,17 @@ import { getDbConnection } from "./db";
  *
  * Mirrors the [[src/main/session-continuation-store.ts]] pattern: a desktop
  * table in the active profile's state.db, keyed by `session_id`.
+ *
+ * Gateway conversations (Telegram topics, Discord threads) rotate the session
+ * id on every reset cycle while keeping a stable routing `session_key`
+ * (`agent:<profile>:<platform>:<chat>:<thread>`, issue #168). Bindings are
+ * therefore stored for BOTH keys: an id-keyed row covers the exact session, a
+ * session_key-keyed row lets the NEXT session of the same conversation inherit
+ * the project automatically. Local desktop sessions have a NULL session_key
+ * and simply keep using the id-keyed row.
  */
 const TABLE = "desktop_session_context_folders";
+const KEY_TABLE = "desktop_session_key_context_folders";
 
 function ensureTable(db: Database.Database): void {
   db.exec(`
@@ -21,12 +30,19 @@ function ensureTable(db: Database.Database): void {
       updated_at REAL NOT NULL DEFAULT (strftime('%s', 'now'))
     );
   `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ${KEY_TABLE} (
+      session_key TEXT PRIMARY KEY,
+      folder_path TEXT NOT NULL,
+      updated_at REAL NOT NULL DEFAULT (strftime('%s', 'now'))
+    );
+  `);
 }
 
-function tableExists(db: Database.Database): boolean {
+function tableExists(db: Database.Database, table: string = TABLE): boolean {
   const row = db
     .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?")
-    .get(TABLE) as { name: string } | undefined;
+    .get(table) as { name: string } | undefined;
   return !!row;
 }
 
@@ -36,11 +52,14 @@ function tableExists(db: Database.Database): boolean {
  * A null/empty folder stores an EMPTY-STRING sentinel row rather than deleting:
  * syncSessionCache derives the sidebar grouping folder from the session's own
  * cwd/git_repo_root when no row exists, so "no row" now means "derive" and the
- * sentinel is the only way to record a deliberate unlink (issue #15).
+ * sentinel is the only way to record a deliberate unlink (issue #15). The
+ * sentinel is written for BOTH keys when a session_key is provided, so an
+ * unlink also suppresses key-inheritance for the conversation's next session.
  */
 export function setSessionContextFolder(
   sessionId: string,
   folder: string | null,
+  sessionKey?: string | null,
 ): void {
   if (!sessionId) return;
   const db = getDbConnection(false);
@@ -48,8 +67,9 @@ export function setSessionContextFolder(
   ensureTable(db);
 
   const path = folder?.trim() || "";
+  const key = sessionKey?.trim() || "";
   if (!path) {
-    // Explicit unlink: keep a sentinel row so the derived cwd/repo folder does
+    // Explicit unlink: keep sentinel rows so the derived cwd/repo folder does
     // not resurrect the grouping the user removed.
     db.prepare(
       `INSERT INTO ${TABLE} (session_id, folder_path, updated_at)
@@ -58,6 +78,15 @@ export function setSessionContextFolder(
          folder_path = '',
          updated_at = excluded.updated_at`,
     ).run(sessionId);
+    if (key) {
+      db.prepare(
+        `INSERT INTO ${KEY_TABLE} (session_key, folder_path, updated_at)
+         VALUES (?, '', strftime('%s', 'now'))
+         ON CONFLICT(session_key) DO UPDATE SET
+           folder_path = '',
+           updated_at = excluded.updated_at`,
+      ).run(key);
+    }
     return;
   }
 
@@ -67,7 +96,16 @@ export function setSessionContextFolder(
      ON CONFLICT(session_id) DO UPDATE SET
        folder_path = excluded.folder_path,
        updated_at = excluded.updated_at`,
-  ).run(sessionId, folder);
+  ).run(sessionId, path);
+  if (key) {
+    db.prepare(
+      `INSERT INTO ${KEY_TABLE} (session_key, folder_path, updated_at)
+       VALUES (?, ?, strftime('%s', 'now'))
+       ON CONFLICT(session_key) DO UPDATE SET
+         folder_path = excluded.folder_path,
+         updated_at = excluded.updated_at`,
+    ).run(key, path);
+  }
 }
 
 /** Read the folder linked to a session, or null when none is stored. */
@@ -142,7 +180,28 @@ export function getAllSessionContextFolders(
 }
 
 /**
- * Drop a session's linked-folder row. Called from `deleteSessionRows` so it
+ * Read EVERY session_key-keyed binding: routing key → folder path, sentinels
+ * preserved. Remote/SSH list paths merge this AFTER the id-keyed map so a
+ * conversation whose session id rotated (gateway reset cycle, issue #168)
+ * still lands in its project: precedence id row > key row > derived cwd.
+ */
+export function getAllSessionKeyContextFolders(
+  profile?: unknown,
+): Map<string, string> {
+  const result = new Map<string, string>();
+  const db = getDbConnection(true, profile);
+  if (!db || !tableExists(db, KEY_TABLE)) return result;
+  const rows = db
+    .prepare(`SELECT session_key, folder_path FROM ${KEY_TABLE}`)
+    .all() as Array<{ session_key: string; folder_path: string }>;
+  for (const r of rows) {
+    result.set(r.session_key, r.folder_path ?? "");
+  }
+  return result;
+}
+
+/**
+ * Drop a session's linked-folder rows. Called from `deleteSessionRows` so it
  * runs inside the same delete transaction as the other per-session cleanup.
  */
 export function deleteSessionContextFolderForSession(

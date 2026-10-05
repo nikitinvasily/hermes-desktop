@@ -97,10 +97,12 @@ export interface ProjectGroupSessions {
 export function regroupTreeSessionsByBindings(
   groups: Map<string, CachedSession[]>,
   bindings: Map<string, string>,
+  keyBindings?: Map<string, string>,
 ): Record<string, CachedSession[]> {
   const merged = mergeDesktopBindingsIntoRemoteList(
     Array.from(groups.values()).flat(),
     bindings,
+    keyBindings,
   );
   const out: Record<string, CachedSession[]> = {};
   const seen = new Set<string>();
