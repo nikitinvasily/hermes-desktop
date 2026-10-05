@@ -149,11 +149,15 @@ describe("DashboardGatewayClient server→client requests", () => {
       method: "approval",
       params: { session_id: "s1", request_id: "up-1", choices: ["once"] },
     });
-    expect(onServerRequest).toHaveBeenCalledWith("approval", {
-      session_id: "s1",
-      request_id: "up-1",
-      choices: ["once"],
-    });
+    expect(onServerRequest).toHaveBeenCalledWith(
+      "approval",
+      {
+        session_id: "s1",
+        request_id: "up-1",
+        choices: ["once"],
+      },
+      "srq-1",
+    );
     await vi.waitFor(() => {
       expect(sentFrames().find((frame) => frame.id === "srq-1")).toEqual({
         jsonrpc: "2.0",

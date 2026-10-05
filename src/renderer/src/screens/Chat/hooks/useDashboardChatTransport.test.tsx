@@ -28,7 +28,11 @@ const dashboardMock = vi.hoisted(() => ({
   onClose: null as (() => void) | null,
   onEvent: null as ((event: DashboardRpcEvent) => void) | null,
   onServerRequest: null as
-    | ((method: string, params: Record<string, unknown>) => unknown)
+    | ((
+        method: string,
+        params: Record<string, unknown>,
+        frameId?: number | string,
+      ) => unknown)
     | null,
   request: vi.fn(),
 }));
@@ -588,6 +592,67 @@ describe("useDashboardChatTransport recovery", () => {
     expect(api.messages?.find((m) => m.kind === "clarify")).toMatchObject({
       resolved: true,
       answer: "staging",
+    });
+  });
+
+  // @lat: [[dashboard-clarify#Batch server-request delivery]]
+  it("answers a batch server-request clarify via clarify.lock with the frame id (issue #158)", async () => {
+    // Newer cores send batch clarify as a server→client request whose frame id
+    // (`srq-…`) is the only request identity: answers must lock through
+    // `clarify.lock {request_id, question_id}` keyed by that id, never by a
+    // synthetic one.
+    dashboardMock.request.mockImplementation(async (method, params) => {
+      if (method === "session.create")
+        return { session_id: "live", stored_session_id: "stored" };
+      if (method === "model.options")
+        return { model: "bad-model", provider: "bad-provider", providers: [] };
+      if (method === "clarify.lock") {
+        if (params?.request_id !== "srq-live1") return { status: "expired" };
+        return { status: "ok", remaining: [] };
+      }
+      if (method === "clarify.respond")
+        throw new Error("Method not found: clarify.respond");
+      return {};
+    });
+    const api: HarnessApi = {};
+    render(<Harness api={api} />);
+    await act(async () => {
+      await api.send?.("hello");
+    });
+    let resolved: unknown = null;
+    await act(async () => {
+      const answer = dashboardMock.onServerRequest?.(
+        "clarify",
+        {
+          session_id: "live",
+          questions: [
+            { qid: "q0", question: "When?", choices: ["am", "pm"] },
+          ],
+        },
+        "srq-live1",
+      );
+      void Promise.resolve(answer).then((result) => {
+        resolved = result;
+      });
+    });
+    const card = api.messages?.find(
+      (m) => m.kind === "clarify" && m.qid === "q0",
+    ) as { requestId?: string } | undefined;
+    expect(card?.requestId).toBe("srq-live1");
+    await act(async () => {
+      expect(await api.respondClarify?.("srq-live1", "am", "q0")).toBe(true);
+    });
+    expect(
+      dashboardMock.request.mock.calls.some(
+        ([method, params]) =>
+          method === "clarify.lock" &&
+          (params as Record<string, unknown>)?.request_id === "srq-live1" &&
+          (params as Record<string, unknown>)?.question_id === "q0",
+      ),
+    ).toBe(true);
+    expect(api.messages?.find((m) => m.kind === "clarify")).toMatchObject({
+      resolved: true,
+      answer: "am",
     });
   });
 

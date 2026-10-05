@@ -1640,6 +1640,7 @@ export function useDashboardChatTransport({
     (
       method: string,
       params: Record<string, unknown>,
+      frameId?: number | string,
     ) =>
       | Record<string, unknown>
       | Promise<Record<string, unknown> | void>
@@ -1701,8 +1702,8 @@ export function useDashboardChatTransport({
           }
           const client: DashboardGatewayClient = new DashboardGatewayClient({
             onEvent: handleGatewayEvent,
-            onServerRequest: (method, params) =>
-              handleServerRequestRef.current(method, params),
+            onServerRequest: (method, params, frameId) =>
+              handleServerRequestRef.current(method, params, frameId),
             onClose: () => {
               if (clientRef.current === client) {
                 expirePendingClarifyRef.current(true);
@@ -2803,17 +2804,27 @@ export function useDashboardChatTransport({
     (
       method: string,
       params: Record<string, unknown>,
+      frameId?: number | string,
     ):
       | Record<string, unknown>
       | Promise<Record<string, unknown> | void>
       | false => {
+      // The frame's JSON-RPC id (`srq-…`) is the request identity the backend
+      // knows: batch answers lock through `clarify.lock {request_id}` and the
+      // resume replay keys open requests by it, so prefer it over any
+      // synthetic id whenever the transport can supply it.
+      const wireId =
+        (typeof frameId === "string" && frameId) ||
+        (typeof params.__requestId === "string" && params.__requestId) ||
+        (typeof frameId === "number" && String(frameId)) ||
+        "";
       if (method === "approval") {
         // Surface the card through the same event pipeline the legacy
         // approval.request event used, then wait for the user's answer.
         const requestId =
           typeof params.request_id === "string"
             ? params.request_id
-            : `server-approval-${++approvalNonceRef.current}`;
+            : wireId || `server-approval-${++approvalNonceRef.current}`;
         handleGatewayEvent({
           type: "approval.request",
           session_id:
@@ -2833,7 +2844,7 @@ export function useDashboardChatTransport({
         const requestId =
           typeof params.request_id === "string" && params.request_id
             ? params.request_id
-            : `server-clarify-${Date.now()}`;
+            : wireId || `server-clarify-${Date.now()}`;
         handleGatewayEvent({
           type: "clarify.request",
           session_id:
