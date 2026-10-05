@@ -15,6 +15,12 @@ Gateway events preserve questions and choices as interactive cards rather than f
 
 Choice, free-text and skip answers use clarify.respond on the originating dashboard session.
 
+## Batch server-request delivery
+
+Newer cores deliver clarify as a server→client JSON-RPC request keyed by its frame id (`srq-…`), the only request identity the backend knows.
+
+Single questions answer with the result frame; batch answers lock through `clarify.lock {request_id, question_id}` keyed by that frame id.
+
 ## Composer fallback
 
 Composer answers share the card delivery path and resolve the visible question.
