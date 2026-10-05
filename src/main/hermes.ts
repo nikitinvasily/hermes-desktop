@@ -1459,6 +1459,10 @@ export interface ChatCallbacks {
     question: string;
     choices: string[];
   }) => void;
+  /** The backend withdrew its clarify request (`request.cancel`: answered
+   *  elsewhere, timeout, interrupt). The renderer flips the matching card to
+   *  unavailable so a late answer cannot target a dead request. */
+  onClarifyCancel?: (requestId: string) => void;
   onApproval?: (req: ChatApprovalRequest) => boolean | void;
 }
 
@@ -2466,11 +2470,18 @@ async function sendMessageViaTuiGateway(
       approvalByServerRequest.delete(serverRequestId);
     }
     if (clarifyServerRequestIds.has(serverRequestId)) {
+      // Prefer the cancelled request's own id when the frame echoes it;
+      // otherwise fall back to the pending one we are about to clear.
+      const cancelledRequestId =
+        typeof payload.request_id === "string" && payload.request_id
+          ? payload.request_id
+          : pendingClarifyId;
       if (pendingClarifyId) {
         clearPendingClarify(pendingClarifyId);
         pendingClarifyId = null;
       }
       clarifyServerRequestIds.delete(serverRequestId);
+      if (cancelledRequestId) cb.onClarifyCancel?.(cancelledRequestId);
     }
   });
   const cleanupServerHandlers = (): void => {
@@ -2481,10 +2492,11 @@ async function sendMessageViaTuiGateway(
   function finish(error?: string): void {
     if (finished) return;
     finished = true;
-    if (pendingClarifyId) {
-      clearPendingClarify(pendingClarifyId);
-      pendingClarifyId = null;
-    }
+    // The pending clarify resolver SURVIVES turn end: the backend's clarify
+    // request is the authority for when it is withdrawn (a `request.cancel`
+    // notification clears it). A turn that ended locally (WS blip, stream end)
+    // while the question is still open server-side must stay answerable, or a
+    // late answer can never be delivered (issue #154 / TODO #83).
     clearApprovals();
     cleanupServerHandlers();
     cleanup();
@@ -2500,10 +2512,8 @@ async function sendMessageViaTuiGateway(
   function cancel(): void {
     if (finished) return;
     finished = true;
-    if (pendingClarifyId) {
-      clearPendingClarify(pendingClarifyId);
-      pendingClarifyId = null;
-    }
+    // Same as finish(): the clarify resolver outlives a locally-cancelled turn
+    // unless the backend withdraws the request via `request.cancel` (issue #154).
     clearApprovals();
     cleanupServerHandlers();
     cleanup();

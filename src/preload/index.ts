@@ -842,6 +842,18 @@ const hermesAPI = {
     return () => ipcRenderer.removeListener("chat-clarify-request", handler);
   },
 
+  /** The backend withdrew its clarify request (answered elsewhere, timeout,
+   *  interrupt) — the matching card flips to unavailable. */
+  onClarifyCancel: (callback: (runId: string, requestId: string) => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      runId: string,
+      requestId: string,
+    ): void => callback(runId, requestId);
+    ipcRenderer.on("chat-clarify-cancel", handler);
+    return () => ipcRenderer.removeListener("chat-clarify-cancel", handler);
+  },
+
   /** Answer an inline clarify card. An empty/skip answer lets the agent proceed
    *  autonomously (the gateway treats it as "you decide"). */
   respondClarify: (requestId: string, answer: string): Promise<boolean> =>

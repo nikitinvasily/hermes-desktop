@@ -287,6 +287,22 @@ export function useChatIPC({
       },
     );
 
+    const cleanupClarifyCancel = window.hermesAPI.onClarifyCancel(
+      (eventRunId, requestId) => {
+        if (!eventMatchesRun(eventRunId, runId) || !requestId) return;
+        setMessages((prev) =>
+          prev.map((message) =>
+            message.kind === "clarify" &&
+            message.responsePath !== "dashboard" &&
+            message.requestId === requestId &&
+            !message.resolved
+              ? { ...message, unavailable: true }
+              : message,
+          ),
+        );
+      },
+    );
+
     const cleanupApproval = window.hermesAPI.onApprovalRequest(
       (eventRunId, req) => {
         if (!eventMatchesRun(eventRunId, runId)) return;
@@ -409,6 +425,7 @@ export function useChatIPC({
       cleanupDone();
       cleanupError();
       cleanupClarify();
+      cleanupClarifyCancel();
       cleanupApproval();
       cleanupToolProgress();
       cleanupToolEvent();

@@ -152,6 +152,8 @@ Transport tests verify a withdrawn server request clears the pending approval ca
 
 A server `clarify` request resolves with `{answer}` when the renderer's clarify-respond IPC path fires the shared pendingClarify resolver; `sudo`/`secret` requests are answered `{value}` from the hardened askpass modal (vault-first for secrets).
 
+The pending clarify resolver SURVIVES turn end (`finish`/`cancel` in [[src/main/hermes.ts]]): the backend's clarify request is the authority for when it is withdrawn, and only a `request.cancel` notification clears it — a late answer to a question whose turn already ended is still delivered (issue #154, TODO #83). On withdrawal the renderer is notified via the `chat-clarify-cancel` IPC event and flips the card to unavailable. On the dashboard transport, a clarify answer that fails delivery retires the pending slot so the composer's next message goes out as a normal prompt instead of being swallowed by the clarify intercept.
+
 ### Runs approval fail-closed
 
 Runs transport tests verify approval events stop the original run with its captured credentials, never POST an approval, and never replay through chat completions.

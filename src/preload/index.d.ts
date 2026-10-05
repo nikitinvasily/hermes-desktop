@@ -578,6 +578,9 @@ interface HermesAPI {
       },
     ) => void,
   ) => () => void;
+  onClarifyCancel: (
+    callback: (runId: string, requestId: string) => void,
+  ) => () => void;
   respondClarify: (requestId: string, answer: string) => Promise<boolean>;
   onApprovalRequest: (
     callback: (runId: string, req: ChatApprovalRequest) => void,
