@@ -191,12 +191,14 @@ const remote = {
 function callbacks(): ChatCallbacks & {
   onApproval: Mock<(approval: ChatApprovalRequest) => boolean>;
   onClarify: Mock<(req: unknown) => void>;
+  onClarifyCancel: Mock<(requestId: string) => void>;
 } {
   return {
     onChunk: vi.fn(),
     onDone: vi.fn(),
     onError: vi.fn(),
     onClarify: vi.fn(),
+    onClarifyCancel: vi.fn(),
     onApproval: vi.fn((approval: ChatApprovalRequest) =>
       bindPendingApproval(approval.requestId, {
         ownerId: 1,
@@ -516,6 +518,89 @@ describe("server-to-client requests", () => {
         result: { answer: "eu" },
       }),
     );
+  });
+
+  // @lat: [[chat-commands#Structured command approvals#Clarify server requests]]
+  it("keeps a clarify answer deliverable after the turn ends (issue #154)", async () => {
+    const cb = callbacks();
+    const handle = await send(cb);
+    const socket = transport.sockets.at(-1)!;
+    socket.emit(
+      "message",
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: "srq-clarify-late",
+        method: "clarify",
+        params: {
+          session_id: "live-1",
+          request_id: "upstream-q-late",
+          question: "Which region?",
+          choices: ["eu"],
+        },
+      }),
+    );
+    expect(cb.onClarify).toHaveBeenCalled();
+    // The turn ends (stream done) while the question is still unanswered.
+    socket.emit(
+      "message",
+      JSON.stringify({
+        method: "event",
+        params: {
+          type: "message.complete",
+          session_id: "live-1",
+          payload: {},
+        },
+      }),
+    );
+    await vi.waitFor(() => expect(cb.onDone).toHaveBeenCalled());
+    // The resolver must SURVIVE the turn end: a late answer still resolves
+    // the still-open server request instead of returning false forever.
+    const { resolvePendingClarify } = await import("../src/main/hermes");
+    expect(resolvePendingClarify("upstream-q-late", "eu")).toBe(true);
+    await vi.waitFor(() =>
+      expect(transport.rpc).toContainEqual({
+        jsonrpc: "2.0",
+        id: "srq-clarify-late",
+        result: { answer: "eu" },
+      }),
+    );
+    expect(cb.onError).not.toHaveBeenCalled();
+    handle.abort();
+  });
+
+  // @lat: [[chat-commands#Structured command approvals#Request cancel teardown]]
+  it("request.cancel withdraws a clarify request and notifies the renderer (issue #154)", async () => {
+    const cb = callbacks();
+    const handle = await send(cb);
+    const socket = transport.sockets.at(-1)!;
+    socket.emit(
+      "message",
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: "srq-clarify-cancel",
+        method: "clarify",
+        params: {
+          session_id: "live-1",
+          request_id: "upstream-q-cancel",
+          question: "Which region?",
+          choices: ["eu"],
+        },
+      }),
+    );
+    expect(cb.onClarify).toHaveBeenCalled();
+    socket.emit(
+      "message",
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "request.cancel",
+        params: { id: "srq-clarify-cancel", method: "clarify" },
+      }),
+    );
+    expect(cb.onClarifyCancel).toHaveBeenCalledWith("upstream-q-cancel");
+    // The withdrawn request can no longer be answered.
+    const { resolvePendingClarify } = await import("../src/main/hermes");
+    expect(resolvePendingClarify("upstream-q-cancel", "eu")).toBe(false);
+    handle.abort();
   });
 
   it("answers unknown methods with -32601", async () => {

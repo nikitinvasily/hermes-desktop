@@ -65,6 +65,7 @@ function installHermesApi(callbacks: ChatIpcCallbacks): {
         return vi.fn();
       },
       onClarifyRequest: vi.fn(() => vi.fn()),
+      onClarifyCancel: vi.fn(() => vi.fn()),
       onApprovalRequest: (cb: Callback<[string, ChatApprovalRequest]>) => {
         callbacks.approval = cb;
         return vi.fn();

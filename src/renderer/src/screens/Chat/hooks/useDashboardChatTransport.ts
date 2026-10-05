@@ -2191,25 +2191,19 @@ export function useDashboardChatTransport({
       if (!enabled) return false;
       const pendingClarifyRequestId = pendingClarifyRef.current?.requestId;
       if (pendingClarifyRequestId) {
+        let delivered = false;
         try {
-          if (!(await respondClarify(pendingClarifyRequestId, text))) {
-            throw new Error(
-              "Could not deliver the clarification answer. Retry from the question card.",
-            );
-          }
-          return true;
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          const activeTurn = activeTurnRef.current;
-          if (activeTurn) activeTurn.status = "failed";
-          setMessages((prev) =>
-            markActiveTurnFailed(prev, message, activeTurn),
-          );
-          activeTurnRef.current = null;
-          setToolProgress(null);
-          setIsLoading(false);
-          return true;
+          delivered = await respondClarify(pendingClarifyRequestId, text);
+        } catch {
+          delivered = false;
         }
+        if (delivered) return true;
+        // The clarify request is gone server-side (turn ended without the
+        // question being withdrawn is handled in main; here the pending slot
+        // itself failed to deliver). Retiring the slot and falling through to
+        // a NORMAL prompt send keeps the chat usable — the old behavior failed
+        // the turn and swallowed every following message (issue #154 / #83).
+        expirePendingClarifyRef.current();
       }
       const dashboardText = dashboardPromptTextForAttachments(
         text,

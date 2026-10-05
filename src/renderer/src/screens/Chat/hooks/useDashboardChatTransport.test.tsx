@@ -487,6 +487,37 @@ describe("useDashboardChatTransport recovery", () => {
     ).toHaveLength(1);
   });
 
+  // @lat: [[dashboard-clarify#Composer fallback]]
+  it("falls back to a normal prompt send when the clarify delivery fails (issue #154)", async () => {
+    const api = await clarifyHarness();
+    // The clarify.respond RPC fails (request gone server-side).
+    dashboardMock.request.mockImplementation(async (method) => {
+      if (method === "session.create")
+        return { session_id: "live", stored_session_id: "stored" };
+      if (method === "model.options")
+        return { model: "bad-model", provider: "bad-provider", providers: [] };
+      if (method === "clarify.respond") return { status: "expired" };
+      return {};
+    });
+    await act(async () => {
+      await api.send?.("just proceed with staging");
+    });
+    // The stuck pending slot was retired: the card is unavailable…
+    expect(api.messages?.find((m) => m.kind === "clarify")).toMatchObject({
+      unavailable: true,
+    });
+    // …and the message went out as a NORMAL prompt instead of being
+    // swallowed by the old clarify-intercept error path.
+    expect(
+      dashboardMock.request.mock.calls.some(
+        ([method, params]) =>
+          method === "prompt.submit" &&
+          typeof (params as { text?: string })?.text === "string" &&
+          ((params as { text: string }).text ?? "").includes("staging"),
+      ),
+    ).toBe(true);
+  });
+
   // @lat: [[dashboard-clarify#Retry and duplicate answers]]
   it("keeps a failed answer retryable and blocks concurrent card/composer replies", async () => {
     const api = await clarifyHarness();
