@@ -351,6 +351,52 @@ describe("SidebarRecentSessions projects-only groups (issue #68)", () => {
       await screen.findByRole("button", { name: "New chat in proj" }),
     ).toBeTruthy();
   });
+
+  it("shows a Show more row for the 6th+ project and reveals it on click (issue #160)", async () => {
+    const names = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta"];
+    listCachedSessions.mockImplementation(
+      async (): Promise<
+        Array<{ id: string; title: string; contextFolder?: string | null }>
+      > => [],
+    );
+    syncSessionCache.mockImplementation(
+      async (): Promise<
+        Array<{ id: string; title: string; contextFolder?: string | null }>
+      > => [],
+    );
+    renderSidebarProjects(
+      names.map((name) => ({
+        id: `p-${name}`,
+        slug: name,
+        name: name.charAt(0).toUpperCase() + name.slice(1),
+        primaryPath: `/tmp/${name}`,
+        folders: [{ path: `/tmp/${name}` }],
+      })),
+    );
+
+    // First chunk: 5 of the 7 headings paint; the remaining 2 do not. Order
+    // is alphabetical by display name (issue #74), so derive both sets.
+    const sorted = [...names].sort((a, b) => a.localeCompare(b, undefined));
+    const cap = (n: string): string =>
+      n.charAt(0).toUpperCase() + n.slice(1);
+    expect(await screen.findByText(cap(sorted[0]))).toBeTruthy();
+    for (const name of sorted.slice(0, 5)) {
+      expect(screen.getByText(cap(name)));
+    }
+    for (const name of sorted.slice(5)) {
+      expect(screen.queryByText(cap(name))).toBeNull();
+    }
+
+    // The reveal row exists (the i18n mock does not interpolate, so the
+    // hidden count is asserted by the reveal behavior itself).
+    const showMore = screen.getByText("navigation.showMoreCount");
+
+    // Click reveals the remaining chunk: all 7 headings are visible.
+    fireEvent.click(showMore);
+    await screen.findByText(cap(sorted[5]));
+    expect(screen.getByText(cap(sorted[6]))).toBeTruthy();
+    expect(screen.queryByText("navigation.showMoreCount")).toBeNull();
+  });
 });
 
 describe("SidebarRecentSessions ordering (issue #74)", () => {

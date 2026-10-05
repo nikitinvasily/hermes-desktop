@@ -1741,6 +1741,11 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
                     </div>
                   );
                 })}
+                <ShowMoreRow
+                  hiddenCount={projectsList.hiddenCount}
+                  onShowMore={projectsList.showMore}
+                  tabIndex={expanded && projectsOpen ? 0 : -1}
+                />
               </div>
             </div>
           </div>
