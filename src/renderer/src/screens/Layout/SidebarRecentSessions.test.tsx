@@ -1,12 +1,15 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import SidebarRecentSessions from "./SidebarRecentSessions";
 
 declare const __dirname: string;
 
-const mainCss = readFileSync(join(__dirname, "../../assets/main.css"), "utf8");
+// The fs mock below (backlog #92 bindings) nulls readFileSync, so read the
+// CSS through fs/promises which the mock does not cover.
+const mainCss = await import("node:fs/promises").then((fsp) =>
+  fsp.readFile(join(__dirname, "../../assets/main.css"), "utf8"),
+);
 
 // The component owns its data fetching; stub the hermesAPI bridge so no
 // profile DB is touched and the list stays whatever the tests seed.
@@ -35,6 +38,22 @@ vi.mock("../../components/useI18n", () => ({
 vi.mock("../../env", async (importOriginal) => ({
   ...(await importOriginal<object>()),
 }));
+
+// Backlog #92: tests that need chats WITHOUT desktop bindings (so they
+// group into the flat Chats section) rely on this nulling readFileSync —
+// the bindings file read returns null. The CSS-contract read at the top
+// uses fs/promises, which this mock does not cover.
+vi.mock("fs", () => ({
+  readFileSync: (): null => null,
+}));
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = (await importOriginal()) as object;
+  return {
+    ...actual,
+    readFileSync: (): null => null,
+  };
+});
 
 // window.hermesAPI is injected by preload; provide the subset the sidebar uses.
 beforeEach(() => {
@@ -401,6 +420,152 @@ describe("SidebarRecentSessions projects-only groups (issue #68)", () => {
     await screen.findByText(cap(sorted[5]));
     expect(screen.getByText(cap(sorted[6]))).toBeTruthy();
     expect(screen.queryByText("navigation.showMoreCount")).toBeNull();
+  });
+});
+
+describe("SidebarRecentSessions single pagination (backlog #92)", () => {
+  function chatsFixture(
+    count: number,
+  ): Array<{ id: string; title: string; contextFolder?: string | null }> {
+    return Array.from({ length: count }, (_, i) => ({
+      id: `chat-${i}`,
+      title: `Chat ${i}`,
+      contextFolder: null,
+    }));
+  }
+
+  it("keeps the Show more row alive (uncounted) while the server has more rows", async () => {
+    // Offset-aware server: 61 chats exist; the first sync window hands the
+    // renderer its top 51, the page fetch walks the rest by offset.
+    const serverRows = chatsFixture(61);
+    syncSessionCache.mockImplementation(async () => serverRows.slice(0, 51));
+    listCachedSessions.mockImplementation(
+      async (_l: number, offset: number) =>
+        serverRows.slice(offset, offset + 31),
+    );
+    renderSidebar(() => undefined);
+
+    await screen.findByText("Chat 0");
+    // While hasMore is true the label carries NO count: the hidden count is
+    // provisional (a prefetch can grow it), and a number that jumps upward
+    // mid-reveal reads as a bug (user report on #92).
+    const row = (): HTMLElement => screen.getByText("common.showMore");
+    expect(screen.queryByText("navigation.showMoreCount")).toBeNull();
+    // 6 chunks of 5 reveal the 30 initially held rows. Near the end of the
+    // held window the click prefetches the next page (rows 30..60 land), so
+    // the row survives with hidden rows beyond the reveal.
+    for (let i = 0; i < 6; i++) {
+      fireEvent.click(row());
+    }
+    expect(screen.getByText("common.showMore")).toBeTruthy();
+    expect(screen.queryByText("Chat 29")).toBeTruthy();
+    expect(screen.queryByText("Chat 30")).toBeNull();
+    // The prefetch fired during those clicks (beyond the two initial loads).
+    expect(listCachedSessions.mock.calls.length).toBeGreaterThan(2);
+  });
+
+  it("grows the sync window with the loaded list instead of shrinking it on refresh", async () => {
+    const serverRows = chatsFixture(91);
+    // First sync hands the renderer 51 rows (window 50 + end-probe).
+    syncSessionCache.mockImplementation(async () => serverRows.slice(0, 51));
+    listCachedSessions.mockImplementation(async (_l: number, offset: number) =>
+      serverRows.slice(offset, offset + 31),
+    );
+    renderSidebar(() => undefined);
+    await screen.findByText("Chat 0");
+
+    // Reveal chunks until the loaded remainder runs low → prefetch fires and
+    // the loaded list grows past the initial sync window (uncounted label
+    // throughout: the server may always have more rows).
+    const row = (): HTMLElement => screen.getByText("common.showMore");
+    for (let i = 0; i < 9; i++) {
+      fireEvent.click(row());
+    }
+    await waitFor(() => {
+      // A page fetch was issued beyond the initial two loads.
+      expect(listCachedSessions.mock.calls.length).toBeGreaterThan(2);
+    });
+
+    // The refresh sync window now follows the loaded size (>= 50, capped at
+    // 100 by the dashboard limit) — never the flat 50 of the old behavior.
+    const calls = syncSessionCache.mock.calls as unknown as Array<unknown[]>;
+    const withWindow = calls.filter(
+      (c) => typeof c[2] === "number" && (c[2] as number) >= 50,
+    );
+    expect(withWindow.length).toBeGreaterThan(0);
+  });
+
+  it("ends the row after full reveal: duplicate pages kill it, refresh only resurrects with real rows", async () => {
+    // 61 rows on the server; the first sync window hands over 51 (renderer
+    // holds their top 30). Page fetches at offset >= 30 return only rows
+    // the window already delivered (the recency-reorder race). Two such
+    // consecutive full-no-append pages end the offset walk.
+    const serverRows = chatsFixture(61);
+    syncSessionCache.mockImplementation(async () => serverRows.slice(0, 51));
+    const heldPage = [...serverRows.slice(0, 29), serverRows[0], serverRows[1]];
+    listCachedSessions.mockImplementation(
+      async (_l: number, offset: number) =>
+        offset < 30 ? serverRows.slice(offset, offset + 31) : heldPage,
+    );
+    renderSidebar(() => undefined);
+    await screen.findByText("Chat 0");
+
+    const row = (): HTMLElement | null =>
+      screen.queryByText("common.showMore") ??
+      screen.queryByText("navigation.showMoreCount");
+    // Reveal: clicks walk the held 30 rows, prefetches hit the duplicate
+    // page — one duplicate doesn't kill (streak < 2), the next click's
+    // prefetch does. Loop guards on the row disappearing.
+    for (let i = 0; i < 12 && row(); i++) {
+      fireEvent.click(row() as HTMLElement);
+      // Let the async prefetch append + streak settle.
+      await waitFor(() => {});
+      await waitFor(() => {});
+    }
+    await waitFor(() => {
+      expect(screen.queryByText("common.showMore")).toBeNull();
+      expect(screen.queryByText("navigation.showMoreCount")).toBeNull();
+    });
+
+    // A refresh sync delivers the window truth (51 rows > 30 loaded): the
+    // row RETURNS, honestly, with rows to show — uncounted again, because
+    // hasMore=true means the server may still hold more below the window.
+    window.dispatchEvent(new Event("hermes-sessions-maybe-changed"));
+    await waitFor(() => {
+      expect(screen.queryByText("common.showMore")).toBeTruthy();
+    });
+    // Reveal the rest: each click also prefetches (hasMore is true again),
+    // the duplicate pages rebuild the streak and the row dies for good.
+    // Flush between clicks so the async fetches are not swallowed by the
+    // reentry guard.
+    for (let i = 0; i < 8 && row(); i++) {
+      fireEvent.click(row() as HTMLElement);
+      await waitFor(() => {});
+      await waitFor(() => {});
+    }
+    window.dispatchEvent(new Event("hermes-sessions-maybe-changed"));
+    await waitFor(() => {
+      expect(screen.queryByText("common.showMore")).toBeNull();
+      expect(screen.queryByText("navigation.showMoreCount")).toBeNull();
+    });
+  });
+
+  it("hides the Show more row when everything is loaded and the server has no more", async () => {
+    // 8 chats, all loaded, sync confirms exactly 8 (8 <= 30 → hasMore=false).
+    const fixture = chatsFixture(8);
+    syncSessionCache.mockImplementation(async () => fixture);
+    listCachedSessions.mockImplementation(async () => fixture);
+    renderSidebar(() => undefined);
+
+    await screen.findByText("Chat 0");
+    // Chunk cap 5 → one click reveals all 8; the row must disappear (no
+    // hidden rows, no server rows either).
+    fireEvent.click(screen.getByText("navigation.showMoreCount"));
+    await waitFor(() => {
+      expect(screen.queryByText("navigation.showMoreCount")).toBeNull();
+    });
+    expect(screen.queryByText("common.showMore")).toBeNull();
+    expect(screen.getByText("Chat 7")).toBeTruthy();
   });
 });
 

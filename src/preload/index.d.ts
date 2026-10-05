@@ -939,6 +939,7 @@ interface HermesAPI {
   syncSessionCache: (
     connectionId?: string,
     profile?: string,
+    windowRows?: number,
   ) => Promise<
     Array<{
       id: string;

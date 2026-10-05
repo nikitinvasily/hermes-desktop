@@ -99,6 +99,27 @@ function activityKey(s: RecentSession): number {
 
 // ChatGPT-style paged conversation list under the pinned app navigation.
 export const RECENT_SESSIONS_PAGE_SIZE = 30;
+/**
+ * Remote sync fetch window (backlog #92): the dashboard REST API caps
+ * `limit` at 100 (422 above), so the window the sidebar asks for on sync
+ * follows the loaded list size but never exceeds that ceiling. The +1
+ * end-probe mirrors the page-size convention: a response longer than the
+ * loaded count proves the server still has rows.
+ */
+export const SYNC_WINDOW_MIN_ROWS = 50;
+export const SYNC_WINDOW_MAX_ROWS = 100;
+
+/**
+ * Sync window size for the CURRENTLY loaded list (backlog #92): the periodic
+ * refresh must never shrink an already-grown Chats list, so the window
+ * follows the loaded count (min 50, dashboard cap 100, +1 end-probe).
+ */
+export function syncWindowRows(loadedCount: number): number {
+  return Math.min(
+    Math.max(SYNC_WINDOW_MIN_ROWS, loadedCount) + 1,
+    SYNC_WINDOW_MAX_ROWS,
+  );
+}
 
 // Re-sync cadence while the list is visible. Deliberately slower than the
 // Sessions screen (30s) — the sidebar is always on screen, so this interval
@@ -108,7 +129,6 @@ const RECENT_REFRESH_MS = 60_000;
 // Minimum gap between event-driven refreshes (focus, session switch) so a
 // burst of focus/blur events doesn't hammer state.db.
 const REFRESH_THROTTLE_MS = 5_000;
-const INFINITE_SCROLL_THRESHOLD_PX = 180;
 const PROJECTS_OPEN_KEY = "hermes.sidebar.projectsOpen";
 const CHATS_OPEN_KEY = "hermes.sidebar.chatsOpen";
 const FOLDERS_CLOSED_KEY = "hermes.sidebar.closedProjectFolders";
@@ -412,6 +432,8 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   const sessionsRef = useRef<RecentSession[]>([]);
   const hasMoreRef = useRef(false);
   const loadingMoreRef = useRef(false);
+  // Consecutive full pages that appended zero new rows (backlog #92).
+  const duplicatePageStreakRef = useRef(0);
 
   useEffect(() => {
     sessionsRef.current = sessions;
@@ -495,9 +517,37 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         RECENT_SESSIONS_PAGE_SIZE,
         sessionsRef.current.length,
       );
-      setHasMore(list.length > loadedLimit);
+      // Backlog #92: a sync shorter than the loaded list is ambiguous —
+      // either rows disappeared (archive/delete) or the fetch window was
+      // capped at the dashboard's 100-row limit with rows still below it.
+      // The cap case is knowable: it only happens once the loaded list has
+      // reached SYNC_WINDOW_MAX_ROWS. In that case keep the old tail (rows
+      // below the window are not deleted, just unfetched); otherwise the
+      // shorter list IS the truth and deletions must win.
+      const windowWasCapped =
+        sessionsRef.current.length >= SYNC_WINDOW_MAX_ROWS &&
+        list.length < sessionsRef.current.length;
+      // A capped window carries NO information about rows beyond it: keep
+      // the current hasMore (appendPage's end-detection stands) instead of
+      // resurrecting the Show more row on every refresh after the user
+      // already expanded the whole list (user report on #92).
+      if (!windowWasCapped) setHasMore(list.length > loadedLimit);
       const next = normalizeRows(list, loadedLimit);
-      setSessions((prev) => (sameSessions(prev, next) ? prev : next));
+      setSessions((prev) => {
+        if (sameSessions(prev, next)) return prev;
+        if (!windowWasCapped || next.length >= prev.length) return next;
+        // Window capped: fresh window rows first, then the previously
+        // loaded tail the window no longer covers.
+        const seen = new Set(next.map((s) => s.id));
+        const merged = [...next];
+        for (const session of prev) {
+          if (!seen.has(session.id)) {
+            merged.push(session);
+            seen.add(session.id);
+          }
+        }
+        return merged;
+      });
     },
     [normalizeRows],
   );
@@ -509,18 +559,24 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         title: string;
         contextFolder?: string | null;
       }>,
-    ): void => {
+    ): boolean => {
       setHasMore(list.length > RECENT_SESSIONS_PAGE_SIZE);
       const page = normalizeRows(list);
-      if (page.length === 0) return;
+      if (page.length === 0) return false;
+      // Compute against the committed list (sessionsRef) — a side effect
+      // inside the setSessions updater would run after this function
+      // returns (React defers updaters), reading the flag as always-false.
+      const seen = new Set(sessionsRef.current.map((s) => s.id));
+      const appended = page.some((session) => !seen.has(session.id));
       setSessions((prev) => {
-        const seen = new Set(prev.map((s) => s.id));
+        const prevSeen = new Set(prev.map((s) => s.id));
         const next = [...prev];
         for (const session of page) {
-          if (!seen.has(session.id)) next.push(session);
+          if (!prevSeen.has(session.id)) next.push(session);
         }
         return sameSessions(prev, next) ? prev : next;
       });
+      return appended;
     },
     [normalizeRows],
   );
@@ -534,6 +590,9 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         const synced = await window.hermesAPI.syncSessionCache(
           connectionId,
           activeProfile,
+          // Backlog #92: window follows the loaded list so a refresh cannot
+          // shrink it (remote). Local ignores the extra arg (full set).
+          syncWindowRows(sessionsRef.current.length),
         );
         applyLoadedWindow(synced);
       } catch {
@@ -554,22 +613,33 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         connectionId,
         activeProfile,
       );
-      appendPage(nextPage);
+      const appended = appendPage(nextPage);
+      // End-detection for the recency-reorder race (backlog #92, kin to
+      // #71): a FULL page that appended nothing means recency shifted rows
+      // we already hold into this offset window. One such page proves
+      // nothing (a busy server reorders constantly); TWO consecutive ones
+      // mean the offset walk cannot find new rows — treat the list as
+      // exhausted so the row dies instead of resurrecting forever.
+      if (!appended && nextPage.length > RECENT_SESSIONS_PAGE_SIZE) {
+        duplicatePageStreakRef.current += 1;
+        if (duplicatePageStreakRef.current >= 2) setHasMore(false);
+      } else {
+        duplicatePageStreakRef.current = 0;
+      }
     } catch {
-      // keep the current list; scrolling can retry on the next event
+      // keep the current list; the next click retries
     } finally {
       loadingMoreRef.current = false;
       setLoadingMore(false);
     }
   }, [activeProfile, appendPage, connectionId, open]);
 
-  const maybeLoadNextPage = useCallback((): void => {
-    const root = scrollRootRef.current;
-    if (!projectsOpen && !chatsOpen) return;
-    if (!root || !hasMoreRef.current || loadingMoreRef.current) return;
-    const remaining = root.scrollHeight - root.scrollTop - root.clientHeight;
-    if (remaining <= INFINITE_SCROLL_THRESHOLD_PX) void loadNextPage();
-  }, [chatsOpen, loadNextPage, projectsOpen, scrollRootRef]);
+  // Backlog #92: the only load-more path is the Chats "Show more" row
+  // (chunked UI cap, #82/#84). The old infinite-scroll listener and the
+  // fill-until-overflow effect fought that cap on remote — the background
+  // pager walked the whole session list and its spinner row rendered a
+  // second "loading" affordance below Chats. Prefetch stays lazy: the click
+  // handler pulls the next 30-row page when the loaded remainder runs low.
 
   // Initial load when the section opens: paint from the JSON cache
   // immediately (no DB access), then sync once for anything new.
@@ -648,25 +718,9 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     };
   }, [open, refresh]);
 
-  useEffect(() => {
-    if (!open) return;
-    const root = scrollRootRef.current;
-    if (!root) return;
-    const onScroll = (): void => {
-      maybeLoadNextPage();
-    };
-    root.addEventListener("scroll", onScroll, { passive: true });
-    maybeLoadNextPage();
-    return () => {
-      root.removeEventListener("scroll", onScroll);
-    };
-  }, [maybeLoadNextPage, open, scrollRootRef]);
-
-  // If the first page does not fill the sidebar, keep paging until the scroll
-  // container has real overflow or the cache runs out.
-  useEffect(() => {
-    if (open) maybeLoadNextPage();
-  }, [hasMore, maybeLoadNextPage, open, sessions.length]);
+  // Backlog #92: the infinite-scroll listener and the fill-until-overflow
+  // effect are gone — the Chats "Show more" row is the single load-more
+  // path, and it prefetches pages internally (see its onClick).
 
   // Resuming/switching sessions reorders recency — refresh (throttled).
   // Also refreshes when going to "New Chat" (currentSessionId becomes null)
@@ -1842,9 +1896,18 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
                   )}
                   <ShowMoreRow
                     hiddenCount={chatsList.hiddenCount}
+                    externalMore={hasMore}
                     onShowMore={() => {
                       chatsList.showMore();
-                      if (chatsList.hiddenCount <= SHOW_MORE_CHUNK)
+                      // Backlog #92: prefetch the next 30-row page while the
+                      // server may have more, as soon as the CHATS remainder
+                      // (not the combined list — sessions includes project
+                      // rows the cap never reveals) drops below a chunk.
+                      if (
+                        hasMore &&
+                        chats.length - (chatsList.shown + SHOW_MORE_CHUNK) <
+                          SHOW_MORE_CHUNK
+                      )
                         void loadNextPage();
                     }}
                     tabIndex={expanded && chatsOpen ? 0 : -1}

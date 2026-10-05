@@ -15,6 +15,8 @@ export function useShowMore<T>(
 ): {
   visible: T[];
   hiddenCount: number;
+  /** Currently revealed item count (backlog #92 prefetch arithmetic). */
+  shown: number;
   showMore: () => void;
 } {
   const chunk = opts?.chunk ?? SHOW_MORE_CHUNK;
@@ -31,6 +33,7 @@ export function useShowMore<T>(
   return {
     visible: items.slice(0, effective),
     hiddenCount: items.length - effective,
+    shown: effective,
     showMore: (): void => setShown((prev) => prev + chunk),
   };
 }
@@ -41,19 +44,29 @@ export function useShowMore<T>(
  */
 export function ShowMoreRow({
   hiddenCount,
+  externalMore = false,
   onShowMore,
   tabIndex = 0,
   ariaLabel,
 }: {
-  /** Items currently hidden below the cap; 0 with `onRequestPage` still shows the row. */
+  /** Items currently hidden below the cap; 0 with `externalMore` still shows the row. */
   hiddenCount: number;
+  /** True when the source (server/cache) has rows beyond the loaded list —
+   * the row stays visible at hiddenCount 0 so the list never dead-ends
+   * without a load-more affordance (backlog #92). */
+  externalMore?: boolean;
   /** Reveal the next chunk (and/or load the next external page). */
   onShowMore: () => void;
   tabIndex?: number;
   ariaLabel?: string;
 }): React.JSX.Element | null {
   const { t } = useI18n();
-  if (hiddenCount <= 0) return null;
+  if (hiddenCount <= 0 && !externalMore) return null;
+  // Backlog #92: while the server may have more rows, the hidden count is
+  // provisional (a prefetch can grow it) — show the uncounted label so the
+  // number never jumps upward mid-reveal. The exact count shows only once
+  // the list end is known (local mode, or last page loaded).
+  const counted = hiddenCount > 0 && !externalMore;
   return (
     <button
       type="button"
@@ -62,7 +75,9 @@ export function ShowMoreRow({
       tabIndex={tabIndex}
       aria-label={ariaLabel}
     >
-      {t("navigation.showMoreCount", { count: hiddenCount })}
+      {counted
+        ? t("navigation.showMoreCount", { count: hiddenCount })
+        : t("common.showMore")}
     </button>
   );
 }

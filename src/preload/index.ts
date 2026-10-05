@@ -1309,6 +1309,7 @@ const hermesAPI = {
   syncSessionCache: (
     connectionId?: string,
     profile?: string,
+    windowRows?: number,
   ): Promise<
     Array<{
       id: string;
@@ -1323,7 +1324,8 @@ const hermesAPI = {
       model: string;
       contextFolder: string | null;
     }>
-  > => ipcRenderer.invoke("sync-session-cache", connectionId, profile),
+  > =>
+    ipcRenderer.invoke("sync-session-cache", connectionId, profile, windowRows),
 
   updateSessionTitle: (
     sessionId: string,
