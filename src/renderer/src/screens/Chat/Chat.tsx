@@ -61,6 +61,10 @@ import type {
   AgentSlashCommand,
 } from "./slash/types";
 import { shouldPlayCompletionSound } from "./chatNotifications";
+import {
+  shouldPersistSessionFolder,
+  type FolderPersistGuard,
+} from "./sessionFolderPersist";
 
 interface QueuedMessage {
   text: string;
@@ -310,11 +314,28 @@ function Chat({
   // stored folder is never clobbered by the initial null. Skip no-op null
   // writes: storing null marks a DELIBERATE unlink (sentinel row, issue #15),
   // so merely opening an unbound session must not record one.
-  const lastPersistedFolderRef = useRef<string | null>(null);
+  const lastPersistedFolderRef = useRef<FolderPersistGuard | null>(null);
   useEffect(() => {
-    if (!hermesSessionId || !contextFolderLoadedRef.current) return;
-    if (lastPersistedFolderRef.current === contextFolder) return;
-    lastPersistedFolderRef.current = contextFolder;
+    if (!contextFolderLoadedRef.current) return;
+    // Dedupe on the (sessionId, folder) PAIR, never the folder alone: the
+    // runtime session can be RECREATED mid-send after a WS drop (recovery /
+    // recreate paths swap hermesSessionId A → B while the folder stays the
+    // same). A folder-only guard skips the write for the live session and the
+    // chat silently loses its project binding (issue #162/#86).
+    if (
+      !shouldPersistSessionFolder(
+        lastPersistedFolderRef.current,
+        hermesSessionId,
+        contextFolder,
+      )
+    ) {
+      return;
+    }
+    if (!hermesSessionId) return;
+    lastPersistedFolderRef.current = {
+      sessionId: hermesSessionId,
+      folder: contextFolder,
+    };
     void window.hermesAPI
       .setSessionContextFolder(hermesSessionId, contextFolder)
       .then(() => {
@@ -341,7 +362,9 @@ function Chat({
       if (!target || target !== hermesSessionId) return;
       const next = detail.folder ?? null;
       if (next === contextFolder) return;
-      lastPersistedFolderRef.current = next;
+      lastPersistedFolderRef.current = hermesSessionId
+        ? { sessionId: hermesSessionId, folder: next }
+        : null;
       setContextFolder(next);
     };
     window.addEventListener(
