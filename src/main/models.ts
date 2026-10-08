@@ -7,6 +7,7 @@ import { hostDerivedEnvKeyForUrl } from "./host-derived-env";
 import { mirrorFirstPartyAgentProviders } from "./agent-config-providers";
 import { customProviderEnvKey } from "../shared/url-key-map";
 import { normalizeModelEndpointUrl } from "../shared/model-endpoint";
+import { isSameModelAttachment } from "../shared/model-attachment-dedupe";
 import DEFAULT_MODELS from "./default-models";
 
 // Config health imports this reader through the installer/config cycle. Resolve
@@ -397,14 +398,18 @@ export function syncAgentConfigModels(profile?: string): void {
   const models = readModelsRaw();
   let modified = false;
   for (const cp of cpModels) {
-    const exists = models.some(
-      (m) =>
-        m.model === cp.model &&
-        m.provider === cp.provider &&
-        normalizeModelEndpointUrl(m.baseUrl) ===
-          normalizeModelEndpointUrl(cp.baseUrl),
-    );
-    if (!exists) {
+    // Relaxed key: an empty stored baseUrl matches the config entry's explicit
+    // endpoint URL. The old strict triple key kept re-adding a second row for
+    // the same pickable model — the picker duplicate from issue #170.
+    const existing = models.find((m) => isSameModelAttachment(m, cp));
+    if (existing) {
+      // Backfill routing metadata onto the survivor of an earlier
+      // empty-vs-explicit pair instead of leaving it URL-less.
+      if (!existing.baseUrl && cp.baseUrl) {
+        existing.baseUrl = cp.baseUrl;
+        modified = true;
+      }
+    } else {
       models.push({
         id: randomUUID(),
         name: cp.name,
@@ -438,6 +443,30 @@ function seedDefaults(profile?: string): SavedModelRow[] {
   return readModelsRaw();
 }
 
+/**
+ * One-time-ish collapse of attachment rows that are the same pickable model
+ * under the relaxed identity (empty vs explicit baseUrl for a named provider).
+ * Runs as part of the renderer-facing read because that path already performs
+ * migrations; if nothing collapses, models.json is not rewritten.
+ */
+function collapseDuplicateAttachments(): void {
+  const rows = readModelsRaw();
+  const result: SavedModelRow[] = [];
+  let modified = false;
+  for (const row of rows) {
+    const existing = result.find((kept) => isSameModelAttachment(kept, row));
+    if (!existing) {
+      result.push(row);
+      continue;
+    }
+    modified = true;
+    if (!existing.baseUrl && row.baseUrl) {
+      existing.baseUrl = row.baseUrl;
+    }
+  }
+  if (modified) writeModels(result);
+}
+
 export function listModels(profile?: string): SavedModel[] {
   if (!existsSync(modelsFilePath())) {
     seedDefaults(profile);
@@ -446,6 +475,9 @@ export function listModels(profile?: string): SavedModel[] {
     // the library was first seeded — keeps `hermes` CLI edits and the desktop
     // library in sync instead of only honoring config.yaml on first run.
     syncAgentConfigModels(profile);
+    // Collapse same-model rows that differ only by empty vs explicit baseUrl
+    // (issue #170: the current model showed twice in the chat picker).
+    collapseDuplicateAttachments();
   }
   // Hoist any legacy per-row context overrides into shared definitions before
   // the merged read. This is the renderer-facing entry point (Providers screen),
