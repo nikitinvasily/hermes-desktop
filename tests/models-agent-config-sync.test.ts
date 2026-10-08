@@ -73,4 +73,66 @@ describe("agent-config model sync", () => {
     const rows = models.listModels().filter((m) => m.model === "faab-large");
     expect(rows).toHaveLength(1);
   });
+
+  // @lat: [[provider-setup#Provider setup#Models live under each provider (OpenCode-style)#Model attachment dedup]]
+  it("does not add a second row when the library already has the model with an empty baseUrl", async () => {
+    // Seed the library with a manually-added row that carries no baseUrl
+    // (legal for custom endpoints stored from the UI before a URL was kept).
+    const models0 = await freshModels();
+    models0.addModel("Z.ai GLM", "custom", "glm-5.3", "");
+
+    // The terminal then adds a custom_providers entry for the same model with
+    // the explicit endpoint URL. The relaxed identity must see them as one.
+    writeFileSync(
+      join(testHome, "config.yaml"),
+      [
+        "custom_providers:",
+        '  - name: "Z.ai"',
+        '    base_url: "https://api.z.ai/api/paas/v4"',
+        '    model: "glm-5.3"',
+        '    api_key: "sk-zai"',
+        "",
+      ].join("\n"),
+    );
+    const models = await freshModels();
+    const rows = models
+      .listModels()
+      .filter((m) => m.provider === "custom" && m.model === "glm-5.3");
+    expect(rows).toHaveLength(1);
+    // The surviving row keeps routing metadata: the non-empty baseUrl.
+    expect(rows[0].baseUrl).toBe("https://api.z.ai/api/paas/v4");
+  });
+
+  // @lat: [[provider-setup#Provider setup#Models live under each provider (OpenCode-style)#Model attachment dedup]]
+  it("collapses pre-existing empty-vs-explicit baseUrl duplicates on read", async () => {
+    // models.json as it accumulated in the wild: the same model twice,
+    // once without and once with the canonical endpoint URL (issue #170).
+    const models0 = await freshModels();
+    models0.listModels(); // seed defaults so models.json exists
+    const raw = JSON.parse(readFileSync(join(testHome, "models.json"), "utf-8"));
+    raw.push(
+      { id: "dup-a", name: "glm-5.3", provider: "zai", model: "glm-5.3", baseUrl: "", createdAt: 1 },
+      {
+        id: "dup-b",
+        name: "glm-5.3",
+        provider: "zai",
+        model: "glm-5.3",
+        baseUrl: "https://api.z.ai/api/paas/v4",
+        createdAt: 2,
+      },
+    );
+    writeFileSync(join(testHome, "models.json"), JSON.stringify(raw));
+
+    const models = await freshModels();
+    const rows = models
+      .listModels()
+      .filter((m) => m.provider === "zai" && m.model === "glm-5.3");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].baseUrl).toBe("https://api.z.ai/api/paas/v4");
+    // And the collapse is persisted — a second process sees one row too.
+    const persisted = JSON.parse(
+      readFileSync(join(testHome, "models.json"), "utf-8"),
+    ).filter((r: { provider: string; model: string }) => r.provider === "zai" && r.model === "glm-5.3");
+    expect(persisted).toHaveLength(1);
+  });
 });

@@ -1,6 +1,7 @@
 import type { SavedModel } from "./models";
 import { remoteRequestJson, type RemoteSessionConfig } from "./remote-sessions";
 import { normalizeModelEndpointUrl } from "../shared/model-endpoint";
+import { dedupeAttachmentRows } from "../shared/model-attachment-dedupe";
 
 type RemoteRecord = Record<string, unknown>;
 const REMOTE_MODEL_OPTIONS_TIMEOUT_MS = 60_000;
@@ -78,6 +79,9 @@ function normalizeRemoteSavedModel(
   };
 }
 
+// Strict identity (provider + model + explicit baseUrl) for rows that must
+// stay separate endpoints; the *picker-facing* dedup additionally collapses
+// empty-vs-explicit baseUrl pairs — see dedupeAttachmentRows (issue #170).
 function dedupeModels(models: SavedModel[]): SavedModel[] {
   const seen = new Set<string>();
   const result: SavedModel[] = [];
@@ -103,7 +107,9 @@ async function remoteModelLibraryRows(
     });
     const rows = asRecord(response).models;
     if (!Array.isArray(rows)) return [];
-    return dedupeModels(
+    // Remote library rows may repeat the active model with a different baseUrl
+    // spelling (empty vs canonical) — collapse to one pickable row (#170).
+    return dedupeAttachmentRows(
       rows
         .map((row, index) => normalizeRemoteSavedModel(row, index))
         .filter((row): row is SavedModel => row !== null),
@@ -175,7 +181,9 @@ function modelsFromRemoteOptions(response: unknown): SavedModel[] {
     });
   }
 
-  return dedupeModels(models);
+  // Current model + provider rows can repeat the same (provider, model) with
+  // empty vs explicit baseUrl — collapse to one pickable row (#170).
+  return dedupeAttachmentRows(dedupeModels(models));
 }
 
 function currentProviderRow(response: unknown): {

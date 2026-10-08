@@ -130,6 +130,40 @@ describe("remote dashboard models", () => {
     );
   });
 
+  // @lat: [[provider-setup#Provider setup#Models live under each provider (OpenCode-style)#Model attachment dedup]]
+  it("collapses an empty-vs-explicit baseUrl pair into one pickable row", async () => {
+    const { url } = await startServer((req, res) => {
+      expect(req.url).toBe("/api/model/library");
+      res.setHeader("Content-Type", "application/json");
+      res.end(
+        JSON.stringify({
+          models: [
+            {
+              id: "remote:active:zai:glm-5.3",
+              name: "glm-5.3",
+              provider: "zai",
+              model: "glm-5.3",
+              baseUrl: "",
+              createdAt: 0,
+            },
+            {
+              id: "remote:library:zai:0:glm-5.3",
+              name: "glm-5.3",
+              provider: "zai",
+              model: "glm-5.3",
+              baseUrl: "https://api.z.ai/api/paas/v4",
+              createdAt: 1,
+            },
+          ],
+        }),
+      );
+    });
+
+    const models = await remoteListModels({ remoteUrl: url, apiKey: "token" });
+    expect(models).toHaveLength(1);
+    expect(models[0].baseUrl).toBe("https://api.z.ai/api/paas/v4");
+  });
+
   it("reads the remote current model and writes changes through dashboard REST", async () => {
     const seenBodies: unknown[] = [];
     let current = {
