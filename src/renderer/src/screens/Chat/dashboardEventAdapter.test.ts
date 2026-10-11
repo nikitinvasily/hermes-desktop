@@ -257,6 +257,128 @@ describe("applyDashboardStreamEvent — message.complete text reconciliation", (
   });
 });
 
+describe("applyDashboardStreamEvent — message.interim (issue #173)", () => {
+  const userTurn = (): ChatMessage => ({
+    id: "u1",
+    role: "user",
+    content: "run the check",
+  });
+
+  it("appends a sealed bubble when deltas were suppressed (remote path)", () => {
+    const next = applyDashboardStreamEvent(
+      { messages: [userTurn()], reasoningSegmentClosed: false },
+      {
+        type: "message.interim",
+        payload: {
+          text: "План: выполню ls и опишу вывод.",
+          already_streamed: false,
+        },
+      },
+      { renderAssistantDeltas: false },
+    );
+
+    const bubble = next.messages.find(
+      (m) => m.role === "agent" && (m as { sealed?: boolean }).sealed,
+    );
+    expect(bubble).toBeDefined();
+    expect((bubble as { content: string }).content).toBe(
+      "План: выполню ls и опишу вывод.",
+    );
+    expect((bubble as { pending?: boolean }).pending).toBe(false);
+    expect(next.messages.filter((m) => m.role === "agent")).toHaveLength(1);
+  });
+
+  it("seals the streaming bubble in place when already_streamed (local path)", () => {
+    let state: DashboardEventState = {
+      messages: [userTurn()],
+      reasoningSegmentClosed: false,
+    };
+    state = applyDashboardStreamEvent(state, {
+      type: "message.delta",
+      payload: { text: "План: выполню ls" },
+    });
+    state = applyDashboardStreamEvent(state, {
+      type: "message.interim",
+      payload: {
+        text: "План: выполню ls",
+        already_streamed: true,
+      },
+    });
+
+    const bubbles = state.messages.filter((m) => m.role === "agent");
+    expect(bubbles).toHaveLength(1);
+    expect((bubbles[0] as { content: string }).content).toBe(
+      "План: выполню ls",
+    );
+    expect((bubbles[0] as { sealed?: boolean }).sealed).toBe(true);
+    expect((bubbles[0] as { pending?: boolean }).pending).toBe(false);
+  });
+
+  it("message.complete creates a NEW bubble after a sealed interim, not a merge", () => {
+    let state: DashboardEventState = {
+      messages: [userTurn()],
+      reasoningSegmentClosed: false,
+    };
+    state = applyDashboardStreamEvent(
+      state,
+      {
+        type: "message.interim",
+        payload: { text: "Сначала посмотрю файлы.", already_streamed: false },
+      },
+      { renderAssistantDeltas: false },
+    );
+    state = applyDashboardStreamEvent(state, {
+      type: "message.complete",
+      payload: { text: "В выводе корень проекта." },
+    });
+
+    const bubbles = state.messages.filter((m) => m.role === "agent");
+    expect(bubbles).toHaveLength(2);
+    expect((bubbles[0] as { content: string }).content).toBe(
+      "Сначала посмотрю файлы.",
+    );
+    expect((bubbles[1] as { content: string }).content).toBe(
+      "В выводе корень проекта.",
+    );
+  });
+
+  it("deltas after a sealed interim start a NEW bubble (no concatenation)", () => {
+    let state: DashboardEventState = {
+      messages: [userTurn()],
+      reasoningSegmentClosed: false,
+    };
+    state = applyDashboardStreamEvent(
+      state,
+      {
+        type: "message.interim",
+        payload: { text: "Первый сегмент.", already_streamed: false },
+      },
+      { renderAssistantDeltas: false },
+    );
+    state = applyDashboardStreamEvent(state, {
+      type: "message.delta",
+      payload: { text: "Второй сегмент." },
+    });
+
+    const bubbles = state.messages.filter((m) => m.role === "agent");
+    expect(bubbles).toHaveLength(2);
+    expect((bubbles[0] as { content: string }).content).toBe("Первый сегмент.");
+    expect((bubbles[1] as { content: string }).content).toBe("Второй сегмент.");
+  });
+
+  it("empty interim text is a no-op", () => {
+    const state: DashboardEventState = {
+      messages: [userTurn()],
+      reasoningSegmentClosed: false,
+    };
+    const next = applyDashboardStreamEvent(state, {
+      type: "message.interim",
+      payload: { text: "   ", already_streamed: false },
+    });
+    expect(next.messages).toHaveLength(1);
+  });
+});
+
 describe("applyDashboardStreamEvent approval requests", () => {
   it("projects a structured dashboard approval and dedupes repeated events", () => {
     const state: DashboardEventState = {
@@ -436,7 +558,12 @@ it("keeps a replayed batch from reopening answered cards", () => {
       payload: {
         request_id: "batch-2",
         questions: [
-          { qid: "q0", question: "First?", choices: ["a"], multi_select: false },
+          {
+            qid: "q0",
+            question: "First?",
+            choices: ["a"],
+            multi_select: false,
+          },
         ],
       },
     },

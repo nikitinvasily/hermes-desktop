@@ -42,6 +42,14 @@ This matches the reference `apps/desktop`, which has no `/v1` chat path at all (
 
 So `ensureClient` distinguishes two failures: a **genuinely absent** dashboard (`startDashboard` → `running:false`) latches the negative flag and (auto mode) drops to legacy gateway `/v1`; a **transient** WS drop while the dashboard is up (a "socket hang up" from a tunnel blip) instead **retries the connect** (up to 3×, re-running `startDashboard` each time to re-establish the SSH tunnel). If it still can't connect, it throws a `dashboardWasReachable`-tagged error so `sendMessage` **fails the turn for the user to retry** rather than 405-ing on `/v1`.
 
+## Interim assistant messages
+
+`message.interim` carries the agent's commentary emitted alongside tool calls; the backend persists it as its own assistant row and upstream's desktop seals it as a standalone bubble. The fork used to drop the event (#173).
+
+The drop was invisible locally (the text had already arrived via `message.delta`) but lost the segment on remote connections, where assistant deltas are not rendered and `message.complete` carries only the last turn's text — the reply showed in the WebUI and was missing in the desktop app.
+
+[[src/renderer/src/screens/Chat/dashboardEventAdapter.ts#sealInterimAssistantMessage]] seals the text: with `already_streamed: true` it flips the currently streaming bubble to `sealed` in place (no duplicate); otherwise (remote) it appends a new non-pending bubble marked `sealed`. A sealed bubble is terminal for merging — [[src/renderer/src/screens/Chat/dashboardEventAdapter.ts#appendAssistantDelta]] starts a NEW bubble after it, and [[src/renderer/src/screens/Chat/dashboardEventAdapter.ts#completeAssistantWithFinalText]] skips sealed bubbles when looking for the merge target, so the turn's final text lands as its own bubble instead of being concatenated into the commentary.
+
 ## Completion text reconciliation
 
 On `message.complete` the desktop reconciles the text streamed via `message.delta` with the turn's `final_response`, because a last-turn-only final would otherwise clobber text streamed before a tool call (#746).

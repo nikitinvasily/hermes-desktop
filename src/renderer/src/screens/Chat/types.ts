@@ -20,6 +20,13 @@ export interface ChatBubbleMessage {
   error?: string;
   /** True while an optimistic assistant bubble is still being finalized. */
   pending?: boolean;
+  /**
+   * True once the backend sealed this bubble's text as a standalone interim
+   * assistant message (`message.interim`): the text is complete, further
+   * deltas belong to a NEW bubble and `message.complete` must not merge the
+   * turn's final text into it.
+   */
+  sealed?: boolean;
   /** True for UI-only messages that do not have a canonical state.db row. */
   localOnly?: boolean;
   /** Renderer-local turn identity used to anchor local failures. */
