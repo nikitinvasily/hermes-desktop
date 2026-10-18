@@ -392,7 +392,7 @@ export function listSubagentSessions(
        FROM sessions s
        WHERE s.parent_session_id = ?
          AND json_extract(CASE WHEN json_valid(s.model_config) THEN s.model_config ELSE '{}' END, '$._delegate_from') IS NOT NULL
-       ORDER BY s.started_at ASC`,
+       ORDER BY s.started_at DESC, s.id ASC`,
     )
     .all(parentSessionId) as Array<{
     id: string;
