@@ -304,6 +304,53 @@ function isAssistantBubble(msg: ChatMessage): msg is ChatBubbleMessage {
   return msg.role === "agent" && (!kind || kind === "assistant");
 }
 
+/**
+ * Seal an interim assistant message (`message.interim`: the agent's commentary
+ * alongside tool calls, or a pre-nudge answer attempt) as its own bubble.
+ *
+ * With `already_streamed: true` (local mode renders deltas) the text already
+ * sits in the currently streaming bubble — seal that bubble in place instead
+ * of duplicating the text. Without streamed deltas (remote mode) the text has
+ * no carrier yet — append it as a new non-pending bubble.
+ */
+function sealInterimAssistantMessage(
+  messages: ReadonlyArray<ChatMessage>,
+  text: string,
+  alreadyStreamed: boolean,
+  activeTurn?: ActiveTurn | null,
+  now = Date.now(),
+): ChatMessage[] {
+  const content = text.trim();
+  if (!content) return [...messages];
+
+  if (alreadyStreamed) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.role === "user") break;
+      if (!isAssistantBubble(msg) || msg.error || msg.sealed) continue;
+      if (activeTurn && msg.turnId && msg.turnId !== activeTurn.turnId)
+        continue;
+      return [
+        ...messages.slice(0, i),
+        { ...msg, pending: false, sealed: true },
+        ...messages.slice(i + 1),
+      ];
+    }
+  }
+
+  return [
+    ...messages,
+    {
+      id: `agent-dashboard-interim-${now}-${messages.length}`,
+      role: "agent",
+      content,
+      pending: false,
+      sealed: true,
+      ...(activeTurn?.turnId ? { turnId: activeTurn.turnId } : {}),
+    },
+  ];
+}
+
 function appendAssistantDelta(
   messages: ReadonlyArray<ChatMessage>,
   chunk: string,
@@ -316,6 +363,7 @@ function appendAssistantDelta(
     last &&
     isAssistantBubble(last) &&
     !last.error &&
+    !last.sealed &&
     (!activeTurn || !last.turnId || last.turnId === activeTurn.turnId)
   ) {
     return [
@@ -752,7 +800,9 @@ function completeAssistantWithFinalText(
   for (let i = messagesWithoutDuplicateReasoning.length - 1; i >= 0; i--) {
     const msg = messagesWithoutDuplicateReasoning[i];
     if (msg.role === "user") break;
-    if (!isAssistantBubble(msg) || msg.error) continue;
+    // A sealed interim bubble is a standalone persisted message; the turn's
+    // final text belongs to a NEW bubble, never merged into it (#173).
+    if (!isAssistantBubble(msg) || msg.error || msg.sealed) continue;
     if (activeTurn && msg.turnId && msg.turnId !== activeTurn.turnId) continue;
 
     // Merge streamed text with finalText so content streamed before tool
@@ -808,6 +858,20 @@ export function applyDashboardStreamEvent(
           now,
         ),
         reasoningSegmentClosed: false,
+      };
+    case "message.interim":
+      return {
+        messages: sealInterimAssistantMessage(
+          state.messages,
+          textFromPayload(event.payload, "text"),
+          event.payload !== null &&
+            typeof event.payload === "object" &&
+            (event.payload as { already_streamed?: unknown })
+              .already_streamed === true,
+          options.activeTurn,
+          now,
+        ),
+        reasoningSegmentClosed: true,
       };
     case "thinking.delta":
       return state;
