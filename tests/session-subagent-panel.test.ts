@@ -134,14 +134,42 @@ describe("listSubagentSessions (issue #122)", () => {
 
     const rows = listSubagentSessions("parent");
 
-    expect(rows.map((r) => r.id)).toEqual(["child-a", "child-b"]);
-    expect(rows[0]).toMatchObject({
+    expect(rows.map((r) => r.id)).toEqual(["child-b", "child-a"]);
+    expect(rows[1]).toMatchObject({
       id: "child-a",
       startedAt: 200,
       endedAt: 300,
       title: "Audit the fork diff for закладки",
     });
-    expect(rows[1].endedAt).toBeNull();
+    expect(rows[0].endedAt).toBeNull();
+  });
+
+  it("orders by creation descending with stable ids for simultaneous children", () => {
+    // @lat: [[sidebar-navigation#Floating subagents panel]]
+    const db = seedDb();
+    addSession(db, "parent", 100);
+    for (const [id, startedAt] of [
+      ["child-middle", 300],
+      ["child-z", 400],
+      ["child-oldest", 200],
+      ["child-a", 400],
+    ] as const) {
+      addSession(db, id, startedAt, {
+        parentSessionId: "parent",
+        modelConfig: { _delegate_from: "parent" },
+      });
+    }
+    const expected = ["child-a", "child-z", "child-middle", "child-oldest"];
+    expect(listSubagentSessions("parent").map((r) => r.id)).toEqual(expected);
+    expect(listSubagentSessions("parent").map((r) => r.id)).toEqual(expected);
+    addSession(db, "child-newest", 500, {
+      parentSessionId: "parent",
+      modelConfig: { _delegate_from: "parent" },
+    });
+    expect(listSubagentSessions("parent").map((r) => r.id)).toEqual([
+      "child-newest",
+      ...expected,
+    ]);
   });
 
   it("excludes non-delegate lineage children and other parents", () => {

@@ -164,6 +164,71 @@ describe("ChatContextPanel (issue #122)", () => {
     ).not.toContain("expanded");
   });
 
+  it("caps the newest-first list before revealing older children and opens the selected row", async () => {
+    const rows: Row[] = Array.from(
+      { length: 7 },
+      (_, i): Row => ({
+        id: `child-${7 - i}`,
+        startedAt: 7 - i,
+        endedAt: i === 0 ? null : 10,
+        title: `Goal ${7 - i}`,
+        model: null,
+        messageCount: 1,
+      }),
+    );
+    setApi(rows);
+    const onOpenSession = vi.fn();
+    const { container, rerender } = render(
+      <ChatContextPanel {...baseProps} onOpenSession={onOpenSession} />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /subagents/i }));
+    const titles = (): (string | null)[] =>
+      Array.from(
+        container.querySelectorAll(".chat-context-panel-row-title"),
+        (el) => el.textContent,
+      );
+    expect(titles()).toEqual([
+      "Goal 7",
+      "Goal 6",
+      "Goal 5",
+      "Goal 4",
+      "Goal 3",
+    ]);
+    expect(screen.queryByText("Goal 2")).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: "navigation.showMoreCount" }),
+    );
+    expect(titles()).toEqual(rows.map((r) => r.title));
+    fireEvent.click(screen.getByText("Goal 2"));
+    expect(onOpenSession).toHaveBeenCalledWith("child-2");
+    const newest: Row = {
+      ...rows[0],
+      id: "child-8",
+      startedAt: 8,
+      title: "Goal 8",
+    };
+    setApi([newest, ...rows]);
+    rerender(
+      <ChatContextPanel
+        {...baseProps}
+        refreshKey={1}
+        onOpenSession={onOpenSession}
+      />,
+    );
+    await waitFor(() =>
+      expect(titles()).toEqual(["Goal 8", ...rows.map((r) => r.title)]),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /subagents/i }));
+    fireEvent.click(screen.getByRole("button", { name: /subagents/i }));
+    expect(titles()).toEqual([
+      "Goal 8",
+      "Goal 7",
+      "Goal 6",
+      "Goal 5",
+      "Goal 4",
+    ]);
+  });
+
   it("re-fetches when refreshKey changes (turn finished)", async () => {
     setApi([]);
     const { rerender } = render(
