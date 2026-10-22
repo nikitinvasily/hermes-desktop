@@ -104,6 +104,26 @@ describe("DashboardGatewayClient.connect", () => {
 });
 
 describe("DashboardGatewayClient server→client requests", () => {
+  it("marks an RPC rejection distinctly from a lost ACK", async () => {
+    const client = await openedClient({});
+    const pending = client.request("prompt.submit", {
+      session_id: "live",
+      text: "C",
+    });
+    const assertion = expect(pending).rejects.toMatchObject({
+      message: "Session is busy",
+      rpcRejected: true,
+    });
+    const request = sentFrames().find(
+      (frame) => frame.method === "prompt.submit",
+    );
+    FakeWebSocket.last?.receive({
+      jsonrpc: "2.0",
+      id: request?.id,
+      error: { code: -32000, message: "Session is busy" },
+    });
+    await assertion;
+  });
   interface SentFrame {
     id?: number | string;
     method?: string;

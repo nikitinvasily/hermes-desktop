@@ -20,6 +20,18 @@ Every typed slash command is resolved through the merged catalog before executio
 
 Desktop-only commands delegate to local renderer handlers, Agent commands use the gateway command pipeline, and model commands build a prompt through the shared model-submission formatter. The legacy transport reports Agent commands as unavailable instead of sending raw `/…` text to the model.
 
+## Stop controls
+
+Typed `/stop`, the Stop button, and queued Send now share an awaitable turn interruption on Dashboard transport, without changing the model or closing the session.
+
+[[src/renderer/src/screens/Chat/hooks/useChatActions.ts#useChatActions]] routes `/stop` before catalog/model dispatch; the transport's direct slash entry point also intercepts it. [[src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts#useDashboardChatTransport]] coalesces stop calls, awaits `session.interrupt`, then probes structured `session.resume` until `running=false` (or structured idle status). The ACK only means interruption was requested. `message.complete` can arrive before the backend clears running in finally, so it does not release loading while stopping. The idle probe has a ten-second deadline; interrupt RPC retains its normal request timeout. `session.status` renders text and is not a liveness probe.
+
+Stop failure does not close the socket/session and leaves the queue paused. Target checks fence connection/socket/runtime changes across awaited work; events from superseded sockets are dropped. The stored session/history stays intact. Auto fallback tracks the transport actually used: an IPC turn still stops through legacy abort, not a disconnected Dashboard. Arbitrary delayed, untagged completion duplicates on the same socket cannot be universally correlated with a turn: optional persisted receipts do not provide a generic turn ID. Backend correlation/idempotency would be required for stronger guarantees.
+
+Live remote verification also observed an interrupt sent immediately after prompt acceptance returning `interrupted` while the backend remained `working` past the ten-second deadline. The client reports a timeout and keeps the queue paused; retrying Stop reached idle. This client change does not guarantee immediate cancellation during backend turn startup or change the server protocol.
+
+Submission distinguishes accepted, rejected, and uncertain outcomes all the way through actions and [[chat-input#Queued message send-now]]. JSON-RPC error responses are marked as explicit rejections; socket failures and timeouts after submit are uncertain and are not replayed. Tests in [[src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.test.tsx]] and [[src/renderer/src/screens/Chat/hooks/useChatActions.test.tsx]] protect these boundaries.
+
 ## Commands never queue
 
 Slash commands run on the gateway's **persistent slash-worker subprocess**, concurrent with any in-flight turn — so they respond instantly and must NOT sit in the busy queue behind a running turn (only plain prompts queue).

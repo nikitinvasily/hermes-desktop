@@ -26,6 +26,9 @@ import {
   type ApprovalChoice,
 } from "../../../../../shared/chat-approval";
 
+/** true = accepted; false = transport fallback; failures must not drain queues. */
+export type DashboardSendResult = boolean | "rejected" | "uncertain";
+
 interface SessionResponse {
   info?: unknown;
   messages?: unknown[];
@@ -144,7 +147,8 @@ interface UseDashboardChatTransportArgs {
 }
 
 interface UseDashboardChatTransportResult {
-  abort: () => void;
+  abort: () => Promise<void>;
+  waitForIdle: () => Promise<void>;
   enabled: boolean;
   /** True while a turn was retired as "continues on the agent" after a
    *  transport teardown (issue #76) and no resync has caught up yet. */
@@ -172,7 +176,10 @@ interface UseDashboardChatTransportResult {
     requestId: string,
     choice: ApprovalChoice,
   ) => Promise<boolean>;
-  sendMessage: (text: string, attachments?: Attachment[]) => Promise<boolean>;
+  sendMessage: (
+    text: string,
+    attachments?: Attachment[],
+  ) => Promise<DashboardSendResult>;
   /**
    * Run a slash command through the gateway's `slash.exec` pipeline instead of
    * submitting it to the model as a literal prompt. `sys` renders command
@@ -1067,6 +1074,13 @@ export function useDashboardChatTransport({
   const clientRef = useRef<DashboardGatewayClient | null>(null);
   const connectingRef = useRef<Promise<DashboardGatewayClient> | null>(null);
   const clientGenerationRef = useRef(0);
+  const stopPromiseRef = useRef<{
+    promise: Promise<void>;
+    generation: number;
+    client: DashboardGatewayClient | null;
+    sessionId: string | null;
+  } | null>(null);
+  const legacyFallbackUsedRef = useRef(false);
   // Sticky "dashboard transport can't connect on this remote/SSH connection"
   // flag. The dashboard WebSocket (`/api/ws`) never connects against a tunneled
   // `hermes gateway` (issue #667), so once we've learned it's unavailable we
@@ -1330,7 +1344,9 @@ export function useDashboardChatTransport({
     if (transportBoundRef.current) retireDetachedTurnRef.current();
     transportBoundRef.current = true;
     clientGenerationRef.current += 1;
+    stopPromiseRef.current = null;
     dashboardUnavailableRef.current = false;
+    legacyFallbackUsedRef.current = false;
     expirePendingApprovalsRef.current(true);
     clientRef.current?.close();
     clientRef.current = null;
@@ -1527,9 +1543,17 @@ export function useDashboardChatTransport({
         }
         const activeTurn = activeTurnRef.current;
         if (activeTurn) activeTurn.status = failed ? "failed" : "completed";
-        activeTurnRef.current = null;
-        setToolProgress(null);
-        setIsLoading(false);
+        const stopping = stopPromiseRef.current;
+        if (
+          !stopping ||
+          stopping.generation !== clientGenerationRef.current ||
+          stopping.client !== clientRef.current ||
+          stopping.sessionId !== runtimeSessionId
+        ) {
+          activeTurnRef.current = null;
+          setToolProgress(null);
+          setIsLoading(false);
+        }
         const usage = usageFromPayload(event.payload);
         if (usage || !failed) {
           // The gauge only renders when `contextTokens` is set, so it must be
@@ -1701,7 +1725,13 @@ export function useDashboardChatTransport({
             );
           }
           const client: DashboardGatewayClient = new DashboardGatewayClient({
-            onEvent: handleGatewayEvent,
+            onEvent: (event) => {
+              if (
+                clientRef.current === client &&
+                clientGenerationRef.current === generation
+              )
+                handleGatewayEvent(event);
+            },
             onServerRequest: (method, params, frameId) =>
               handleServerRequestRef.current(method, params, frameId),
             onClose: () => {
@@ -2345,7 +2375,15 @@ export function useDashboardChatTransport({
   );
 
   const sendMessage = useCallback(
-    async (text: string, attachments?: Attachment[]): Promise<boolean> => {
+    async (
+      text: string,
+      attachments?: Attachment[],
+    ): Promise<DashboardSendResult> => {
+      legacyFallbackUsedRef.current = false;
+      const fallback = (): false => {
+        legacyFallbackUsedRef.current = true;
+        return false;
+      };
       if (!enabled) return false;
       const pendingClarifyRequestId = pendingClarifyRef.current?.requestId;
       if (pendingClarifyRequestId) {
@@ -2393,7 +2431,10 @@ export function useDashboardChatTransport({
           );
         }
       };
-      const failActiveTurn = (message: string): true => {
+      const failActiveTurn = (
+        message: string,
+        outcome: "rejected" | "uncertain" = "rejected",
+      ): DashboardSendResult => {
         const activeTurn = activeTurnRef.current;
         if (activeTurn) activeTurn.status = "failed";
         if (pendingApprovalsRef.current.length) {
@@ -2425,10 +2466,10 @@ export function useDashboardChatTransport({
         activeTurnRef.current = null;
         setToolProgress(null);
         setIsLoading(false);
-        return true;
+        return outcome;
       };
       if (dashboardText === null) {
-        if (fallbackOnUnavailable) return false;
+        if (fallbackOnUnavailable) return fallback();
         return failActiveTurn(
           "Dashboard chat supports image attachments only in this build. Use Auto or Legacy for mixed file attachments.",
         );
@@ -2449,12 +2490,13 @@ export function useDashboardChatTransport({
         }
         if (fallbackOnUnavailable) {
           console.warn("Falling back to legacy chat transport.", err);
-          return false;
+          return fallback();
         }
         const message = err instanceof Error ? err.message : String(err);
         return failActiveTurn(message);
       }
 
+      let submitting = false;
       try {
         let continuationItems: DesktopSessionContinuationItem[] = [];
         const forceCreateRuntime = recreateRuntimeSessionRef.current;
@@ -2498,7 +2540,7 @@ export function useDashboardChatTransport({
           attachments,
         );
         if (!syncedAttachments.handled) {
-          if (fallbackOnUnavailable) return false;
+          if (fallbackOnUnavailable) return fallback();
           return failActiveTurn(
             "Hermes dashboard could not attach the selected file. Use Auto or Legacy to fall back to the legacy attachment path.",
           );
@@ -2508,6 +2550,7 @@ export function useDashboardChatTransport({
           syncedAttachments.refs,
         );
         const approvalNonceBeforeSubmit = approvalNonceRef.current;
+        submitting = true;
         await submitDashboardPromptWithRecovery(client, {
           canRecover: () =>
             approvalNonceRef.current === approvalNonceBeforeSubmit,
@@ -2521,10 +2564,15 @@ export function useDashboardChatTransport({
         });
         return true;
       } catch (err) {
-        appliedModelRef.current = null;
-        recreateRuntimeSessionRef.current = true;
+        // A missing ACK is not a rejection. Keep this runtime and never replay
+        // an ambiguous submit; the queue requires an explicit user decision.
         const message = err instanceof Error ? err.message : String(err);
-        return failActiveTurn(message);
+        const outcome =
+          submitting && !(err as { rpcRejected?: boolean })?.rpcRejected
+            ? "uncertain"
+            : "rejected";
+        if (!submitting) appliedModelRef.current = null;
+        return failActiveTurn(message, outcome);
       }
     },
     [
@@ -2608,6 +2656,141 @@ export function useDashboardChatTransport({
     [enabled, setPendingApprovals],
   );
 
+  // @lat: [[chat-commands#Stop controls]]
+  // A terminal frame precedes running=false in the gateway's finally block.
+  // Probe structured resume state, never the rendered session.status output.
+  const waitForIdle = useCallback(async (): Promise<void> => {
+    // IPC completion remains the drain signal for a turn actually sent via
+    // legacy fallback; configured Dashboard availability is not its owner.
+    if (legacyFallbackUsedRef.current) return;
+    const client = await ensureClient();
+    const sessionId = await ensureRuntimeSession(client);
+    const storedSessionId = storedSessionIdRef.current;
+    if (!storedSessionId)
+      throw new Error("Stored session is unavailable. Queue paused.");
+    const generation = clientGenerationRef.current;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(
+        () =>
+          reject(
+            new Error(
+              "Timed out waiting for the agent to stop. Queue paused; retry Stop to check again.",
+            ),
+          ),
+        10000,
+      );
+    });
+    try {
+      await Promise.race([
+        timeout,
+        (async (): Promise<void> => {
+          while (!cancelled) {
+            if (
+              clientRef.current !== client ||
+              clientGenerationRef.current !== generation
+            )
+              throw new Error(
+                "Chat connection changed while stopping. Queue paused; check the session before retrying.",
+              );
+            const state = await client.request<SessionResponse>(
+              "session.resume",
+              {
+                session_id: storedSessionId,
+                ...(profile ? { profile } : {}),
+              },
+            );
+            if (
+              clientRef.current !== client ||
+              clientGenerationRef.current !== generation
+            )
+              throw new Error("Chat connection changed while stopping.");
+            if (state.session_id !== sessionId)
+              throw new Error(
+                "Runtime session changed while stopping. Queue paused.",
+              );
+            if (
+              state.running === false ||
+              (state.running === undefined && state.status === "idle")
+            )
+              return;
+            await new Promise<void>((resolve) => setTimeout(resolve, 100));
+          }
+        })(),
+      ]);
+    } finally {
+      cancelled = true;
+      clearTimeout(timer);
+    }
+  }, [ensureClient, ensureRuntimeSession, profile]);
+
+  const abort = useCallback((): Promise<void> => {
+    const currentStop = stopPromiseRef.current;
+    if (
+      currentStop &&
+      currentStop.generation === clientGenerationRef.current &&
+      currentStop.client === clientRef.current &&
+      currentStop.sessionId === runtimeSessionIdRef.current
+    )
+      return currentStop.promise;
+    const target = {
+      generation: clientGenerationRef.current,
+      client: clientRef.current,
+      sessionId: runtimeSessionIdRef.current,
+      promise: null as unknown as Promise<void>,
+    };
+    const pending = (async (): Promise<void> => {
+      if (!enabled) throw new Error("Dashboard transport disabled");
+      if (legacyFallbackUsedRef.current)
+        throw new Error(
+          "Send now cannot confirm idle for a legacy turn. Wait for it to finish.",
+        );
+      const generation = clientGenerationRef.current;
+      const client = await ensureClient();
+      const sessionId = await ensureRuntimeSession(client);
+      const checkTarget = (): void => {
+        if (
+          clientGenerationRef.current !== generation ||
+          clientRef.current !== client ||
+          runtimeSessionIdRef.current !== sessionId
+        )
+          throw new Error(
+            "Chat connection changed while stopping. Queue paused.",
+          );
+      };
+      checkTarget();
+      target.client = client;
+      target.sessionId = sessionId;
+      expirePendingClarifyRef.current();
+      expirePendingApprovalsRef.current();
+      setIsLoading(true);
+      await client.request("session.interrupt", { session_id: sessionId });
+      checkTarget();
+      await waitForIdle();
+      checkTarget();
+      activeTurnRef.current = null;
+      setToolProgress(null);
+      setIsLoading(false);
+    })();
+    target.promise = pending;
+    stopPromiseRef.current = target;
+    void pending
+      .finally(() => {
+        if (stopPromiseRef.current === target) stopPromiseRef.current = null;
+      })
+      .catch(() => undefined);
+    return pending;
+  }, [
+    enabled,
+    ensureClient,
+    ensureRuntimeSession,
+    waitForIdle,
+    activeTurnRef,
+    setIsLoading,
+    setToolProgress,
+  ]);
+
   const execSlash = useCallback(
     async (
       command: string,
@@ -2617,6 +2800,10 @@ export function useDashboardChatTransport({
         return { kind: "error", message: "dashboard transport disabled" };
       }
       try {
+        if (/^\/stop(?:\s|$)/i.test(command.trim())) {
+          await abort();
+          return { kind: "done" };
+        }
         const client = await ensureClient();
         const runtimeSessionId = await ensureRuntimeSession(client);
         const sessionId = await ensureSelectedModel(client, runtimeSessionId);
@@ -2633,7 +2820,7 @@ export function useDashboardChatTransport({
         };
       }
     },
-    [enabled, ensureClient, ensureRuntimeSession, ensureSelectedModel],
+    [enabled, ensureClient, ensureRuntimeSession, ensureSelectedModel, abort],
   );
 
   const getCommandCatalog =
@@ -2721,19 +2908,6 @@ export function useDashboardChatTransport({
     },
     [enabled, ensureRuntimeSession, connectionId, profile],
   );
-
-  const abort = useCallback(() => {
-    expirePendingClarifyRef.current();
-    expirePendingApprovalsRef.current();
-    const client = clientRef.current;
-    const sessionId = runtimeSessionIdRef.current;
-    if (!enabled || !client || !sessionId) return;
-    void client
-      .request("session.interrupt", { session_id: sessionId })
-      .catch(() => {
-        client.close();
-      });
-  }, [enabled]);
 
   // Catch a chat up after its transport was torn down mid-turn (issue #76):
   // reconnect, resume the stored session (the backend re-attaches the event
@@ -2895,6 +3069,7 @@ export function useDashboardChatTransport({
 
   return {
     abort,
+    waitForIdle,
     enabled,
     hasDetachedTurn: detachedSessionId !== null,
     hasPendingApproval,

@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useRef } from "react";
+import type { DashboardSendResult } from "./useDashboardChatTransport";
+
+export type SubmissionOutcome = "accepted" | "rejected" | "uncertain";
+
 import type { ChatInputHandle } from "../ChatInput";
 import { createTurn, shouldSendToAgent } from "../chatMessages";
 import type { SlashExecOutcome } from "../slashExec";
@@ -62,7 +66,7 @@ interface UseChatActionsArgs {
   sendViaDashboard?: (
     text: string,
     attachments?: Attachment[],
-  ) => Promise<boolean>;
+  ) => Promise<DashboardSendResult>;
   /** Run an Agent-owned slash command through the gateway pipeline. Undefined
    *  on legacy transport; the central router reports it as unavailable. */
   execSlashViaDashboard?: (
@@ -79,7 +83,7 @@ interface UseChatActionsArgs {
   /** Defer a message onto the busy queue. Used when a slash command resolves to
    *  an agent prompt while a turn is already in flight. */
   enqueueMessage?: (text: string, attachments?: Attachment[]) => void;
-  abortDashboard?: () => void;
+  abortDashboard?: () => Promise<void>;
 }
 
 interface UseChatActionsResult {
@@ -87,7 +91,7 @@ interface UseChatActionsResult {
     text: string,
     attachments?: Attachment[],
     skipLoadingCheck?: boolean,
-  ) => Promise<void>;
+  ) => Promise<SubmissionOutcome | void>;
   handleQuickAsk: (text: string, attachments?: Attachment[]) => Promise<void>;
   /** Launch a side-question (`/btw`) background prompt. Bypasses the busy queue;
    *  `question` is the text after the command. */
@@ -95,7 +99,7 @@ interface UseChatActionsResult {
     question: string,
     attachments?: Attachment[],
   ) => Promise<void>;
-  handleAbort: () => void;
+  handleAbort: () => Promise<boolean>;
   handleApprove: () => void;
   handleDeny: () => void;
 }
@@ -134,6 +138,10 @@ export function useChatActions({
   const messagesRef = useRef(messages);
   const isLoadingRef = useRef(isLoading);
   const sessionModelRef = useRef(sessionModel);
+  const lastSendTransportRef = useRef<"dashboard" | "legacy" | null>(null);
+  useEffect(() => {
+    lastSendTransportRef.current = null;
+  }, [connectionId, profile]);
   useEffect(() => {
     messagesRef.current = messages;
     isLoadingRef.current = isLoading;
@@ -159,12 +167,18 @@ export function useChatActions({
   );
 
   const sendToAgent = useCallback(
-    async (text: string, attachments?: Attachment[]): Promise<void> => {
+    async (
+      text: string,
+      attachments?: Attachment[],
+    ): Promise<SubmissionOutcome> => {
       try {
         if (sendViaDashboard) {
+          lastSendTransportRef.current = "dashboard";
           const handled = await sendViaDashboard(text, attachments);
-          if (handled) return;
+          if (handled === true) return "accepted";
+          if (handled === "rejected" || handled === "uncertain") return handled;
         }
+        lastSendTransportRef.current = "legacy";
         await window.hermesAPI.sendMessage(
           text,
           profile,
@@ -179,8 +193,10 @@ export function useChatActions({
           sessionModelRef.current || undefined,
           connectionId,
         );
+        return "accepted";
       } catch {
-        // onChatError IPC already surfaces this to the user
+        // IPC may have delivered before the ACK was lost. Never retry blindly.
+        return "uncertain";
       }
     },
     [
@@ -236,14 +252,55 @@ export function useChatActions({
     [runBackgroundViaDashboard, pushUser, addAgentMessage, runQuickAsk],
   );
 
+  const handleAbort = useCallback(async (): Promise<boolean> => {
+    try {
+      if (abortDashboard && lastSendTransportRef.current !== "legacy") {
+        await abortDashboard();
+      } else {
+        window.hermesAPI.abortChat(runId, connectionId);
+        activeTurnRef.current = null;
+        setIsLoading(false);
+      }
+      setMessages((current) =>
+        current.map((message) =>
+          message.kind === "approval" &&
+          message.responsePath === "ipc" &&
+          !message.resolved
+            ? { ...message, unavailable: true }
+            : message,
+        ),
+      );
+      setTimeout(() => chatInputRef.current?.focus(), 50);
+      return true;
+    } catch (error) {
+      addAgentMessage?.(
+        `error: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return false;
+    }
+  }, [
+    abortDashboard,
+    runId,
+    connectionId,
+    activeTurnRef,
+    setIsLoading,
+    setMessages,
+    chatInputRef,
+    addAgentMessage,
+  ]);
+
   const handleSend = useCallback(
     async (
       text: string,
       attachments?: Attachment[],
       skipLoadingCheck = false,
-    ): Promise<void> => {
+    ): Promise<SubmissionOutcome | void> => {
       const hasPayload = text.length > 0 || (attachments?.length ?? 0) > 0;
       if (!hasPayload) return;
+      if (/^\/stop(?:\s|$)/i.test(text.trim())) {
+        await handleAbort();
+        return;
+      }
       if (!skipLoadingCheck && isLoadingRef.current) return;
 
       const cmdName = text.startsWith("/")
@@ -380,10 +437,11 @@ export function useChatActions({
         status: "running",
       };
       onSessionStarted?.();
-      await sendToAgent(text, attachments);
+      return await sendToAgent(text, attachments);
     },
     [
       activeTurnRef,
+      handleAbort,
       hermesSessionId,
       localCommands,
       profile,
@@ -408,31 +466,6 @@ export function useChatActions({
     },
     [runBackground],
   );
-
-  const handleAbort = useCallback(() => {
-    abortDashboard?.();
-    window.hermesAPI.abortChat(runId, connectionId);
-    activeTurnRef.current = null;
-    setMessages((current) =>
-      current.map((message) =>
-        message.kind === "approval" &&
-        message.responsePath === "ipc" &&
-        !message.resolved
-          ? { ...message, unavailable: true }
-          : message,
-      ),
-    );
-    setIsLoading(false);
-    setTimeout(() => chatInputRef.current?.focus(), 50);
-  }, [
-    abortDashboard,
-    runId,
-    connectionId,
-    activeTurnRef,
-    chatInputRef,
-    setIsLoading,
-    setMessages,
-  ]);
 
   const handleApprove = useCallback(() => {
     chatInputRef.current?.clear();
