@@ -17,7 +17,7 @@ vi.mock("../../components/useI18n", () => {
 });
 
 // Component test for the queue's "send now" affordance (issue #109 / TODO 3):
-// each queued row exposes a send button that hands its index to the owner.
+// each queued row exposes a send button that hands its stable ID to the owner.
 
 function renderQueue(
   messages: Array<{ text: string; attachments?: Attachment[] }>,
@@ -29,7 +29,8 @@ function renderQueue(
   const onRemove = vi.fn();
   render(
     <QueuedMessages
-      messages={messages.map((m) => ({
+      messages={messages.map((m, index) => ({
+        id: `queued-${index}`,
         text: m.text,
         attachments: m.attachments ?? [],
       }))}
@@ -41,15 +42,35 @@ function renderQueue(
 }
 
 describe("QueuedMessages send-now button", () => {
+  it("disables queue mutations while stopping and explains ambiguous delivery", () => {
+    const onSendNow = vi.fn();
+    const onRemove = vi.fn();
+    render(
+      <QueuedMessages
+        messages={[{ id: "C", text: "queued", attachments: [] }]}
+        busy
+        error="Check the session. Queue paused."
+        onSendNow={onSendNow}
+        onRemove={onRemove}
+      />,
+    );
+    const send = screen.getByRole("button", { name: "chat.queuedSendNow" });
+    const remove = screen.getByRole("button", { name: "chat.queuedCancel" });
+    expect(send).toBeDisabled();
+    expect(remove).toBeDisabled();
+    expect(screen.getByRole("alert")).toHaveTextContent("Check the session");
+    fireEvent.click(send);
+    expect(onSendNow).not.toHaveBeenCalled();
+  });
   it("shows the send-now button on the collapsed single-row preview", () => {
     // @lat: [[chat-input#Queued message send-now]]
     const { onSendNow } = renderQueue([{ text: "only queued" }]);
     const button = screen.getByRole("button", { name: "chat.queuedSendNow" });
     fireEvent.click(button);
-    expect(onSendNow).toHaveBeenCalledWith(0);
+    expect(onSendNow).toHaveBeenCalledWith("queued-0");
   });
 
-  it("invokes onSendNow with the row index in the expanded list", () => {
+  it("invokes onSendNow with the stable message ID in the expanded list", () => {
     const { onSendNow } = renderQueue([
       { text: "first queued" },
       { text: "second queued" },
@@ -61,6 +82,6 @@ describe("QueuedMessages send-now button", () => {
     });
     expect(buttons.length).toBe(2);
     fireEvent.click(buttons[1]);
-    expect(onSendNow).toHaveBeenCalledWith(1);
+    expect(onSendNow).toHaveBeenCalledWith("queued-1");
   });
 });

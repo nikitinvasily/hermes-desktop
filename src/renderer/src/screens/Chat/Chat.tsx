@@ -17,6 +17,7 @@ import { useChatScroll } from "./hooks/useChatScroll";
 import { useTranscriptState } from "./hooks/useTranscriptState";
 import { useChatIPC } from "./hooks/useChatIPC";
 import { useChatActions, parseBackgroundCommand } from "./hooks/useChatActions";
+import { useChatQueue } from "./hooks/useChatQueue";
 import {
   useModelConfig,
   effectiveOverrideBaseUrl,
@@ -65,11 +66,6 @@ import {
   shouldPersistSessionFolder,
   type FolderPersistGuard,
 } from "./sessionFolderPersist";
-
-interface QueuedMessage {
-  text: string;
-  attachments: Attachment[];
-}
 
 export type { ChatMessage } from "./types";
 
@@ -420,8 +416,6 @@ function Chat({
   const sessionModelOverrideLoadedRef = useRef<boolean>(!initialSessionId);
   const dragCounter = useRef(0);
   const chatInputRef = useRef<ChatInputHandle>(null);
-  const queueRef = useRef<QueuedMessage[]>([]);
-  const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
   const activeTurnRef = useRef<ActiveTurn | null>(null);
   const dashboardChatEnabled = dashboardChatEnabledForConnection(
     import.meta.env.VITE_HERMES_DESKTOP_DASHBOARD_CHAT,
@@ -761,47 +755,6 @@ function Chat({
     [setMessages],
   );
 
-  const handleClear = useCallback(() => {
-    if (isLoading) {
-      window.hermesAPI.abortChat(runId, connectionId);
-      setIsLoading(false);
-    }
-    const idToDelete = hermesSessionId;
-    if (idToDelete) {
-      void window.hermesAPI.deleteSession(idToDelete, connectionId, profile);
-      void window.hermesAPI.clearStagedAttachments(idToDelete);
-    }
-    setMessages([]);
-    setHermesSessionId(null);
-    setContextFolder(null);
-    // Clearing the conversation reverts to the global default model — the
-    // session-scoped pick belongs to the conversation being cleared (#688).
-    setSessionModelOverride(undefined);
-    void reloadModelConfig();
-    activeTurnRef.current = null;
-    setUsage(null);
-    setToolProgress(null);
-    queueRef.current = [];
-    setQueuedMessages([]);
-  }, [
-    isLoading,
-    runId,
-    connectionId,
-    profile,
-    hermesSessionId,
-    setMessages,
-    reloadModelConfig,
-  ]);
-
-  const localCommands = useLocalCommands({
-    profile,
-    usage,
-    setFastMode: setFastTier,
-    onNewChat,
-    onClear: handleClear,
-    addAgentMessage,
-  });
-
   // Fired once per connection when the dashboard WebSocket transport can't
   // connect (e.g. SSH tunnel → `hermes gateway`, which has no `/api/ws`, issue
   // #667) and we fall back to legacy chat. A fixed toast id dedupes.
@@ -975,15 +928,68 @@ function Chat({
     [slashCatalog],
   );
 
-  // Defer a message onto the busy queue (used when a slash command resolves to
-  // an agent prompt while a turn is already in flight).
-  const enqueueMessage = useCallback(
-    (text: string, attachments: Attachment[] = []) => {
-      queueRef.current.push({ text, attachments });
-      setQueuedMessages([...queueRef.current]);
-    },
-    [],
+  const handleSendRef = useRef<ReturnType<typeof useChatActions>["handleSend"]>(
+    async () => undefined,
   );
+  const queue = useChatQueue({
+    isLoading,
+    scopeKey: `${connectionId}|${profile ?? ""}|${connectionRevision}`,
+    stop: async () => {
+      if (!dashboardTransport.enabled)
+        throw new Error(
+          "Send now requires Dashboard transport to confirm the agent is idle.",
+        );
+      await dashboardTransport.abort();
+    },
+    waitForIdle: dashboardTransport.enabled
+      ? dashboardTransport.waitForIdle
+      : undefined,
+    send: (text, attachments) => handleSendRef.current(text, attachments, true),
+  });
+  const enqueueMessage = queue.enqueue;
+  const clearQueue = queue.clear;
+  const isQueueHeld = queue.isHeld;
+
+  const handleClear = useCallback(() => {
+    if (isLoading) {
+      window.hermesAPI.abortChat(runId, connectionId);
+      setIsLoading(false);
+    }
+    const idToDelete = hermesSessionId;
+    if (idToDelete) {
+      void window.hermesAPI.deleteSession(idToDelete, connectionId, profile);
+      void window.hermesAPI.clearStagedAttachments(idToDelete);
+    }
+    setMessages([]);
+    setHermesSessionId(null);
+    setContextFolder(null);
+    // Clearing the conversation reverts to the global default model — the
+    // session-scoped pick belongs to the conversation being cleared (#688).
+    setSessionModelOverride(undefined);
+    void reloadModelConfig();
+    activeTurnRef.current = null;
+    setUsage(null);
+    setToolProgress(null);
+    clearQueue();
+  }, [
+    isLoading,
+    runId,
+    connectionId,
+    profile,
+    hermesSessionId,
+    setMessages,
+    reloadModelConfig,
+    clearQueue,
+  ]);
+
+  const localCommands = useLocalCommands({
+    profile,
+    usage,
+    setFastMode: setFastTier,
+    onNewChat,
+    onClear: handleClear,
+    addAgentMessage,
+  });
 
   const actions = useChatActions({
     runId,
@@ -1014,54 +1020,17 @@ function Chat({
     addAgentMessage,
     enqueueMessage,
     abortDashboard: dashboardTransport.enabled
-      ? dashboardTransport.abort
+      ? queue.stopCurrentTurn
       : undefined,
   });
 
   // Stable ref to handleSend so the drain effect doesn't re-trigger on
   // identity changes (regression #5 from PR #315).
-  const handleSendRef = useRef(actions.handleSend);
   const handleBackgroundRef = useRef(actions.handleBackground);
   useEffect(() => {
     handleSendRef.current = actions.handleSend;
     handleBackgroundRef.current = actions.handleBackground;
   });
-
-  // Drain queued messages one at a time when the agent finishes.
-  useEffect(() => {
-    if (isLoading) return;
-    const next = queueRef.current.shift();
-    if (!next) return;
-    setQueuedMessages([...queueRef.current]);
-    handleSendRef.current(next.text, next.attachments, true).catch(() => {
-      // Put the message back at the front so it isn't silently lost if
-      // the send fails (e.g. IPC error before onChatError fires).
-      queueRef.current.unshift(next);
-      setQueuedMessages([...queueRef.current]);
-    });
-  }, [isLoading]);
-
-  const handleRemoveQueued = useCallback((index: number) => {
-    queueRef.current.splice(index, 1);
-    setQueuedMessages([...queueRef.current]);
-  }, []);
-
-  // "Send now" on a queued message (issue #109 / TODO 3): move it to the head
-  // of the queue, then abort the running turn — handleAbort interrupts the
-  // agent and clears isLoading, and the drain effect above immediately sends
-  // the (new) queue head in FIFO order. A failed send puts the message back
-  // at the front via the drain's existing recovery path.
-  const handleSendNowQueued = useCallback(
-    (index: number) => {
-      if (!isLoading) return;
-      const [item] = queueRef.current.splice(index, 1);
-      if (!item) return;
-      queueRef.current.unshift(item);
-      setQueuedMessages([...queueRef.current]);
-      actions.handleAbort();
-    },
-    [isLoading, actions],
-  );
 
   const handleSubmitOrQueue = useCallback(
     (text: string, attachments: Attachment[]) => {
@@ -1082,14 +1051,13 @@ function Chat({
         void handleSendRef.current(text, attachments, true);
         return;
       }
-      if (isLoading) {
-        queueRef.current.push({ text, attachments });
-        setQueuedMessages([...queueRef.current]);
+      if (isLoading || isQueueHeld()) {
+        enqueueMessage(text, attachments);
         return;
       }
       void handleSendRef.current(text, attachments);
     },
-    [isLoading],
+    [isLoading, isQueueHeld, enqueueMessage],
   );
 
   const handleSuggestion = useCallback((text: string) => {
@@ -1266,9 +1234,11 @@ function Chat({
       <div className="chat-input-area">
         <div className="chat-content-column">
           <QueuedMessages
-            messages={queuedMessages}
-            onRemove={handleRemoveQueued}
-            onSendNow={handleSendNowQueued}
+            messages={queue.messages}
+            busy={queue.busy}
+            error={queue.error}
+            onRemove={queue.remove}
+            onSendNow={queue.sendNow}
           />
           <ChatInput
             ref={chatInputRef}

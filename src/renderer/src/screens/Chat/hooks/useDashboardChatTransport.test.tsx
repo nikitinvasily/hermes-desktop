@@ -12,6 +12,9 @@ import type { Mock } from "vitest";
 import type { DashboardRpcEvent } from "../dashboardGatewayClient";
 import { useDashboardChatTransport } from "./useDashboardChatTransport";
 import { useTranscriptState } from "./useTranscriptState";
+import { useChatActions } from "./useChatActions";
+import { useChatQueue } from "./useChatQueue";
+import type { SlashCommandCatalog } from "../slash/types";
 import type { ActiveTurn, ChatMessage, UsageState } from "../types";
 
 type SetUsageMock = Mock<(value: SetStateAction<UsageState | null>) => void>;
@@ -63,9 +66,13 @@ vi.mock("../dashboardGatewayClient", () => ({
 }));
 
 interface HarnessApi {
+  actions?: ReturnType<typeof useChatActions>;
+  queue?: ReturnType<typeof useChatQueue>;
   isLoading?: boolean;
   activeTurnRef?: MutableRefObject<ActiveTurn | null>;
-  abort?: () => void;
+  abort?: () => Promise<void>;
+  waitForIdle?: () => Promise<void>;
+  execSlash?: ReturnType<typeof useDashboardChatTransport>["execSlash"];
   messages?: ChatMessage[];
   resyncAfterDetach?: () => Promise<void>;
   hasDetachedTurn?: boolean;
@@ -75,7 +82,7 @@ interface HarnessApi {
   respondApproval?: ReturnType<
     typeof useDashboardChatTransport
   >["respondApproval"];
-  send?: (text: string) => Promise<boolean>;
+  send?: ReturnType<typeof useDashboardChatTransport>["sendMessage"];
   sessionYolo?: boolean | null;
   toggleSessionYolo?: (enabled: boolean) => Promise<boolean>;
   setConnectionMode?: Dispatch<SetStateAction<"local" | "remote" | "ssh">>;
@@ -158,6 +165,43 @@ function Harness({
     onTodoState,
   });
 
+  const sendRef = useRef<ReturnType<typeof useChatActions>["handleSend"]>(
+    async () => undefined,
+  );
+  const queue = useChatQueue({
+    isLoading,
+    scopeKey: `${connectionId}|${connectionRevision}`,
+    stop: transport.abort,
+    waitForIdle: transport.waitForIdle,
+    send: (text, attachments) => sendRef.current(text, attachments, true),
+  });
+  const actions = useChatActions({
+    runId: "test-run",
+    connectionId: connectionId ?? "local",
+    hermesSessionId,
+    messages,
+    isLoading,
+    setIsLoading,
+    setMessages,
+    activeTurnRef,
+    contextFolder: null,
+    chatInputRef: { current: null },
+    localCommands: { executeLocal: async () => false },
+    slashCatalog: {
+      commands: [],
+      resolve: () => undefined,
+    } as unknown as SlashCommandCatalog,
+    abortDashboard: queue.stopCurrentTurn,
+    sendViaDashboard: transport.sendMessage,
+    execSlashViaDashboard: transport.execSlash,
+  });
+  useEffect(() => {
+    sendRef.current = actions.handleSend;
+  });
+  useEffect(() => {
+    Object.assign(api, { actions, queue });
+  });
+
   useEffect(() => {
     // Bridge the hook's live values out to the test via the shared `api`
     // object. Object.assign mutates it in place (same reference the test
@@ -166,6 +210,8 @@ function Harness({
       isLoading,
       activeTurnRef,
       abort: transport.abort,
+      waitForIdle: transport.waitForIdle,
+      execSlash: transport.execSlash,
       messages,
       resyncAfterDetach: transport.resyncAfterDetach,
       hasDetachedTurn: transport.hasDetachedTurn,
@@ -194,6 +240,8 @@ function Harness({
     transport.sessionYolo,
     transport.toggleSessionYolo,
     transport.abort,
+    transport.waitForIdle,
+    transport.execSlash,
   ]);
 
   return null;
@@ -238,6 +286,539 @@ describe("useDashboardChatTransport recovery", () => {
         })),
       },
     });
+  });
+
+  it("routes /stop to interrupt without synchronizing the selected model", async () => {
+    dashboardMock.request.mockImplementation(async (method: string) => {
+      if (method === "session.create" || method === "session.resume")
+        return {
+          session_id: "live",
+          stored_session_id: "stored",
+          running: false,
+        };
+      if (method === "model.options")
+        return { model: "bad-model", provider: "bad-provider", providers: [] };
+      return {};
+    });
+    const api: HarnessApi = {};
+    render(<Harness api={api} />);
+    await act(async () => {
+      await api.send?.("hello");
+    });
+    await act(async () => {
+      api.setModel?.("different-model");
+    });
+    dashboardMock.request.mockClear();
+    await act(async () => {
+      await api.execSlash?.("/stop", vi.fn());
+    });
+    expect(dashboardMock.request).toHaveBeenCalledWith("session.interrupt", {
+      session_id: "live",
+    });
+    // Resume addresses the durable conversation, not its ephemeral runtime ID.
+    expect(dashboardMock.request).toHaveBeenCalledWith("session.resume", {
+      session_id: "stored",
+    });
+    expect(
+      dashboardMock.request.mock.calls.map(([method]) => method),
+    ).not.toContain("slash.exec");
+    expect(
+      dashboardMock.request.mock.calls.map(([method]) => method),
+    ).not.toContain("config.set");
+    expect(
+      dashboardMock.request.mock.calls.map(([method]) => method),
+    ).not.toContain("session.close");
+  });
+
+  it("joins stop calls and waits past complete and interrupt ACK until real idle", async () => {
+    let acknowledge!: (value: unknown) => void;
+    let settle!: (value: unknown) => void;
+    const interrupt = new Promise((resolve) => {
+      acknowledge = resolve;
+    });
+    const idle = new Promise((resolve) => {
+      settle = resolve;
+    });
+    dashboardMock.request.mockImplementation(async (method: string) => {
+      if (method === "session.create")
+        return { session_id: "live", stored_session_id: "stored" };
+      if (method === "model.options")
+        return { model: "bad-model", provider: "bad-provider", providers: [] };
+      if (method === "session.interrupt") return interrupt;
+      if (method === "session.resume") return idle;
+      return {};
+    });
+    const api: HarnessApi = {};
+    render(<Harness api={api} />);
+    await act(async () => {
+      await api.send?.("hello");
+    });
+    let finished = false;
+    let stopping!: Promise<void>;
+    act(() => {
+      stopping = Promise.resolve(api.abort?.()).then(() => {
+        finished = true;
+      });
+      void api.abort?.();
+    });
+    await act(async () => {
+      dashboardMock.onEvent?.({
+        type: "message.complete",
+        session_id: "live",
+        payload: {},
+      });
+      acknowledge({ status: "interrupted" });
+      await Promise.resolve();
+    });
+    expect(finished).toBe(false);
+    expect(api.isLoading).toBe(true);
+    expect(
+      dashboardMock.request.mock.calls.filter(
+        ([method]) => method === "session.interrupt",
+      ),
+    ).toHaveLength(1);
+    await act(async () => {
+      settle({ session_id: "live", running: false });
+      await stopping;
+    });
+    expect(finished).toBe(true);
+    expect(api.isLoading).toBe(false);
+    expect(api.activeTurnRef?.current).toBeNull();
+    expect(dashboardMock.close).not.toHaveBeenCalled();
+  });
+
+  it("reports a lost submit ACK as uncertain without replay or session recreation", async () => {
+    dashboardMock.request.mockImplementation(async (method: string) => {
+      if (method === "session.create")
+        return { session_id: "live", stored_session_id: "stored" };
+      if (method === "model.options")
+        return { model: "bad-model", provider: "bad-provider", providers: [] };
+      if (method === "prompt.submit")
+        throw new Error("Hermes dashboard request timed out: prompt.submit");
+      return {};
+    });
+    const api: HarnessApi = {};
+    render(<Harness api={api} />);
+    let outcome: unknown;
+    await act(async () => {
+      outcome = await api.send?.("hello");
+    });
+    expect(outcome).toBe("uncertain");
+    expect(
+      dashboardMock.request.mock.calls.filter(
+        ([method]) => method === "prompt.submit",
+      ),
+    ).toHaveLength(1);
+    expect(
+      dashboardMock.request.mock.calls.map(([method]) => method),
+    ).not.toContain("session.close");
+  });
+
+  it("reports an explicit prompt rejection without claiming acceptance", async () => {
+    dashboardMock.request.mockImplementation(async (method: string) => {
+      if (method === "session.create")
+        return { session_id: "live", stored_session_id: "stored" };
+      if (method === "model.options")
+        return { model: "bad-model", provider: "bad-provider", providers: [] };
+      if (method === "prompt.submit")
+        throw Object.assign(new Error("Session is busy"), {
+          rpcRejected: true,
+        });
+      return {};
+    });
+    const api: HarnessApi = {};
+    render(<Harness api={api} />);
+    let outcome: unknown;
+    await act(async () => {
+      outcome = await api.send?.("C");
+    });
+    expect(outcome).toBe("rejected");
+    expect(
+      dashboardMock.request.mock.calls.filter(
+        ([method]) => method === "prompt.submit",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it.each(["complete", "Stop"])(
+    "does not let a superseded pending Stop suppress the new connection's %s",
+    async (event) => {
+      let acknowledge!: (value: unknown) => void;
+      const interrupted = new Promise((resolve) => {
+        acknowledge = resolve;
+      });
+      let interrupts = 0;
+      dashboardMock.request.mockImplementation(async (method: string) => {
+        if (method === "session.create" || method === "session.resume")
+          return {
+            session_id: "live",
+            stored_session_id: "stored",
+            running: false,
+          };
+        if (method === "model.options")
+          return {
+            model: "bad-model",
+            provider: "bad-provider",
+            providers: [],
+          };
+        if (method === "session.interrupt" && ++interrupts === 1)
+          return interrupted;
+        return {};
+      });
+      const api: HarnessApi = {};
+      const { rerender } = render(<Harness api={api} connectionRevision={1} />);
+      await act(async () => {
+        await api.actions!.handleSend("A");
+      });
+      let oldStop!: Promise<string>;
+      act(() => {
+        oldStop = api.queue!.stopCurrentTurn().then(
+          () => "stopped",
+          (error: Error) => error.message,
+        );
+      });
+      await waitFor(() => expect(interrupts).toBe(1));
+      rerender(<Harness api={api} connectionRevision={2} />);
+      await act(async () => {
+        await api.actions!.handleSend("C");
+      });
+      let newStop!: Promise<void>;
+      if (event === "complete") {
+        await act(async () => {
+          dashboardMock.onEvent?.({
+            type: "message.complete",
+            session_id: "live",
+            payload: {},
+          });
+        });
+        expect(api.isLoading).toBe(false);
+        expect(api.activeTurnRef!.current).toBeNull();
+      } else {
+        act(() => {
+          newStop = api.queue!.stopCurrentTurn();
+        });
+        await waitFor(() => expect(interrupts).toBe(2));
+        await act(async () => {
+          await newStop;
+        });
+        expect(api.isLoading).toBe(false);
+      }
+      await act(async () => {
+        acknowledge({});
+        expect(await oldStop).toMatch(/changed|superseded/i);
+      });
+      expect(api.isLoading).toBe(false);
+      expect(api.activeTurnRef!.current).toBeNull();
+    },
+  );
+
+  it("does not settle a new connection's turn when an old interrupt ACK arrives", async () => {
+    let acknowledge!: (value: unknown) => void;
+    const interrupted = new Promise((resolve) => {
+      acknowledge = resolve;
+    });
+    dashboardMock.request.mockImplementation(async (method: string) => {
+      if (method === "session.create" || method === "session.resume")
+        return {
+          session_id: "live",
+          stored_session_id: "stored",
+          running: false,
+        };
+      if (method === "model.options")
+        return { model: "bad-model", provider: "bad-provider", providers: [] };
+      if (method === "session.interrupt") return interrupted;
+      return {};
+    });
+    const api: HarnessApi = {};
+    const { rerender } = render(<Harness api={api} connectionRevision={1} />);
+    await act(async () => {
+      await api.send?.("A");
+    });
+    let stopping!: Promise<string>;
+    act(() => {
+      stopping = api.abort!().then(
+        () => "stopped",
+        (error: Error) => error.message,
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    rerender(<Harness api={api} connectionRevision={2} />);
+    await act(async () => {
+      await api.send?.("C");
+    });
+    const successor = { ...activeRecoveryTurn };
+    api.activeTurnRef!.current = successor;
+    let outcome = "";
+    await act(async () => {
+      acknowledge({ status: "interrupted" });
+      outcome = await stopping;
+    });
+    expect(outcome).toMatch(/changed|superseded/i);
+    expect(api.activeTurnRef?.current).toBe(successor);
+  });
+
+  it.each(["button", "/stop"])(
+    "interrupts a submitted successor via %s before its submit ACK",
+    async (control) => {
+      let acknowledge!: (value: unknown) => void;
+      const submitted = new Promise((resolve) => {
+        acknowledge = resolve;
+      });
+      dashboardMock.request.mockImplementation(
+        async (method: string, params) => {
+          if (method === "session.create" || method === "session.resume")
+            return {
+              session_id: "live",
+              stored_session_id: "stored",
+              running: false,
+            };
+          if (method === "model.options")
+            return {
+              model: "bad-model",
+              provider: "bad-provider",
+              providers: [],
+            };
+          if (method === "prompt.submit" && params.text === "C")
+            return submitted;
+          return {};
+        },
+      );
+      const api: HarnessApi = {};
+      render(<Harness api={api} />);
+      await act(async () => {
+        await api.actions!.handleSend("A");
+      });
+      act(() => api.queue!.enqueue("C"));
+      const id = api.queue!.messages[0].id;
+      let sending!: Promise<void>;
+      act(() => {
+        sending = api.queue!.sendNow(id);
+      });
+      await waitFor(() =>
+        expect(dashboardMock.request).toHaveBeenCalledWith(
+          "prompt.submit",
+          expect.objectContaining({ text: "C" }),
+        ),
+      );
+      let stopping!: Promise<unknown>;
+      act(() => {
+        void api.queue!.sendNow(id);
+        stopping =
+          control === "button"
+            ? api.queue!.stopCurrentTurn()
+            : api.actions!.handleSend("/stop");
+      });
+      await waitFor(() =>
+        expect(
+          dashboardMock.request.mock.calls.filter(
+            ([method]) => method === "session.interrupt",
+          ),
+        ).toHaveLength(2),
+      );
+      await act(async () => {
+        await stopping;
+      });
+      expect(api.isLoading).toBe(false);
+      await act(async () => {
+        acknowledge({});
+        await sending;
+      });
+      expect(
+        dashboardMock.request.mock.calls.filter(
+          ([method, params]) =>
+            method === "prompt.submit" && params.text === "C",
+        ),
+      ).toHaveLength(1);
+      expect(api.queue!.messages).toEqual([]);
+    },
+  );
+
+  it("serializes real queue/actions/transport through complete-before-idle and repeated clicks", async () => {
+    let acknowledge!: (value: unknown) => void;
+    let settle!: (value: unknown) => void;
+    const interrupted = new Promise((resolve) => {
+      acknowledge = resolve;
+    });
+    const idle = new Promise((resolve) => {
+      settle = resolve;
+    });
+    dashboardMock.request.mockImplementation(async (method: string) => {
+      if (method === "session.create")
+        return { session_id: "live", stored_session_id: "stored" };
+      if (method === "model.options")
+        return { model: "bad-model", provider: "bad-provider", providers: [] };
+      if (method === "session.interrupt") return interrupted;
+      if (method === "session.resume") return idle;
+      return {};
+    });
+    const api: HarnessApi = {};
+    render(<Harness api={api} />);
+    await act(async () => {
+      await api.actions!.handleSend("A");
+    });
+    act(() => {
+      api.queue!.enqueue("B");
+      api.queue!.enqueue("C");
+      api.queue!.enqueue("D");
+    });
+    const [b, c, d] = api.queue!.messages;
+    let sending!: Promise<void>;
+    act(() => {
+      sending = api.queue!.sendNow(c.id);
+      void api.queue!.sendNow(d.id);
+    });
+    await act(async () => {
+      dashboardMock.onEvent?.({
+        type: "message.complete",
+        session_id: "live",
+        payload: { text: "A stopped" },
+      });
+      acknowledge({ status: "interrupted" });
+      await Promise.resolve();
+    });
+    expect(api.isLoading).toBe(true);
+    expect(
+      dashboardMock.request.mock.calls.filter(
+        ([method]) => method === "prompt.submit",
+      ),
+    ).toHaveLength(1);
+    expect(api.queue!.messages.map((m) => m.id)).toEqual([b.id, c.id, d.id]);
+    await act(async () => {
+      settle({ session_id: "live", running: false });
+      await sending;
+    });
+    expect(api.queue!.messages.map((m) => m.id)).toEqual([b.id, d.id]);
+    const prompts = dashboardMock.request.mock.calls.filter(
+      ([method]) => method === "prompt.submit",
+    );
+    expect(prompts.map(([, params]) => params.text)).toEqual(["A", "C"]);
+    expect(api.isLoading).toBe(true);
+    expect(api.activeTurnRef?.current?.status).toBe("running");
+    expect(
+      dashboardMock.request.mock.calls.filter(
+        ([method]) => method === "session.interrupt",
+      ),
+    ).toHaveLength(1);
+    expect(
+      dashboardMock.request.mock.calls.map(([method]) => method),
+    ).not.toContain("session.close");
+  });
+
+  it("keeps ordinary legacy fallback draining but refuses unconfirmed force-send", async () => {
+    Object.defineProperty(window, "hermesAPI", {
+      configurable: true,
+      value: {
+        startDashboard: vi.fn(async () => ({ running: false })),
+      },
+    });
+    const api: HarnessApi = {};
+    const { rerender } = render(
+      <Harness api={api} fallbackOnUnavailable initialConnectionMode="ssh" />,
+    );
+    await act(async () => {
+      expect(await api.send?.("A")).toBe(false);
+    });
+    await act(async () => {
+      await expect(api.waitForIdle!()).resolves.toBeUndefined();
+    });
+    await act(async () => {
+      await expect(api.abort!()).rejects.toThrow(/legacy/i);
+    });
+    expect(dashboardMock.request).not.toHaveBeenCalled();
+    rerender(
+      <Harness
+        api={api}
+        fallbackOnUnavailable
+        initialConnectionMode="ssh"
+        connectionRevision={1}
+      />,
+    );
+    await act(async () => {
+      await expect(api.waitForIdle!()).rejects.toThrow(/unavailable/i);
+    });
+  });
+
+  it("drops terminal events from a superseded socket even when runtime IDs match", async () => {
+    dashboardMock.request.mockImplementation(async (method: string) => {
+      if (method === "session.create" || method === "session.resume")
+        return {
+          session_id: "live",
+          stored_session_id: "stored",
+          running: false,
+        };
+      if (method === "model.options")
+        return { model: "bad-model", provider: "bad-provider", providers: [] };
+      return {};
+    });
+    const api: HarnessApi = {};
+    const { rerender } = render(<Harness api={api} connectionRevision={1} />);
+    await act(async () => {
+      await api.actions!.handleSend("A");
+    });
+    const oldEvent = dashboardMock.onEvent;
+    rerender(<Harness api={api} connectionRevision={2} />);
+    await act(async () => {
+      await api.actions!.handleSend("C");
+    });
+    const successor = api.activeTurnRef!.current;
+    await act(async () => {
+      oldEvent?.({
+        type: "message.complete",
+        session_id: "live",
+        payload: { text: "old A" },
+      });
+    });
+    expect(api.activeTurnRef!.current).toBe(successor);
+    expect(api.isLoading).toBe(true);
+    expect(
+      api.messages?.some((m) => "content" in m && m.content === "old A"),
+    ).toBe(false);
+  });
+
+  it("times out an unknown idle state without closing or replaying the session", async () => {
+    dashboardMock.request.mockImplementation(async (method: string) => {
+      if (method === "session.resume") return { session_id: "live" };
+      if (method === "session.create")
+        return { session_id: "live", stored_session_id: "stored" };
+      if (method === "model.options")
+        return { model: "bad-model", provider: "bad-provider", providers: [] };
+      return {};
+    });
+    const api: HarnessApi = {};
+    render(<Harness api={api} />);
+    await act(async () => {
+      await api.actions!.handleSend("A");
+    });
+    vi.useFakeTimers();
+    try {
+      let stop!: Promise<string>;
+      act(() => {
+        stop = api.abort!().then(
+          () => "stopped",
+          (error: Error) => error.message,
+        );
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10001);
+      });
+      expect(await stop).toContain("Timed out");
+      expect(dashboardMock.close).not.toHaveBeenCalled();
+      expect(
+        dashboardMock.request.mock.calls.map(([method]) => method),
+      ).not.toContain("session.close");
+      expect(
+        dashboardMock.request.mock.calls.map(([method]) => method),
+      ).not.toContain("session.status");
+      const requests = dashboardMock.request.mock.calls.length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+      expect(dashboardMock.request.mock.calls).toHaveLength(requests);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   async function clarifyHarness(): Promise<HarnessApi> {
@@ -357,7 +938,7 @@ describe("useDashboardChatTransport recovery", () => {
       unavailable: true,
     });
     await act(async () => {
-      expect(await api.send?.("retry after disconnect")).toBe(true);
+      expect(await api.send?.("retry after disconnect")).toBe("rejected");
     });
   });
 
@@ -625,9 +1206,7 @@ describe("useDashboardChatTransport recovery", () => {
         "clarify",
         {
           session_id: "live",
-          questions: [
-            { qid: "q0", question: "When?", choices: ["am", "pm"] },
-          ],
+          questions: [{ qid: "q0", question: "When?", choices: ["am", "pm"] }],
         },
         "srq-live1",
       );
@@ -871,12 +1450,14 @@ describe("useDashboardChatTransport recovery", () => {
       />,
     );
 
-    let handled: boolean | undefined;
+    let handled:
+      | Awaited<ReturnType<NonNullable<HarnessApi["send"]>>>
+      | undefined;
     await act(async () => {
       handled = await api.send?.("hello");
     });
 
-    expect(handled).toBe(true);
+    expect(handled).toBe("rejected");
     expect(onUnavailable).not.toHaveBeenCalled();
   });
 
@@ -1033,7 +1614,7 @@ describe("useDashboardChatTransport recovery", () => {
     const api: HarnessApi = {};
     render(<Harness api={api} />);
 
-    let firstSend: Promise<boolean> | null = null;
+    let firstSend: ReturnType<NonNullable<HarnessApi["send"]>> | null = null;
     await act(async () => {
       firstSend = api.send?.("first prompt") ?? null;
     });
@@ -1386,7 +1967,7 @@ describe("useDashboardChatTransport unavailable fallback (issue #667)", () => {
       />,
     );
 
-    let first: boolean | undefined;
+    let first: Awaited<ReturnType<NonNullable<HarnessApi["send"]>>> | undefined;
     await act(async () => {
       first = await api.send?.("hello");
     });
@@ -1395,7 +1976,9 @@ describe("useDashboardChatTransport unavailable fallback (issue #667)", () => {
     expect(startDashboard).toHaveBeenCalledTimes(1);
     expect(onUnavailable).toHaveBeenCalledTimes(1);
 
-    let second: boolean | undefined;
+    let second:
+      | Awaited<ReturnType<NonNullable<HarnessApi["send"]>>>
+      | undefined;
     await act(async () => {
       second = await api.send?.("again");
     });

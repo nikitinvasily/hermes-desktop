@@ -333,7 +333,7 @@ export class DashboardGatewayClient {
         typeof response.error === "string"
           ? response.error
           : response.error.message || "Hermes dashboard request failed";
-      pending.reject(new Error(message));
+      pending.reject(Object.assign(new Error(message), { rpcRejected: true }));
       return;
     }
 
