@@ -1748,7 +1748,9 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
                           ) : (
                             <Folder size={13} />
                           )}
-                          <span>{displayName(group.path)}</span>
+                          <span className="sidebar-recent-project-title">
+                            {displayName(group.path)}
+                          </span>
                         </button>
                         {projectRecord && (
                           <>

@@ -2904,7 +2904,7 @@ body:has(.shell-vibrant),
   flex-shrink: 0;
 }
 
-.sidebar-recent-project-heading span {
+.sidebar-recent-project-title {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -2912,9 +2912,8 @@ body:has(.shell-vibrant),
   white-space: nowrap;
 }
 
-/* Task #89: the aggregated activity spinner is a span too — the title rule
-   above (flex: 1 1 auto, higher specificity by element order) would stretch
-   the 13px ring across the row into a "stick". Re-pin its footprint. */
+/* Keep the running ring's footprint explicit; title flex sizing is scoped
+   to .sidebar-recent-project-title and never applies to status indicators. */
 .sidebar-recent-project-heading .sidebar-recent-session-spinner {
   flex: 0 0 13px;
   width: 13px;
@@ -2967,11 +2966,12 @@ body:has(.shell-vibrant),
 }
 
 .sidebar-recent-session-waiting-subagents {
-  width: 11px;
-  height: 11px;
-  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
+  flex: 0 0 13px;
   border: 2px dotted var(--accent);
   border-radius: 50%;
+  animation: spin 0.8s linear infinite;
 }
 
 .sidebar-recent-session-dot--unread {
