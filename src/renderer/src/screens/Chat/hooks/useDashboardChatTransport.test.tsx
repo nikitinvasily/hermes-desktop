@@ -372,6 +372,60 @@ describe("useDashboardChatTransport recovery", () => {
     }
   });
 
+  // @lat: [[sidebar-navigation#Sidebar recent sessions#Session state bullets#Backend-started continuation]]
+  it.each(["local", "remote", "ssh"] as const)(
+    "restores activity for repeated backend-started turns on an idle %s chat",
+    async (initialConnectionMode) => {
+      dashboardMock.request.mockImplementation(async (method: string) => {
+        if (method === "session.resume")
+          return {
+            session_id: "runtime-parent",
+            stored_session_id: "stored-parent",
+            running: false,
+          };
+        return { subagents: [] };
+      });
+      const api: HarnessApi = {};
+      const view = render(
+        <Harness
+          api={api}
+          hermesSessionId="stored-parent"
+          initialConnectionMode={initialConnectionMode}
+        />,
+      );
+      await waitFor(() =>
+        expect(dashboardMock.request).toHaveBeenCalledWith("subagent.list", {
+          session_id: "runtime-parent",
+        }),
+      );
+      const emit = (type: string, session_id = "runtime-parent"): void => {
+        act(() => dashboardMock.onEvent?.({ type, session_id, payload: {} }));
+      };
+      emit("message.complete");
+      expect(api.isLoading).toBe(false);
+      expect(api.activeTurnRef?.current).toBeNull();
+      emit("message.start", "unrelated-runtime");
+      expect(api.isLoading).toBe(false);
+      for (let turn = 0; turn < 3; turn++) {
+        emit("message.start");
+        expect(api.isLoading).toBe(true);
+        expect(api.activeTurnRef?.current?.status).toBe("running");
+        const activeTurn = api.activeTurnRef?.current;
+        emit("message.start");
+        expect(api.activeTurnRef?.current).toBe(activeTurn);
+        emit("message.complete");
+        expect(api.isLoading).toBe(false);
+        expect(api.activeTurnRef?.current).toBeNull();
+      }
+      expect(
+        dashboardMock.request.mock.calls.some(
+          ([method]) => method === "prompt.submit",
+        ),
+      ).toBe(false);
+      view.unmount();
+    },
+  );
+
   it("shares a cold resume between the roster probe and a user send", async () => {
     let resume!: (value: unknown) => void;
     const pending = new Promise((resolve) => {

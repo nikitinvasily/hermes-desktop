@@ -1375,6 +1375,23 @@ export function useDashboardChatTransport({
     lastSyncedCwdRef.current = null;
   }, [connectionId, connectionMode, connectionRevision, profile]);
 
+  // Backend continuations (including subagent results) start without the
+  // composer's optimistic loading update. Resume and message.start share the
+  // same run-state restore, preserving any turn the composer already seeded.
+  const markRunStarted = useCallback((): void => {
+    if (!activeTurnRef.current) {
+      activeTurnRef.current = {
+        turnId: "",
+        userId: "",
+        startIndex: messagesRef.current.length,
+        status: "running",
+      };
+    } else {
+      activeTurnRef.current.status = "running";
+    }
+    setIsLoading(true);
+  }, [activeTurnRef, messagesRef, setIsLoading]);
+
   const handleGatewayEvent = useCallback(
     (event: DashboardStreamEvent): void => {
       const runtimeSessionId = runtimeSessionIdRef.current;
@@ -1387,6 +1404,9 @@ export function useDashboardChatTransport({
         return;
       }
       logDashboardEvent(event, "accepted", runtimeSessionId);
+
+      // @lat: [[sidebar-navigation#Sidebar recent sessions#Session state bullets#Backend-started continuation]]
+      if (event.type === "message.start") markRunStarted();
 
       if (event.type === "session.info") {
         const recordRuntimeInfo = window.hermesAPI.recordAgentRuntimeInfo;
@@ -1660,6 +1680,7 @@ export function useDashboardChatTransport({
       connectionId,
       connectionMode,
       flushDeltasNow,
+      markRunStarted,
       setPendingApprovals,
       messagesRef,
       scheduleDeltaFlush,
@@ -1831,32 +1852,6 @@ export function useDashboardChatTransport({
       onTodoState,
     ]);
 
-  // Restore the UI's run state from the backend's truth (issue #109): the
-  // gateway keeps authoritative `running` flags, and session.resume reports
-  // them plus re-attaches the event stream of a still-running turn — deltas
-  // and message.complete then arrive on this client like for a local send.
-  // A synthetic activeTurn carries no turnId/userId; the reconcile path does
-  // not key on them for a resumed turn, and an eventual completion clears
-  // the spinner without needing a matching user bubble.
-  const seedRunStateFromResume = useCallback(
-    (running: boolean): void => {
-      if (running) {
-        if (!activeTurnRef.current) {
-          activeTurnRef.current = {
-            turnId: "",
-            userId: "",
-            startIndex: messagesRef.current.length,
-            status: "running",
-          };
-        } else {
-          activeTurnRef.current.status = "running";
-        }
-        setIsLoading(true);
-      }
-    },
-    [activeTurnRef, messagesRef, setIsLoading],
-  );
-
   const resolveRuntimeSession = useCallback(
     async (
       client: DashboardGatewayClient,
@@ -1921,7 +1916,7 @@ export function useDashboardChatTransport({
           // The resumed session still has a live turn (re-opened chat, app
           // restart, post-detach resync): restore the spinner/Stop state the
           // renderer lost (issue #109).
-          seedRunStateFromResume(true);
+          markRunStarted();
         }
         if (
           !justCreated &&
@@ -2024,7 +2019,7 @@ export function useDashboardChatTransport({
       contextFolder,
       messagesRef,
       profile,
-      seedRunStateFromResume,
+      markRunStarted,
       setHermesSessionId,
     ],
   );
