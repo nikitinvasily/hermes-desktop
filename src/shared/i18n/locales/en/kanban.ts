@@ -5,6 +5,9 @@ export default {
 
   // Header actions
   refresh: "Refresh",
+  sortLabel: "Sort",
+  sortPriority: "Priority",
+  sortNewest: "Newest first",
   refreshTooltip: "Reload boards and tasks from the agent",
   dispatch: "Dispatch",
   dispatchTooltip:
