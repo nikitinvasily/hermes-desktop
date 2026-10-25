@@ -1085,6 +1085,20 @@ describe("SidebarRecentSessions maybe-changed force refresh (issue #97)", () => 
 });
 
 describe("SidebarRecentSessions state bullets", () => {
+  it("keeps project activity spans out of title flex sizing and rotates waiting rings", () => {
+    expect(mainCss).not.toMatch(/\.sidebar-recent-project-heading\s+span\s*\{/);
+    expect(mainCss).toMatch(
+      /\.sidebar-recent-project-title\s*\{[^}]*flex:\s*1 1 auto/s,
+    );
+    const waiting = mainCss.match(
+      /\.sidebar-recent-session-waiting-subagents\s*\{([^}]+)\}/,
+    )?.[1];
+    expect(waiting).toMatch(/width:\s*13px/);
+    expect(waiting).toMatch(/height:\s*13px/);
+    expect(waiting).toMatch(/flex:\s*0 0 13px/);
+    expect(waiting).toMatch(/animation:\s*spin 0\.8s linear infinite/);
+  });
+
   it("prioritizes approval > running > waiting > unread and aggregates waiting projects", async () => {
     const rows = [
       {
@@ -1163,6 +1177,80 @@ describe("SidebarRecentSessions state bullets", () => {
         ".sidebar-recent-project-heading .sidebar-recent-session-waiting-subagents",
       ),
     ).toBeNull();
+  });
+
+  it("aggregates different sessions as approval > running > waiting > folder even when collapsed", async () => {
+    const rows = [
+      {
+        id: "waiting-child",
+        title: "Waiting child",
+        contextFolder: "/tmp/proj",
+      },
+      {
+        id: "working-child",
+        title: "Working child",
+        contextFolder: "/tmp/proj",
+      },
+      {
+        id: "approval-child",
+        title: "Approval child",
+        contextFolder: "/tmp/proj",
+      },
+    ];
+    listCachedSessions.mockResolvedValue(rows);
+    syncSessionCache.mockResolvedValue(rows);
+    const props = {
+      open: true,
+      connectionId: "connection-main",
+      activeProfile: "default",
+      degraded: false,
+      resyncNonce: 0,
+      currentSessionId: null,
+      loadingSessionIds: new Set(["working-child"]),
+      approvalSessionIds: new Set<string>(),
+      subagentSessionIds: new Set(["waiting-child"]),
+      resumingSessionId: null,
+      onSelect: vi.fn(),
+      onSessionDeleted: vi.fn(),
+      scrollRootRef: { current: null },
+    };
+    const { rerender } = render(<SidebarRecentSessions {...props} />);
+    await screen.findByText("Working child");
+    const heading = (): HTMLButtonElement =>
+      document.querySelector(".sidebar-recent-project-heading")!;
+    const has = (selector: string): boolean =>
+      !!heading().querySelector(selector);
+    expect(has(".sidebar-recent-session-spinner")).toBe(true);
+    expect(has(".sidebar-recent-session-waiting-subagents")).toBe(false);
+    expect(
+      heading().querySelector(".sidebar-recent-project-title"),
+    ).not.toBeNull();
+    fireEvent.click(heading());
+    expect(heading().getAttribute("aria-expanded")).toBe("false");
+    expect(has(".sidebar-recent-session-spinner")).toBe(true);
+    rerender(
+      <SidebarRecentSessions
+        {...props}
+        approvalSessionIds={new Set(["approval-child"])}
+      />,
+    );
+    expect(has(".sidebar-recent-session-dot--approval")).toBe(true);
+    expect(has(".sidebar-recent-session-spinner")).toBe(false);
+    rerender(
+      <SidebarRecentSessions {...props} loadingSessionIds={new Set()} />,
+    );
+    expect(has(".sidebar-recent-session-waiting-subagents")).toBe(true);
+    expect(has(".sidebar-recent-session-spinner")).toBe(false);
+    expect(heading().getAttribute("aria-expanded")).toBe("false");
+    rerender(
+      <SidebarRecentSessions
+        {...props}
+        loadingSessionIds={new Set()}
+        subagentSessionIds={new Set()}
+      />,
+    );
+    expect(has(".sidebar-recent-session-waiting-subagents")).toBe(false);
+    expect(has("svg.lucide-folder")).toBe(true);
   });
 
   function bulletFor(title: string): SVGSVGElement | null {

@@ -40,7 +40,9 @@ When any child session awaits an approval, the heading's Folder icon is replaced
 
 ## Waiting for subagents
 
-An idle parent with live delegated children shows a dotted accent ring, distinct from the rotating running ring and the filled unread dot.
+An idle parent with live delegated children shows a rotating dotted accent ring, distinct from the gapped running ring and the filled unread dot.
+
+Both rings use a fixed 13px square footprint and the existing `spin 0.8s linear infinite` animation. Project title flex sizing applies only to `.sidebar-recent-project-title`, never to indicator spans. Project aggregation across different children is approval > running > waiting > Folder, including collapsed groups; a running sibling hides the waiting indicator until its turn ends.
 
 [[src/renderer/src/screens/Chat/hooks/useLiveSubagents.ts#useLiveSubagents]] polls the owning transport's `subagent.list` every two seconds, including after the parent turn ends. Only explicit live statuses count; NULL `ended_at` in database history is never used. Errors clear the signal, polls do not overlap, and scope changes discard late results. Stored chats resume on opening to recover their runtime binding; unsupported legacy agents show no waiting marker.
 
