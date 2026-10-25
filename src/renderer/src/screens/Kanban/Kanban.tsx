@@ -237,6 +237,15 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
   const [detailTaskId, setDetailTaskId] = useState<string | null>(null);
   const [detail, setDetail] = useState<KanbanTaskDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [selectedAssignee, setSelectedAssignee] = useState("");
+  const [confirmAssignment, setConfirmAssignment] = useState(false);
+  const assignmentInFlightRef = useRef(false);
+  const detailRequestGenerationRef = useRef(0);
+  const drawerConnectionIdRef = useRef<string | null>(null);
+  const [dispatchNotice, setDispatchNotice] = useState<{
+    message: string;
+    skippedTaskId?: string;
+  } | null>(null);
   const [remoteUnsupported, setRemoteUnsupported] = useState(false);
   const [profileOptions, setProfileOptions] = useState<
     { id: string; name: string }[]
@@ -387,6 +396,11 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
   // user's board choice survives the switch; if that slug does not exist on
   // the new source, currentBoard falls back to the boards list's is_current.
   useConnectionChangeReload(() => {
+    drawerConnectionIdRef.current = null;
+    ++detailRequestGenerationRef.current;
+    setDetailTaskId(null);
+    setDetail(null);
+    setDispatchNotice(null);
     setError("");
     setRemoteUnsupported(false);
     loadAll();
@@ -424,10 +438,38 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
 
   useEffect(() => {
     if (!showCreate) return;
-    window.hermesAPI.listProfiles().then((profiles) => {
-      setProfileOptions(profiles.map((p) => ({ id: p.id, name: p.name })));
-    });
+    let cancelled = false;
+    window.hermesAPI.listProfiles().then(
+      (profiles) => {
+        if (!cancelled)
+          setProfileOptions(profiles.map((p) => ({ id: p.id, name: p.name })));
+      },
+      (err: unknown) => {
+        if (!cancelled) setError((err as Error).message);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
   }, [showCreate]);
+
+  useEffect(() => {
+    if (!detailTaskId) return;
+    let cancelled = false;
+    setProfileOptions([]);
+    window.hermesAPI.listProfiles().then(
+      (profiles) => {
+        if (!cancelled)
+          setProfileOptions(profiles.map((p) => ({ id: p.id, name: p.name })));
+      },
+      (err: unknown) => {
+        if (!cancelled) setError((err as Error).message);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [detailTaskId, profile]);
 
   // Light polling while the tab is visible — the gateway dispatcher writes
   // to kanban.db out-of-band, so we need to refresh to surface state moves
@@ -440,20 +482,50 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
 
   useEffect(() => {
     if (!detailTaskId) {
+      drawerConnectionIdRef.current = null;
+      ++detailRequestGenerationRef.current;
       setDetail(null);
       return;
     }
     let cancelled = false;
+    const generation = ++detailRequestGenerationRef.current;
+    setDetail(null);
     setDetailLoading(true);
-    window.hermesAPI.kanbanGetTask(detailTaskId, profile).then((res) => {
-      if (cancelled) return;
-      if (res.success && res.data) setDetail(res.data);
-      setDetailLoading(false);
-    });
+    setConfirmAssignment(false);
+    drawerConnectionIdRef.current = null;
+    window.hermesAPI
+      .getConnectionConfig()
+      .then((conn) => {
+        if (cancelled || generation !== detailRequestGenerationRef.current)
+          return null;
+        drawerConnectionIdRef.current = conn.connectionId;
+        return window.hermesAPI.kanbanGetTask(detailTaskId, profile);
+      })
+      .then(
+        (res) => {
+          if (
+            !res ||
+            cancelled ||
+            generation !== detailRequestGenerationRef.current
+          )
+            return;
+          if (res.success && res.data) {
+            setDetail(res.data);
+            setSelectedAssignee(res.data.task.assignee || "");
+          } else setError(res.error || t("kanban.errLoadTasks"));
+          setDetailLoading(false);
+        },
+        (err: unknown) => {
+          if (cancelled || generation !== detailRequestGenerationRef.current)
+            return;
+          setError((err as Error).message);
+          setDetailLoading(false);
+        },
+      );
     return () => {
       cancelled = true;
     };
-  }, [detailTaskId, profile]);
+  }, [detailTaskId, profile, t]);
 
   // Visible columns: the canonical 8, plus a trailing archived lane when the
   // toggle is on (backend only returns archived rows when includeArchived).
@@ -536,6 +608,7 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
     if (slug === HQ_BOARD_SLUG) {
       if (isHqActive) return;
       setActiveBoardSlug(HQ_BOARD_SLUG);
+      setDispatchNotice(null);
       setDetailTaskId(null);
       return;
     }
@@ -548,6 +621,8 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
       return;
     }
     setActiveBoardSlug(slug);
+    setDispatchNotice(null);
+    setDetailTaskId(null);
     loadAll();
   }
 
@@ -709,13 +784,110 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
 
   async function handleDispatch(): Promise<void> {
     setActionBusy("dispatch");
-    const res = await window.hermesAPI.kanbanDispatchOnce(false, profile);
-    setActionBusy(null);
-    if (!res.success) {
-      setError(res.error || t("kanban.errDispatch"));
-      return;
+    setDispatchNotice(null);
+    try {
+      const res = await window.hermesAPI.kanbanDispatchOnce(false, profile);
+      if (!res.success) {
+        setError(res.error || t("kanban.errDispatch"));
+        return;
+      }
+      const outcome =
+        res.data && typeof res.data === "object"
+          ? (res.data as Record<string, unknown>)
+          : {};
+      const unassigned = Array.isArray(outcome.skipped_unassigned)
+        ? outcome.skipped_unassigned.filter(
+            (id): id is string => typeof id === "string",
+          )
+        : [];
+      const spawned = Array.isArray(outcome.spawned) ? outcome.spawned : null;
+      const skippedTaskId = unassigned.find((id) =>
+        tasks.some((task) => task.id === id),
+      );
+      if (unassigned.length) {
+        setDispatchNotice({
+          message: [
+            spawned?.length
+              ? t("kanban.dispatchStarted", { count: spawned.length })
+              : "",
+            t("kanban.dispatchSkippedUnassigned", {
+              tasks: unassigned.join(", "),
+            }),
+          ]
+            .filter(Boolean)
+            .join(" "),
+          skippedTaskId,
+        });
+      } else if (spawned?.length) {
+        setDispatchNotice({
+          message: t("kanban.dispatchStarted", { count: spawned.length }),
+        });
+      } else if (outcome.skipped_locked === true) {
+        setDispatchNotice({ message: t("kanban.dispatchLocked") });
+      } else if (
+        Array.isArray(outcome.skipped_per_profile_capped) &&
+        outcome.skipped_per_profile_capped.length
+      ) {
+        setDispatchNotice({ message: t("kanban.dispatchProfileBusy") });
+      } else if (
+        Array.isArray(outcome.skipped_nonspawnable) &&
+        outcome.skipped_nonspawnable.length
+      ) {
+        setDispatchNotice({ message: t("kanban.dispatchNonspawnable") });
+      } else if (
+        Array.isArray(outcome.respawn_guarded) &&
+        outcome.respawn_guarded.length
+      ) {
+        setDispatchNotice({ message: t("kanban.dispatchGuarded") });
+      } else {
+        setDispatchNotice({ message: t("kanban.dispatchNoTasks") });
+      }
+      loadAll(true);
+    } catch (err) {
+      setError((err as Error).message || t("kanban.errDispatch"));
+    } finally {
+      setActionBusy(null);
     }
-    loadAll(true);
+  }
+
+  async function handleAssign(): Promise<void> {
+    const expectedConnectionId = drawerConnectionIdRef.current;
+    if (!detail || !expectedConnectionId || assignmentInFlightRef.current)
+      return;
+    const taskId = detail.task.id;
+    const assignee = selectedAssignee || null;
+    if (assignee === (detail.task.assignee || null)) return;
+    assignmentInFlightRef.current = true;
+    const generation = ++detailRequestGenerationRef.current;
+    setActionBusy(taskId);
+    try {
+      const res = await window.hermesAPI.kanbanAssignTask(
+        taskId,
+        assignee,
+        profile,
+        expectedConnectionId,
+      );
+      if (!res.success) {
+        setError(res.error || t("kanban.errAssign"));
+        return;
+      }
+      const updated = await window.hermesAPI.kanbanGetTask(taskId, profile);
+      if (updated.success && updated.data) {
+        if (generation === detailRequestGenerationRef.current) {
+          setConfirmAssignment(false);
+          setDetail((current) =>
+            current?.task.id === taskId ? updated.data! : current,
+          );
+          setSelectedAssignee(updated.data.task.assignee || "");
+        }
+      } else setError(updated.error || t("kanban.errLoadTasks"));
+      loadAll(true);
+    } catch (err) {
+      setError((err as Error).message || t("kanban.errAssign"));
+    } finally {
+      assignmentInFlightRef.current = false;
+      setActionBusy(null);
+    }
   }
 
   if (remoteUnsupported) {
@@ -852,6 +1024,27 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
             className="btn-ghost"
             title={t("kanban.dismissError")}
             onClick={() => setError("")}
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
+      {dispatchNotice && (
+        <div className="kanban-dispatch-notice" role="status">
+          <span>{dispatchNotice.message}</span>
+          {dispatchNotice.skippedTaskId && (
+            <button
+              className="btn btn-secondary"
+              onClick={() => setDetailTaskId(dispatchNotice.skippedTaskId!)}
+            >
+              {t("kanban.assignSkipped")}
+            </button>
+          )}
+          <button
+            className="btn-ghost"
+            aria-label={t("kanban.dismissNotice")}
+            onClick={() => setDispatchNotice(null)}
           >
             <X size={14} />
           </button>
@@ -1436,7 +1629,7 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
             </div>
             <div className="schedules-modal-body">
               {detailLoading && <OrbLoader state="searching" size={20} />}
-              {detail && (
+              {detail && detail.task.id === detailTaskId && (
                 <>
                   <div className="kanban-detail-meta">
                     <span className="kanban-pill kanban-pill-status">
@@ -1458,6 +1651,82 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
                       {detail.task.id}
                     </span>
                   </div>
+                  {!isHqActive &&
+                    detail.task.status !== "done" &&
+                    detail.task.status !== "archived" && (
+                      <div className="kanban-detail-section">
+                        <label htmlFor="kanban-detail-assignee">
+                          {t("kanban.fieldAssignee")}
+                        </label>
+                        <div className="kanban-assignee-editor">
+                          <select
+                            id="kanban-detail-assignee"
+                            className="input"
+                            aria-label={t("kanban.fieldAssignee")}
+                            value={selectedAssignee}
+                            disabled={actionBusy !== null || confirmAssignment}
+                            onChange={(e) =>
+                              setSelectedAssignee(e.target.value)
+                            }
+                          >
+                            <option value="">
+                              {t("kanban.assigneeUnassigned")}
+                            </option>
+                            {detail.task.assignee &&
+                              !profileOptions.some(
+                                (p) => p.id === detail.task.assignee,
+                              ) && (
+                                <option value={detail.task.assignee}>
+                                  {detail.task.assignee}
+                                </option>
+                              )}
+                            {profileOptions.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.name}
+                              </option>
+                            ))}
+                          </select>
+                          {!confirmAssignment && (
+                            <button
+                              className="btn btn-secondary"
+                              onClick={() => setConfirmAssignment(true)}
+                              disabled={
+                                actionBusy !== null ||
+                                (selectedAssignee !== "" &&
+                                  !profileOptions.some(
+                                    (option) => option.id === selectedAssignee,
+                                  )) ||
+                                selectedAssignee ===
+                                  (detail.task.assignee || "")
+                              }
+                            >
+                              {t("kanban.saveAssignee")}
+                            </button>
+                          )}
+                        </div>
+                        {confirmAssignment && (
+                          <div className="kanban-assignment-confirm">
+                            <div role="alert">{t("kanban.assignWarning")}</div>
+                            <div className="kanban-assignment-actions">
+                              <button
+                                className="btn btn-secondary"
+                                onClick={() => setConfirmAssignment(false)}
+                                disabled={actionBusy !== null}
+                              >
+                                {t("common.cancel")}
+                              </button>
+                              <button
+                                className="btn btn-primary"
+                                onClick={handleAssign}
+                                disabled={actionBusy !== null}
+                              >
+                                {t("kanban.confirmAssign")}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   {detail.task.body && (
                     <div className="kanban-detail-section">
                       <label>{t("kanban.detailBody")}</label>

@@ -3915,8 +3915,26 @@ export function registerIpcHandlers(context: IpcContext): void {
   );
   ipcMain.handle(
     "kanban-assign-task",
-    (_event, taskId: string, assignee: string | null, profile?: string) =>
-      kanbanAssignTask(taskId, assignee, profile),
+    (
+      _event,
+      taskId: string,
+      assignee: string | null,
+      profile?: string,
+      expectedConnectionId?: string,
+    ) => {
+      // A stale drawer must never assign a same-ID card on another agent.
+      // Check in the main process immediately before the transport resolves.
+      if (
+        expectedConnectionId !== undefined &&
+        getPublicConnectionConfig().connectionId !== expectedConnectionId
+      ) {
+        return {
+          success: false,
+          error: "Connection changed. Reopen the task before assigning it.",
+        };
+      }
+      return kanbanAssignTask(taskId, assignee, profile);
+    },
   );
   ipcMain.handle(
     "kanban-complete-task",
