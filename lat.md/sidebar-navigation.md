@@ -32,6 +32,14 @@ Approval state lifts out of the chat transport: [[src/renderer/src/screens/Chat/
 
 A finished turn may flip its session to unread on the agent, so `handleRunLoading` fires a `hermes-sessions-maybe-changed` renderer event on the true→false loading edge; the sidebar listens for it and refreshes past its throttle instead of waiting for the 60s interval.
 
+### Backend-started continuation
+
+An accepted `message.start` restores running state even when the backend starts the next turn without a composer send, such as after a background subagent result.
+
+[[src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts#useDashboardChatTransport]] shares the same run-state restore with a running resume response. It keeps an existing composer turn, or seeds a synthetic active turn when idle. Completion clears activity normally. Runtime-session filtering happens before the start is accepted, so another session cannot light this chat. Sidebar and project state priorities remain unchanged.
+
+[[src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.test.tsx]] replays repeated start/complete cycles in local, remote and SSH dashboard modes without calling prompt.submit, checks duplicate starts preserve the active turn, and rejects an unrelated runtime ID.
+
 ### Project bullet aggregation
 
 The project heading bullet aggregates the session state bullets over the group's children (task #89), so a collapsed Projects section still reveals activity.
