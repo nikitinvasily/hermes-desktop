@@ -1,7 +1,28 @@
 import type { SavedModel } from "./models";
+import type { ConnectionConfig } from "./config";
+import {
+  remoteDashboardRequestJson,
+  type RemoteDashboardRequestOptions,
+} from "./remote-api";
 import { remoteRequestJson, type RemoteSessionConfig } from "./remote-sessions";
 import { normalizeModelEndpointUrl } from "../shared/model-endpoint";
 import { dedupeAttachmentRows } from "../shared/model-attachment-dedupe";
+
+// Direct connections resolve auto/OAuth through the dashboard boundary; SSH
+// tunnel callers retain their token-only session config and profile scope.
+type RemoteModelConfig =
+  | RemoteSessionConfig
+  | (ConnectionConfig & { profile?: string });
+
+function remoteModelRequestJson(
+  config: RemoteModelConfig,
+  path: string,
+  options: RemoteDashboardRequestOptions,
+): Promise<unknown> {
+  return "mode" in config
+    ? remoteDashboardRequestJson(config, path, options, config.profile)
+    : remoteRequestJson(config, path, options);
+}
 
 type RemoteRecord = Record<string, unknown>;
 const REMOTE_MODEL_OPTIONS_TIMEOUT_MS = 60_000;
@@ -99,12 +120,16 @@ function dedupeModels(models: SavedModel[]): SavedModel[] {
 }
 
 async function remoteModelLibraryRows(
-  config: RemoteSessionConfig,
+  config: RemoteModelConfig,
 ): Promise<SavedModel[] | null> {
   try {
-    const response = await remoteRequestJson(config, "/api/model/library", {
-      timeoutMs: REMOTE_MODEL_LIBRARY_TIMEOUT_MS,
-    });
+    const response = await remoteModelRequestJson(
+      config,
+      "/api/model/library",
+      {
+        timeoutMs: REMOTE_MODEL_LIBRARY_TIMEOUT_MS,
+      },
+    );
     const rows = asRecord(response).models;
     if (!Array.isArray(rows)) return [];
     // Remote library rows may repeat the active model with a different baseUrl
@@ -216,7 +241,7 @@ function currentProviderRow(response: unknown): {
 }
 
 export async function remoteListModels(
-  config: RemoteSessionConfig,
+  config: RemoteModelConfig,
 ): Promise<SavedModel[]> {
   const libraryRows = await remoteModelLibraryRows(config);
   if (libraryRows) return libraryRows;
@@ -224,15 +249,13 @@ export async function remoteListModels(
   // Older Hermes Agent dashboards do not expose the configured model
   // library yet. Fall back to a narrow picker-derived view instead of
   // flattening the whole authenticated provider catalog.
-  const response = await remoteRequestJson(config, "/api/model/options", {
+  const response = await remoteModelRequestJson(config, "/api/model/options", {
     timeoutMs: REMOTE_MODEL_OPTIONS_TIMEOUT_MS,
   });
   return modelsFromRemoteOptions(response);
 }
 
-export async function remoteGetModelConfig(
-  config: RemoteSessionConfig,
-): Promise<{
+export async function remoteGetModelConfig(config: RemoteModelConfig): Promise<{
   provider: string;
   model: string;
   baseUrl: string;
@@ -253,7 +276,7 @@ export async function remoteGetModelConfig(
     };
   }
 
-  const response = await remoteRequestJson(config, "/api/model/options", {
+  const response = await remoteModelRequestJson(config, "/api/model/options", {
     timeoutMs: REMOTE_MODEL_OPTIONS_TIMEOUT_MS,
   });
   const record = asRecord(response);
@@ -270,12 +293,12 @@ export async function remoteGetModelConfig(
 }
 
 export async function remoteSetModelConfig(
-  config: RemoteSessionConfig,
+  config: RemoteModelConfig,
   provider: string,
   model: string,
   baseUrl = "",
 ): Promise<boolean> {
-  await remoteRequestJson(config, "/api/model/set", {
+  await remoteModelRequestJson(config, "/api/model/set", {
     method: "POST",
     body: {
       scope: "main",
@@ -306,13 +329,13 @@ export async function remoteSetModelConfig(
 }
 
 export async function remoteAddModel(
-  config: RemoteSessionConfig,
+  config: RemoteModelConfig,
   name: string,
   provider: string,
   model: string,
   baseUrl: string,
 ): Promise<SavedModel> {
-  const response = await remoteRequestJson(config, "/api/model/library", {
+  const response = await remoteModelRequestJson(config, "/api/model/library", {
     method: "POST",
     body: { name, provider, model, baseUrl },
     timeoutMs: REMOTE_MODEL_LIBRARY_TIMEOUT_MS,
@@ -323,10 +346,10 @@ export async function remoteAddModel(
 }
 
 export async function remoteRemoveModel(
-  config: RemoteSessionConfig,
+  config: RemoteModelConfig,
   id: string,
 ): Promise<boolean> {
-  const response = await remoteRequestJson(
+  const response = await remoteModelRequestJson(
     config,
     `/api/model/library/${encodeURIComponent(id)}`,
     {
@@ -338,11 +361,11 @@ export async function remoteRemoveModel(
 }
 
 export async function remoteUpdateModel(
-  config: RemoteSessionConfig,
+  config: RemoteModelConfig,
   id: string,
   fields: Partial<Pick<SavedModel, "name" | "provider" | "model" | "baseUrl">>,
 ): Promise<boolean> {
-  const response = await remoteRequestJson(
+  const response = await remoteModelRequestJson(
     config,
     `/api/model/library/${encodeURIComponent(id)}`,
     {

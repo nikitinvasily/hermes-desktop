@@ -1243,19 +1243,31 @@ export function registerIpcHandlers(context: IpcContext): void {
     return getHermesHome(profile);
   });
 
-  ipcMain.handle("get-model-config", (_event, profile?: string) => {
-    const conn = getConnectionConfig();
-    if (conn.mode === "remote")
-      return withRemoteDashboard(conn, () => remoteGetModelConfig(conn));
-    if (conn.mode === "ssh" && conn.ssh)
-      return withSshDashboardSessions(
-        conn,
-        (config) => remoteGetModelConfig(config),
-        () => sshGetModelConfig(conn.ssh!, profile),
-        activeSshProfile(profile),
-      );
-    return getModelConfig(profile);
-  });
+  ipcMain.handle(
+    "get-model-config",
+    (_event, profile?: string, connectionId?: string) => {
+      const conn = getConnectionConfig(connectionId);
+      if (conn.mode === "remote")
+        return withRemoteDashboard(conn, () =>
+          remoteGetModelConfig(
+            profile === undefined ? conn : { ...conn, profile },
+          ),
+        );
+      if (conn.mode === "ssh" && conn.ssh) {
+        // Scoped reads must never acquire the singleton tunnel: even an active
+        // connection can change while dashboard setup is awaiting SSH.
+        if (connectionId !== undefined)
+          return sshGetModelConfig(conn.ssh, profile);
+        return withSshDashboardSessions(
+          conn,
+          (config) => remoteGetModelConfig(config),
+          () => sshGetModelConfig(conn.ssh!, profile),
+          activeSshProfile(profile),
+        );
+      }
+      return getModelConfig(profile);
+    },
+  );
 
   ipcMain.handle(
     "set-model-config",
@@ -3487,26 +3499,33 @@ export function registerIpcHandlers(context: IpcContext): void {
   );
 
   // Models
-  ipcMain.handle("list-models", () => {
-    const conn = getConnectionConfig();
-    if (conn.mode === "remote") {
-      return remoteListModels(conn);
-    }
-    if (conn.mode === "ssh" && conn.ssh) {
-      if (conn.sshChatTransport === "legacy") {
-        return sshListModels(conn.ssh);
+  ipcMain.handle(
+    "list-models",
+    (_event, connectionId?: string, profile?: string) => {
+      const conn = getConnectionConfig(connectionId);
+      if (conn.mode === "remote") {
+        return remoteListModels(
+          profile === undefined ? conn : { ...conn, profile },
+        );
       }
-      return withSshDashboardModelLibrary(
-        conn,
-        (config) => remoteListModels(config),
-        () => sshListModels(conn.ssh!),
-        getActiveProfileNameSync(),
-      );
-    }
-    // Pass the active profile so terminal-added `custom_providers:` entries in
-    // that profile's config.yaml are merged into the library on read.
-    return listModels(getActiveProfileNameSync());
-  });
+      if (conn.mode === "ssh" && conn.ssh) {
+        // Keep explicit reads independent of dashboard setup and its tunnel,
+        // including a connection switch during an in-flight refresh.
+        if (connectionId !== undefined || conn.sshChatTransport === "legacy") {
+          return sshListModels(conn.ssh);
+        }
+        return withSshDashboardModelLibrary(
+          conn,
+          (config) => remoteListModels(config),
+          () => sshListModels(conn.ssh!),
+          activeSshProfile(profile),
+        );
+      }
+      // Merge terminal-added `custom_providers:` from the requested profile,
+      // falling back to the active profile for existing unscoped callers.
+      return listModels(profile ?? getActiveProfileNameSync());
+    },
+  );
   ipcMain.handle(
     "add-model",
     async (

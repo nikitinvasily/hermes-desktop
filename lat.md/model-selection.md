@@ -6,6 +6,14 @@ The override is held in renderer state on each `<Chat>` run ([[src/renderer/src/
 
 Pre-send readiness uses the same active override. [[src/renderer/src/screens/Chat/Chat.tsx#Chat]] passes the current picker `{provider, model, baseUrl}` into [[src/main/validation.ts#validateChatReadiness]], so a session-scoped pick does not keep showing "No model selected" just because the global `config.yaml` default is empty.
 
+## Connection-scoped loading
+
+Each chat loads its model from its own connection and profile, independently of the globally selected agent.
+
+Explicit SSH model reads use direct SSH commands rather than acquiring the shared tunnel, so background refreshes cannot disconnect another SSH chat. The legacy SSH library remains the machine-wide `models.json`; Local and direct Remote libraries accept the requested profile.
+
+[[src/renderer/src/screens/Chat/hooks/useModelConfig.ts#useModelConfig]] requests the current identity independently of the model library. Scope changes hide old identity immediately; request generations discard delayed model, error and library responses, including A-B-A switches. Foreign connection broadcasts are ignored. Session picks survive library refreshes. While identity is loading, the picker displays loading and [[src/renderer/src/screens/Chat/ChatInput.tsx#ChatInput]] keeps an Enter draft rather than submitting with stale routing.
+
 ## Two-pane picker grouped by display brand
 
 The bottom [[src/renderer/src/screens/Chat/ModelPicker.tsx]] dropdown is a two-pane layout: a left **provider rail** filters a right **flat model list**, with a top search box (leading magnifier icon) narrowing both.

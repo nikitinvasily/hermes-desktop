@@ -65,6 +65,7 @@ interface UseModelConfigResult {
    *  gateway error). Cleared on the next successful reload. Empty string
    *  when the library loaded fine but is simply empty. */
   loadError: string;
+  isLoading: boolean;
   reload: () => Promise<void>;
   selectModel: (
     provider: string,
@@ -99,7 +100,11 @@ function groupModelsByProvider(models: SavedModelForPicker[]): ModelGroup[] {
   return Array.from(groupMap.values());
 }
 
-export function useModelConfig(profile?: string): UseModelConfigResult {
+// @lat: [[model-selection#Session model override#Connection-scoped loading]]
+export function useModelConfig(
+  profile?: string,
+  connectionId?: string,
+): UseModelConfigResult {
   const { t } = useI18n();
   const [currentModel, setCurrentModel] = useState("");
   const [currentProvider, setCurrentProvider] = useState("auto");
@@ -108,66 +113,127 @@ export function useModelConfig(profile?: string): UseModelConfigResult {
   const [savedModels, setSavedModels] = useState<SavedModelForPicker[]>([]);
   const [loadError, setLoadError] = useState("");
   const loadSeqRef = useRef(0);
+  const scope = JSON.stringify([connectionId, profile]);
+  const [identityScope, setIdentityScope] = useState(scope);
+  const [isLoading, setIsLoading] = useState(true);
+  const selectionRef = useRef(false);
+  const [localDiscoveryScope, setLocalDiscoveryScope] = useState<string | null>(
+    null,
+  );
+  // Live discovery reads local credentials. Remote/SSH catalogs belong to the
+  // selected server and must never be augmented with the Mac's models.
+  useEffect(() => {
+    if (!connectionId) return;
+    let cancelled = false;
+    void window.hermesAPI
+      .getConnectionConfig(connectionId)
+      .then((config) => {
+        if (!cancelled)
+          setLocalDiscoveryScope(config.mode === "local" ? scope : null);
+      })
+      .catch(() => {
+        if (!cancelled) setLocalDiscoveryScope(null);
+      });
+    return (): void => {
+      cancelled = true;
+    };
+  }, [connectionId, scope]);
+  const allowLocalDiscovery = !connectionId || localDiscoveryScope === scope;
 
   const ollamaCloudDiscovery = useDiscoveredModels({
     provider: OLLAMA_CLOUD_PROVIDER,
     profile,
-    enabled: true,
+    enabled: allowLocalDiscovery,
   });
 
   const modelsForPicker = useMemo(
     () =>
       mergeLiveOllamaCloudModels(
         savedModels,
-        ollamaCloudDiscovery.models,
+        allowLocalDiscovery ? ollamaCloudDiscovery.models : [],
         ollamaCloudDiscovery.status,
       ),
-    [savedModels, ollamaCloudDiscovery.models, ollamaCloudDiscovery.status],
+    [
+      savedModels,
+      ollamaCloudDiscovery.models,
+      ollamaCloudDiscovery.status,
+      allowLocalDiscovery,
+    ],
   );
 
   const reload = useCallback(async (): Promise<void> => {
     const seq = ++loadSeqRef.current;
-    let mc: Awaited<ReturnType<typeof window.hermesAPI.getModelConfig>>;
-    let models: SavedModelForPicker[];
-    try {
-      [mc, models] = await Promise.all([
-        window.hermesAPI.getModelConfig(profile),
-        window.hermesAPI.listModels(),
-      ]);
-    } catch (err) {
-      if (seq !== loadSeqRef.current) return;
-      // A failed load (remote down, OAuth cookie expired, dashboard 503 …)
-      // used to escape as an unhandled rejection and leave the picker
-      // silently empty. Keep the previous rows and surface the reason.
-      setLoadError(
-        err instanceof Error ? err.message : String(err ?? "unknown error"),
-      );
-      return;
-    }
-    if (seq !== loadSeqRef.current) return;
     setLoadError("");
-    setCurrentModel(mc.model);
-    setCurrentProvider(mc.provider);
-    setCurrentBaseUrl(mc.baseUrl);
-    setSavedModels(models);
-  }, [profile]);
+    // The selected model is latency-critical; a slow library must not hold it up.
+    await Promise.all([
+      (async (): Promise<void> => {
+        try {
+          const mc = await window.hermesAPI.getModelConfig(
+            profile,
+            connectionId,
+          );
+          if (seq !== loadSeqRef.current || selectionRef.current) return;
+          setIdentityScope(scope);
+          setCurrentModel(mc.model);
+          setCurrentProvider(mc.provider);
+          setCurrentBaseUrl(mc.baseUrl);
+        } catch (err) {
+          if (seq !== loadSeqRef.current) return;
+          setLoadError(err instanceof Error ? err.message : String(err));
+        } finally {
+          if (seq === loadSeqRef.current) setIsLoading(false);
+        }
+      })(),
+      (async (): Promise<void> => {
+        try {
+          const models = await window.hermesAPI.listModels(
+            connectionId,
+            profile,
+          );
+          if (seq === loadSeqRef.current) setSavedModels(models);
+        } catch (err) {
+          if (seq === loadSeqRef.current) {
+            setLoadError(err instanceof Error ? err.message : String(err));
+          }
+        }
+      })(),
+    ]);
+  }, [profile, connectionId, scope]);
 
   // Initial load + reload whenever the profile changes (canonical
   // load-on-mount; setState happens inside `reload` via an awaited IPC call).
   useEffect(() => {
-    reload();
-  }, [reload]);
+    selectionRef.current = false;
+    setIdentityScope(scope);
+    setCurrentModel("");
+    setCurrentProvider("auto");
+    setCurrentBaseUrl("");
+    setSavedModels([]);
+    setIsLoading(true);
+    void reload();
+    const sequence = loadSeqRef;
+    return (): void => {
+      ++sequence.current;
+    };
+  }, [reload, scope]);
 
   useEffect(() => {
     setModelGroups(groupModelsByProvider(modelsForPicker));
   }, [modelsForPicker]);
 
   useEffect(() => {
-    return window.hermesAPI.onConnectionConfigChanged(() => {
-      setModelGroups([]);
+    return window.hermesAPI.onConnectionConfigChanged((config) => {
+      if (connectionId && config.connectionId !== connectionId) return;
+      if (!selectionRef.current) {
+        setCurrentModel("");
+        setCurrentProvider("auto");
+        setCurrentBaseUrl("");
+        setIsLoading(true);
+      }
+      setSavedModels([]);
       void reload();
     });
-  }, [reload]);
+  }, [reload, connectionId]);
 
   useEffect(() => {
     return window.hermesAPI.onModelLibraryChanged(() => {
@@ -183,16 +249,17 @@ export function useModelConfig(profile?: string): UseModelConfigResult {
       { persist = true }: { persist?: boolean } = {},
     ): Promise<void> => {
       const effectiveBaseUrl = effectiveOverrideBaseUrl(provider, baseUrl);
+      setIdentityScope(scope);
+      setIsLoading(false);
       setCurrentModel(model);
       setCurrentProvider(provider);
       setCurrentBaseUrl(effectiveBaseUrl);
       // Session-only selection: update local state only, do not write to
       // config.yaml so the global default model is preserved (issue #688).
-      // Advance the sequence counter so any in-flight reload() triggered by
-      // onConnectionConfigChanged / onModelLibraryChanged cannot clobber the
-      // session-scoped selection with the persisted value.
+      // Keep the session pick across background config/library refreshes without
+      // cancelling the independent model-library request.
       if (!persist) {
-        ++loadSeqRef.current;
+        selectionRef.current = true;
         return;
       }
       const seq = ++loadSeqRef.current;
@@ -203,7 +270,7 @@ export function useModelConfig(profile?: string): UseModelConfigResult {
           effectiveBaseUrl,
           profile,
         );
-        const mc = await window.hermesAPI.getModelConfig(profile);
+        const mc = await window.hermesAPI.getModelConfig(profile, connectionId);
         if (seq !== loadSeqRef.current) return;
         setCurrentModel(mc.model);
         setCurrentProvider(mc.provider);
@@ -213,25 +280,30 @@ export function useModelConfig(profile?: string): UseModelConfigResult {
         throw err;
       }
     },
-    [profile, reload],
+    [profile, connectionId, reload, scope],
   );
 
+  const scopeMatches = identityScope === scope;
+  const loading = !scopeMatches || isLoading;
   const displayModel = useMemo(
     () =>
-      currentModel
-        ? currentModel.split("/").pop() || currentModel
-        : currentProvider === "auto"
-          ? t("chat.auto")
-          : t("chat.noModel"),
-    [currentModel, currentProvider, t],
+      loading
+        ? t("common.loading")
+        : currentModel
+          ? currentModel.split("/").pop() || currentModel
+          : currentProvider === "auto"
+            ? t("chat.auto")
+            : t("chat.noModel"),
+    [currentModel, currentProvider, loading, t],
   );
 
   return {
-    currentModel,
-    currentProvider,
-    currentBaseUrl,
-    modelGroups,
+    currentModel: scopeMatches ? currentModel : "",
+    currentProvider: scopeMatches ? currentProvider : "auto",
+    currentBaseUrl: scopeMatches ? currentBaseUrl : "",
+    modelGroups: scopeMatches ? modelGroups : [],
     displayModel,
+    isLoading: loading,
     loadError,
     reload,
     selectModel,

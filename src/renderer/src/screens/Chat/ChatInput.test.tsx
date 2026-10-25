@@ -90,6 +90,35 @@ describe("ChatInput — border beam", () => {
   });
 });
 
+describe("ChatInput model readiness", () => {
+  it("keeps an immediate Enter draft until the selected agent model is ready", () => {
+    const onSubmit = vi.fn();
+    const props = {
+      isLoading: false,
+      hasSession: true,
+      onSubmit,
+      onQuickAsk: vi.fn(),
+      onAbort: vi.fn(),
+    };
+    const { rerender } = render(
+      <ChatInput
+        {...props}
+        readiness={{ ok: false, message: "Loading model" }}
+      />,
+    );
+    const textarea = screen.getByPlaceholderText(
+      "chat.typeMessage",
+    ) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "immediate send" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(textarea.value).toBe("immediate send");
+    rerender(<ChatInput {...props} readiness={{ ok: true }} />);
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSubmit).toHaveBeenCalledWith("immediate send", []);
+  });
+});
+
 describe("ChatInput — CJK IME Enter handling", () => {
   // Repro: typing Korean (or any CJK IME), the final syllable stays in
   // composition. macOS Chromium can deliver the finalizing Enter as a plain

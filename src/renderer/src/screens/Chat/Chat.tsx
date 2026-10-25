@@ -504,7 +504,7 @@ function Chat({
   }, [connectionId]);
 
   const { containerRef, bottomRef } = useChatScroll(messages);
-  const modelConfig = useModelConfig(profile);
+  const modelConfig = useModelConfig(profile, connectionId);
   const { reload: reloadModelConfig, selectModel } = modelConfig;
   const chatCurrentModel =
     sessionModelOverride?.model ?? modelConfig.currentModel;
@@ -1254,7 +1254,18 @@ function Chat({
             remoteMode={remoteMode}
             profile={profile}
             contextUsage={contextUsage}
-            readiness={readiness}
+            readiness={
+              !sessionModelOverride &&
+              (modelConfig.isLoading ||
+                (!modelConfig.currentModel && modelConfig.loadError))
+                ? {
+                    ok: false,
+                    message: modelConfig.isLoading
+                      ? t("common.loading")
+                      : modelConfig.loadError,
+                  }
+                : readiness
+            }
             slashCommands={slashMenuCommands}
             onSubmit={handleSubmitOrQueue}
             onQuickAsk={actions.handleQuickAsk}

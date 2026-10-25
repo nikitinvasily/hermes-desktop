@@ -362,8 +362,9 @@ const hermesAPI = {
 
   getModelConfig: (
     profile?: string,
+    connectionId?: string,
   ): Promise<{ provider: string; model: string; baseUrl: string }> =>
-    ipcRenderer.invoke("get-model-config", profile),
+    ipcRenderer.invoke("get-model-config", profile, connectionId),
 
   setModelConfig: (
     provider: string,
@@ -1449,7 +1450,10 @@ const hermesAPI = {
     ),
 
   // Models
-  listModels: (): Promise<
+  listModels: (
+    connectionId?: string,
+    profile?: string,
+  ): Promise<
     Array<{
       id: string;
       name: string;
@@ -1462,7 +1466,7 @@ const hermesAPI = {
       modalities?: { input?: string[]; output?: string[] };
       createdAt: number;
     }>
-  > => ipcRenderer.invoke("list-models"),
+  > => ipcRenderer.invoke("list-models", connectionId, profile),
 
   addModel: (
     name: string,
