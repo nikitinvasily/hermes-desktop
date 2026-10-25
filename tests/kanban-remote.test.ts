@@ -72,6 +72,7 @@ import {
   archiveTask,
   promoteTask,
   scheduleTask,
+  moveToTodoTask,
   specifyTask,
   reclaimTask,
   commentTask,
@@ -227,7 +228,7 @@ describe("remote kanban routing", () => {
   });
 
   it("maps every status verb onto the plugin PATCH route", async () => {
-    stubRequest({ task: { id: "t1" } });
+    stubRequest({ task: { id: "t1", status: "triage" } });
     await completeTask("t1", "done text");
     expect(lastCall().opts).toEqual({
       method: "PATCH",
@@ -247,10 +248,23 @@ describe("remote kanban routing", () => {
       status: "scheduled",
       block_reason: "later",
     });
+    await moveToTodoTask("t1");
+    expect(lastCall()).toEqual({
+      path: "/api/plugins/kanban/tasks/t1",
+      opts: { method: "PATCH", body: { status: "todo" } },
+    });
     await archiveTask("t1");
     expect(lastCall().opts.body).toEqual({ status: "archived" });
     await assignTask("t1", null);
     expect(lastCall().opts.body).toEqual({ assignee: "" });
+  });
+
+  it("refuses a stale Triage move instead of overwriting a task already running", async () => {
+    stubRequest({ task: { id: "t1", status: "running" } });
+    const result = await moveToTodoTask("t1");
+    expect(result.success).toBe(false);
+    expect(lastCall().path).toBe("/api/plugins/kanban/tasks/t1");
+    expect(requestSpy).toHaveBeenCalledTimes(1);
   });
 
   it("posts comments to the comments route, not the task body", async () => {

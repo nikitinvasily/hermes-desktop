@@ -456,6 +456,27 @@ export function remoteScheduleTask(
   });
 }
 
+export async function remoteMoveToTodoTask(
+  taskId: string,
+): Promise<KanbanResult<void>> {
+  try {
+    const data = await kanbanJson<{ task?: { status?: string } }>(
+      `/tasks/${encodeURIComponent(taskId)}`,
+    );
+    if (data.task?.status !== "triage") {
+      return {
+        success: false,
+        error: "Task is no longer in Triage on this board",
+      };
+    }
+  } catch (err) {
+    return remoteFailure(err);
+  }
+  // PATCH is the dashboard's supported status transition. The preflight
+  // avoids overwriting an already-running task observed before this request.
+  return remotePatchTask(taskId, { status: "todo" });
+}
+
 export async function remoteSpecifyTask(
   taskId: string,
 ): Promise<KanbanResult<void>> {

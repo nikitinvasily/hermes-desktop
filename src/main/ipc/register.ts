@@ -437,6 +437,7 @@ import {
   archiveTask as kanbanArchiveTask,
   promoteTask as kanbanPromoteTask,
   scheduleTask as kanbanScheduleTask,
+  moveToTodoTask as kanbanMoveToTodoTask,
   specifyTask as kanbanSpecifyTask,
   reclaimTask as kanbanReclaimTask,
   commentTask as kanbanCommentTask,
@@ -3946,6 +3947,11 @@ export function registerIpcHandlers(context: IpcContext): void {
     "kanban-schedule-task",
     (_event, taskId: string, reason?: string, profile?: string) =>
       kanbanScheduleTask(taskId, reason, profile),
+  );
+  ipcMain.handle(
+    "kanban-move-to-todo-task",
+    (_event, taskId: string, profile?: string) =>
+      kanbanMoveToTodoTask(taskId, profile),
   );
   ipcMain.handle(
     "kanban-specify-task",

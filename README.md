@@ -33,6 +33,8 @@ Changes in this fork that are **not** in upstream.
 
 ### Fixes
 
+- **Kanban cards move without browser dialogs** — dragging a card to a supported column opens an in-app confirmation or block-reason form when needed, then saves its new status. Moving Triage to To-do warns that the agent may start working automatically. Unsupported moves and server rejections explain why the card stayed put.
+
 - **Agent commentary between tool calls is no longer lost on remote connections** — the agent's running commentary emitted alongside tool calls (e.g. a one-line plan before running a command) showed in the WebUI but was missing in the desktop app on remote connections, because only the final answer's text was rendered. Each commentary segment now appears as its own message bubble, live during the turn and after reopening the chat, matching what the WebUI shows.
 
 - **No duplicate rows in the model picker** — the model list at the chat input used to show the same model twice (once from the saved library, once from the live config) when one row carried the provider's endpoint URL and the other didn't. Such rows are now recognized as the same model and collapse into one entry; two genuinely different endpoints for the same model id remain separate. The saved library is also cleaned up on the next start, and the sync with terminal-added provider entries no longer creates the second copy.

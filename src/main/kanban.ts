@@ -8,7 +8,11 @@ import {
 } from "./installer";
 import { getConnectionConfig } from "./config";
 import { isRemoteOnlyMode } from "./hermes";
-import { sshRunKanban, sshListClaw3dHqTasks } from "./ssh-remote";
+import {
+  sshRunKanban,
+  sshRunKanbanPython,
+  sshListClaw3dHqTasks,
+} from "./ssh-remote";
 import * as remoteKanban from "./kanban-remote";
 
 export interface KanbanTask {
@@ -99,6 +103,15 @@ export interface KanbanResult<T = unknown> {
 }
 
 const KANBAN_TIMEOUT_MS = 20000;
+
+// The agent's triage specifier exposes an atomic status-only form. No LLM is
+// invoked here: omitted fields keep the card's title, body and assignee.
+const MANUAL_TRIAGE_TO_TODO_PY = `import json, sys
+from hermes_cli import kanban_db as kb
+from hermes_cli import kanban_db_connect as kbc
+with kbc.connect_closing() as conn:
+    ok = kb.specify_triage_task(conn, sys.argv[1], author="desktop")
+print(json.dumps({"ok": ok}))`;
 
 interface RunOpts {
   profile?: string;
@@ -396,6 +409,68 @@ export async function scheduleTask(
   if (reason) args.push(reason);
   const res = await runKanban(args, { profile });
   return { success: res.success, error: res.error };
+}
+
+export async function moveToTodoTask(
+  taskId: string,
+  _profile?: string,
+): Promise<KanbanResult<void>> {
+  if (isRemoteOnlyMode()) return remoteKanban.remoteMoveToTodoTask(taskId);
+  if (!taskId) return { success: false, error: "Missing task ID" };
+  const conn = getConnectionConfig();
+  if (conn.mode === "ssh") {
+    if (!conn.ssh)
+      return { success: false, error: "SSH connection is not configured" };
+    const result = await sshRunKanbanPython<{ ok?: boolean }>(
+      conn.ssh,
+      MANUAL_TRIAGE_TO_TODO_PY,
+      [taskId],
+    );
+    if (!result.success) return { success: false, error: result.error };
+    return result.data?.ok
+      ? { success: true }
+      : { success: false, error: "Task is no longer in Triage on this board" };
+  }
+  const execOpts: ExecFileOptions = {
+    cwd: join(HERMES_HOME, "hermes-agent"),
+    timeout: KANBAN_TIMEOUT_MS,
+    env: { ...process.env, PATH: getEnhancedPath() },
+    maxBuffer: 1024 * 1024,
+  };
+  return new Promise((resolve) => {
+    execFile(
+      HERMES_PYTHON,
+      ["-c", MANUAL_TRIAGE_TO_TODO_PY, taskId],
+      execOpts,
+      (err, stdout, stderr) => {
+        if (err) {
+          resolve({
+            success: false,
+            error: (stderr || err.message || "").toString().trim(),
+          });
+          return;
+        }
+        try {
+          const result = JSON.parse((stdout || "").toString()) as {
+            ok?: boolean;
+          };
+          resolve(
+            result.ok
+              ? { success: true }
+              : {
+                  success: false,
+                  error: "Task is no longer in Triage on this board",
+                },
+          );
+        } catch {
+          resolve({
+            success: false,
+            error: "Could not read Kanban move result",
+          });
+        }
+      },
+    );
+  });
 }
 
 export async function specifyTask(

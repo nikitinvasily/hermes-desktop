@@ -10,6 +10,7 @@ vi.mock("../src/main/locale", () => ({
 
 import {
   buildRemoteHermesCmd,
+  buildRemoteHermesPythonCmd,
   sshSetConfigValue,
   buildGatewayStartCommand,
   buildGatewayStopCommand,
@@ -58,6 +59,33 @@ const sshConfig: SshConfig = {
 // shim/PATH model is POSIX-specific), so they skip there — the portable string
 // assertions in this file still run on every platform.
 const itPosix = process.platform === "win32" ? it.skip : it;
+
+itPosix(
+  "passes Python source and task ID literally through the SSH venv probe",
+  () => {
+    const home = mkdtempSync(join(tmpdir(), "hermes ssh python home-"));
+    const venv = join(home, "hermes-agent", "venv", "bin");
+    mkdirSync(venv, { recursive: true });
+    const shim = join(venv, "python");
+    writeFileSync(shim, '#!/bin/sh\nprintf "%s\\0" "$PWD" "$@"\n');
+    chmodSync(shim, 0o755);
+    const source = "print('literal test')";
+    const taskId = "t_; printf injected";
+    const output = execFileSync(
+      "sh",
+      ["-c", buildRemoteHermesPythonCmd(source, [taskId])],
+      {
+        env: { ...process.env, HOME: home },
+      },
+    );
+    expect(parseNulArgs(output)).toEqual([
+      join(home, "hermes-agent"),
+      "-c",
+      source,
+      taskId,
+    ]);
+  },
+);
 
 function runWithHermesShim(command: string): Buffer {
   if (process.platform === "win32") {

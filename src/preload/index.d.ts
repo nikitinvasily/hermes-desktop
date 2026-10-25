@@ -1316,6 +1316,10 @@ interface HermesAPI {
     reason?: string,
     profile?: string,
   ) => Promise<{ success: boolean; error?: string }>;
+  kanbanMoveToTodoTask: (
+    taskId: string,
+    profile?: string,
+  ) => Promise<{ success: boolean; error?: string }>;
   kanbanSpecifyTask: (
     taskId: string,
     profile?: string,

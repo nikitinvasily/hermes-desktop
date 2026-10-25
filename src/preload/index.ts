@@ -1824,6 +1824,8 @@ const hermesAPI = {
     ipcRenderer.invoke("kanban-promote-task", taskId, profile),
   kanbanScheduleTask: (taskId: string, reason?: string, profile?: string) =>
     ipcRenderer.invoke("kanban-schedule-task", taskId, reason, profile),
+  kanbanMoveToTodoTask: (taskId: string, profile?: string) =>
+    ipcRenderer.invoke("kanban-move-to-todo-task", taskId, profile),
   kanbanSpecifyTask: (taskId: string, profile?: string) =>
     ipcRenderer.invoke("kanban-specify-task", taskId, profile),
   kanbanReclaimTask: (taskId: string, reason?: string, profile?: string) =>
