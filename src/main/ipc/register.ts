@@ -19,6 +19,7 @@ import type { SessionModelOverride } from "../../shared/model-override";
 import type { SessionLocation } from "../../shared/session-location";
 import type { AppLocale } from "../../shared/i18n/types";
 import { normalizeModelEndpointUrl } from "../../shared/model-endpoint";
+import { connectionTargetSignature } from "../../shared/connection-target";
 import type {
   DesktopSessionContinuationItem,
   DesktopSessionLocalError,
@@ -3920,13 +3921,14 @@ export function registerIpcHandlers(context: IpcContext): void {
       taskId: string,
       assignee: string | null,
       profile?: string,
-      expectedConnectionId?: string,
+      expectedConnectionTarget?: string,
     ) => {
       // A stale drawer must never assign a same-ID card on another agent.
       // Check in the main process immediately before the transport resolves.
       if (
-        expectedConnectionId !== undefined &&
-        getPublicConnectionConfig().connectionId !== expectedConnectionId
+        expectedConnectionTarget !== undefined &&
+        connectionTargetSignature(getPublicConnectionConfig()) !==
+          expectedConnectionTarget
       ) {
         return {
           success: false,

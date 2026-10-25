@@ -7,6 +7,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { connectionTargetSignature } from "../../../../shared/connection-target";
 
 vi.mock("../../components/useI18n", () => {
   const t = (key: string, options?: Record<string, string>): string =>
@@ -159,7 +160,11 @@ describe("Kanban task assignment", () => {
         "t_disposable",
         "default",
         "default",
-        "local",
+        connectionTargetSignature({
+          connectionId: "local",
+          mode: "local",
+          remoteUrl: "",
+        }),
       ),
     );
     await waitFor(() => expect(screen.getByText("@default")).toBeTruthy());
@@ -273,7 +278,11 @@ describe("Kanban task assignment", () => {
         "t_disposable",
         null,
         "default",
-        "local",
+        connectionTargetSignature({
+          connectionId: "local",
+          mode: "local",
+          remoteUrl: "",
+        }),
       ),
     );
   });
@@ -289,5 +298,42 @@ describe("Kanban task assignment", () => {
       ).toBeNull(),
     );
     expect(assign).not.toHaveBeenCalled();
+  });
+
+  it("ignores an old assignment failure after switching agents", async () => {
+    const { assign, changeConnection } = setup();
+    let release!: (value: { success: boolean; error: string }) => void;
+    assign.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    render(<Kanban profile="default" visible={false} />);
+    await openTask();
+    await screen.findByRole("option", { name: "Default" });
+    fireEvent.change(
+      screen.getByRole("combobox", { name: "kanban.fieldAssignee" }),
+      { target: { value: "default" } },
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "kanban.saveAssignee" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "kanban.confirmAssign" }),
+    );
+    await waitFor(() => expect(assign).toHaveBeenCalledTimes(1));
+    act(() => changeConnection());
+    await screen.findByText("Disposable task");
+    await act(async () => {
+      release({ success: false, error: "old agent failed" });
+    });
+    expect(screen.queryByText("old agent failed")).toBeNull();
+    expect(
+      screen.queryByRole("combobox", { name: "kanban.fieldAssignee" }),
+    ).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "kanban.dispatch" }),
+    ).toHaveProperty("disabled", false);
   });
 });

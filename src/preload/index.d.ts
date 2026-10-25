@@ -1288,7 +1288,7 @@ interface HermesAPI {
     taskId: string,
     assignee: string | null,
     profile?: string,
-    expectedConnectionId?: string,
+    expectedConnectionTarget?: string,
   ) => Promise<{ success: boolean; error?: string }>;
   kanbanCompleteTask: (
     taskId: string,

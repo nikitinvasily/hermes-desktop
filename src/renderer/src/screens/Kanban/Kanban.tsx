@@ -13,6 +13,7 @@ import {
 } from "../../assets/icons";
 import { useI18n } from "../../components/useI18n";
 import { useConnectionChangeReload } from "../../hooks/useConnectionChangeReload";
+import { connectionTargetSignature } from "../../../../shared/connection-target";
 import { OrbLoader } from "../../components/OrbLoader";
 
 interface KanbanProps {
@@ -239,9 +240,9 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
   const [detailLoading, setDetailLoading] = useState(false);
   const [selectedAssignee, setSelectedAssignee] = useState("");
   const [confirmAssignment, setConfirmAssignment] = useState(false);
-  const assignmentInFlightRef = useRef(false);
+  const assignmentInFlightRef = useRef<symbol | null>(null);
   const detailRequestGenerationRef = useRef(0);
-  const drawerConnectionIdRef = useRef<string | null>(null);
+  const drawerConnectionTargetRef = useRef<string | null>(null);
   const [dispatchNotice, setDispatchNotice] = useState<{
     message: string;
     skippedTaskId?: string;
@@ -396,7 +397,11 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
   // user's board choice survives the switch; if that slug does not exist on
   // the new source, currentBoard falls back to the boards list's is_current.
   useConnectionChangeReload(() => {
-    drawerConnectionIdRef.current = null;
+    drawerConnectionTargetRef.current = null;
+    if (assignmentInFlightRef.current !== null) {
+      assignmentInFlightRef.current = null;
+      setActionBusy(null);
+    }
     ++detailRequestGenerationRef.current;
     setDetailTaskId(null);
     setDetail(null);
@@ -482,7 +487,7 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
 
   useEffect(() => {
     if (!detailTaskId) {
-      drawerConnectionIdRef.current = null;
+      drawerConnectionTargetRef.current = null;
       ++detailRequestGenerationRef.current;
       setDetail(null);
       return;
@@ -492,13 +497,13 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
     setDetail(null);
     setDetailLoading(true);
     setConfirmAssignment(false);
-    drawerConnectionIdRef.current = null;
+    drawerConnectionTargetRef.current = null;
     window.hermesAPI
       .getConnectionConfig()
       .then((conn) => {
         if (cancelled || generation !== detailRequestGenerationRef.current)
           return null;
-        drawerConnectionIdRef.current = conn.connectionId;
+        drawerConnectionTargetRef.current = connectionTargetSignature(conn);
         return window.hermesAPI.kanbanGetTask(detailTaskId, profile);
       })
       .then(
@@ -851,13 +856,18 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
   }
 
   async function handleAssign(): Promise<void> {
-    const expectedConnectionId = drawerConnectionIdRef.current;
-    if (!detail || !expectedConnectionId || assignmentInFlightRef.current)
+    const expectedConnectionTarget = drawerConnectionTargetRef.current;
+    if (
+      !detail ||
+      !expectedConnectionTarget ||
+      assignmentInFlightRef.current !== null
+    )
       return;
     const taskId = detail.task.id;
     const assignee = selectedAssignee || null;
     if (assignee === (detail.task.assignee || null)) return;
-    assignmentInFlightRef.current = true;
+    const requestToken = Symbol("kanban-assignment");
+    assignmentInFlightRef.current = requestToken;
     const generation = ++detailRequestGenerationRef.current;
     setActionBusy(taskId);
     try {
@@ -865,28 +875,33 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
         taskId,
         assignee,
         profile,
-        expectedConnectionId,
+        expectedConnectionTarget,
       );
+      if (generation !== detailRequestGenerationRef.current) return;
       if (!res.success) {
         setError(res.error || t("kanban.errAssign"));
         return;
       }
       const updated = await window.hermesAPI.kanbanGetTask(taskId, profile);
+      if (generation !== detailRequestGenerationRef.current) return;
       if (updated.success && updated.data) {
-        if (generation === detailRequestGenerationRef.current) {
-          setConfirmAssignment(false);
-          setDetail((current) =>
-            current?.task.id === taskId ? updated.data! : current,
-          );
-          setSelectedAssignee(updated.data.task.assignee || "");
-        }
-      } else setError(updated.error || t("kanban.errLoadTasks"));
+        setConfirmAssignment(false);
+        setDetail((current) =>
+          current?.task.id === taskId ? updated.data! : current,
+        );
+        setSelectedAssignee(updated.data.task.assignee || "");
+      } else {
+        setError(updated.error || t("kanban.errLoadTasks"));
+      }
       loadAll(true);
     } catch (err) {
-      setError((err as Error).message || t("kanban.errAssign"));
+      if (generation === detailRequestGenerationRef.current)
+        setError((err as Error).message || t("kanban.errAssign"));
     } finally {
-      assignmentInFlightRef.current = false;
-      setActionBusy(null);
+      if (assignmentInFlightRef.current === requestToken) {
+        assignmentInFlightRef.current = null;
+        setActionBusy(null);
+      }
     }
   }
 
