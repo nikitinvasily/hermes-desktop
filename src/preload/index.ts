@@ -1811,7 +1811,15 @@ const hermesAPI = {
     taskId: string,
     assignee: string | null,
     profile?: string,
-  ) => ipcRenderer.invoke("kanban-assign-task", taskId, assignee, profile),
+    expectedConnectionTarget?: string,
+  ) =>
+    ipcRenderer.invoke(
+      "kanban-assign-task",
+      taskId,
+      assignee,
+      profile,
+      expectedConnectionTarget,
+    ),
   kanbanCompleteTask: (taskId: string, result?: string, profile?: string) =>
     ipcRenderer.invoke("kanban-complete-task", taskId, result, profile),
   kanbanBlockTask: (taskId: string, reason?: string, profile?: string) =>

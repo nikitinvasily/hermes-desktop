@@ -32,7 +32,13 @@ Boards and tasks are per-connection data, so a fourth trigger comes from [[src/r
 
 Clicking a card opens a right-docked issue drawer (`kanban-detail-drawer`) fed by `kanbanGetTask` ([[src/main/kanban.ts#getTask]]).
 
-It shows status, assignee, body, latest run summary, result, the read-only comment thread, and the recent event timeline. It is presentation-only; mutations stay on the card actions.
+It shows status, assignee, body, the latest run summary, result, comments, and recent events.
+
+An active card's assignee can be changed here using `kanbanAssignTask`; a confirmation warns that assigning a Ready card can launch work when the gateway is running. The save action does not trigger a manual Dispatch. Done and archived cards remain read-only.
+
+The profile selector uses `listProfiles` for the active connection (local, SSH, or remote). A successful assignment refetches the detail and board; a failed one keeps the selected profile for retry. Closing the drawer or switching cards invalidates an outstanding detail fetch. Switching connections or changing an SSH/remote endpoint closes the drawer. A shared target signature also makes the main-process assignment IPC reject stale requests before reaching any transport, even if the saved connection ID stays the same. Responses from an old assignment cannot overwrite the new board's state. Unassignment does not require a successful profile list.
+
+Dispatch reports the result instead of silently refreshing the board. When the backend returns `skipped_unassigned`, the notice names those task IDs and links to the skipped card's assignee selector. Other no-op reasons (dispatcher lock, profile cap, non-spawnable lane, restart guard) are shown when supplied by the backend.
 
 ## Remote plugin transport
 
@@ -51,6 +57,8 @@ It is a renderer-only mirror — selecting it routes reads to the remote store, 
 Unit tests for the remote adapter live in `tests/kanban-remote.test.ts`. They stub `remoteDashboardRequestJson` and assert routing and payload mapping.
 
 The renderer's drag-transition tests live in `src/renderer/src/screens/Kanban/Kanban.drag.test.tsx`. They cover the in-app block/confirmation dialogs, saved status refresh, backend rejection, and an unsupported drop.
+
+The renderer's assignment tests live in `src/renderer/src/screens/Kanban/Kanban.assignment.test.tsx`. They cover confirmation, unassigned Dispatch feedback, backend rejection and read-only finished cards, using disposable mocked tasks rather than a live board.
 
 ### Routes every verb to the plugin API
 Each kanban IPC function in remote mode calls the matching plugin endpoint (boards CRUD + switch, /board flattened task list, task detail, create, PATCH status verbs, comments, specify, reclaim, dispatch) with the expected method and body.

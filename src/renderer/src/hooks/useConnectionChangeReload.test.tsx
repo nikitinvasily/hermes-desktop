@@ -4,7 +4,7 @@ import { useConnectionChangeReload } from "./useConnectionChangeReload";
 
 // The hook is behaviorally identical to the inline Schedules pattern
 // (issue #86): refetch when the connection's transport-relevant signature
-// (connectionId|mode|remoteUrl) actually changes, never on re-activation of
+// (connection id, mode, URL, or SSH target) actually changes, never on re-activation of
 // the same connection. The baseline is seeded with the active connection at
 // mount, so an event for the CURRENT connection is a no-op.
 
@@ -12,6 +12,7 @@ interface Conn {
   connectionId: string;
   mode: "local" | "remote" | "ssh";
   remoteUrl: string;
+  ssh?: { host: string; port: number };
 }
 
 let emitConnectionChanged: ((conn: Conn) => void) | null = null;
@@ -95,6 +96,23 @@ describe("useConnectionChangeReload", () => {
 
     await act(async () => {
       emitConnectionChanged?.(conn("local-main", "ssh", ""));
+    });
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("refetches when a saved SSH connection changes its target but keeps its id", async () => {
+    currentConn = {
+      ...conn("ssh-main", "ssh", ""),
+      ssh: { host: "old.example", port: 22 },
+    };
+    render(<Harness onChange={onChange} />);
+    await flush();
+
+    await act(async () => {
+      emitConnectionChanged?.({
+        ...currentConn,
+        ssh: { host: "new.example", port: 22 },
+      });
     });
     expect(onChange).toHaveBeenCalledTimes(1);
   });

@@ -2381,8 +2381,7 @@ body:has(.shell-vibrant),
   font-size: 11px;
   line-height: 1.4;
   color: var(--warning, #d29922);
-  border-top: 1px solid
-    color-mix(in srgb, var(--text-primary) 7%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--text-primary) 7%, transparent);
 }
 
 /* Sidebar row highlight (hover/focus/active): mixed from existing tokens so
@@ -5766,8 +5765,7 @@ body:has(.shell-vibrant),
      transition, it always reads as focused. */
   background: var(--bg-secondary);
   color: var(--text-primary);
-  border: 1px solid
-    color-mix(in srgb, var(--accent) 45%, var(--border-bright));
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border-bright));
   border-bottom-right-radius: 4px;
 }
 
@@ -18099,6 +18097,39 @@ body:has(.shell-vibrant),
   flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 14px;
+}
+
+.kanban-dispatch-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  font-size: 12px;
+}
+
+.kanban-dispatch-notice > span {
+  flex: 1;
+}
+
+.kanban-assignee-editor,
+.kanban-assignment-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.kanban-assignee-editor select {
+  min-width: 0;
+  flex: 1;
+}
+.kanban-assignment-confirm {
+  display: grid;
+  gap: 10px;
+  font-size: 12px;
 }
 
 .kanban-detail-section {

@@ -1,8 +1,5 @@
 import { useEffect, useRef } from "react";
-
-type PublicConnectionConfig = Awaited<
-  ReturnType<typeof window.hermesAPI.getConnectionConfig>
->;
+import { connectionTargetSignature } from "../../../shared/connection-target";
 
 /**
  * Reload a per-connection data screen when the ACTIVE connection changes.
@@ -12,7 +9,7 @@ type PublicConnectionConfig = Awaited<
  * process) keep showing the PREVIOUS connection's data after a local/remote
  * switch unless they refetch. This hook subscribes to
  * `onConnectionConfigChanged` and calls `onChange` when the connection's
- * transport-relevant signature (`connectionId|mode|remoteUrl`) actually
+ * target signature (connection ID, mode, URL, SSH endpoint) actually
  * changed.
  *
  * The baseline is seeded with the CURRENT connection at mount, so
@@ -34,7 +31,7 @@ export function useConnectionChangeReload(onChange: () => void): void {
       .getConnectionConfig()
       .then((conn) => {
         if (signatureRef.current === null) {
-          signatureRef.current = connectionSignature(conn);
+          signatureRef.current = connectionTargetSignature(conn);
         }
       })
       .catch(() => {
@@ -42,7 +39,7 @@ export function useConnectionChangeReload(onChange: () => void): void {
       });
 
     const unsubscribe = window.hermesAPI.onConnectionConfigChanged((conn) => {
-      const signature = connectionSignature(conn);
+      const signature = connectionTargetSignature(conn);
       if (signatureRef.current === signature) return;
       signatureRef.current = signature;
       onChangeRef.current();
@@ -51,8 +48,4 @@ export function useConnectionChangeReload(onChange: () => void): void {
     // The callback is read through a ref, so the subscription never needs to
     // re-bind when the caller's load function identity changes.
   }, []);
-}
-
-function connectionSignature(conn: PublicConnectionConfig): string {
-  return `${conn.connectionId}|${conn.mode}|${conn.remoteUrl}`;
 }

@@ -19,6 +19,7 @@ import type { SessionModelOverride } from "../../shared/model-override";
 import type { SessionLocation } from "../../shared/session-location";
 import type { AppLocale } from "../../shared/i18n/types";
 import { normalizeModelEndpointUrl } from "../../shared/model-endpoint";
+import { connectionTargetSignature } from "../../shared/connection-target";
 import type {
   DesktopSessionContinuationItem,
   DesktopSessionLocalError,
@@ -3915,8 +3916,27 @@ export function registerIpcHandlers(context: IpcContext): void {
   );
   ipcMain.handle(
     "kanban-assign-task",
-    (_event, taskId: string, assignee: string | null, profile?: string) =>
-      kanbanAssignTask(taskId, assignee, profile),
+    (
+      _event,
+      taskId: string,
+      assignee: string | null,
+      profile?: string,
+      expectedConnectionTarget?: string,
+    ) => {
+      // A stale drawer must never assign a same-ID card on another agent.
+      // Check in the main process immediately before the transport resolves.
+      if (
+        expectedConnectionTarget !== undefined &&
+        connectionTargetSignature(getPublicConnectionConfig()) !==
+          expectedConnectionTarget
+      ) {
+        return {
+          success: false,
+          error: "Connection changed. Reopen the task before assigning it.",
+        };
+      }
+      return kanbanAssignTask(taskId, assignee, profile);
+    },
   );
   ipcMain.handle(
     "kanban-complete-task",

@@ -52,6 +52,27 @@ export default {
   bodyPlaceholder: "Context, acceptance criteria, links…",
   fieldAssignee: "Assignee profile",
   assigneeNone: "— Triage (no assignee)",
+  assigneeUnassigned: "Unassigned",
+  saveAssignee: "Save assignee",
+  confirmAssign: "Confirm assignment",
+  assignWarning:
+    "Changing the assignee may immediately start a Ready task if the gateway is running. Saving does not run Dispatch; you can run it separately if the task is still Ready.",
+  errAssign: "Could not save assignee",
+  dispatchSkippedUnassigned:
+    "Skipped unassigned task(s): {{tasks}}. Assign a profile to run them.",
+  dispatchStarted: "Dispatcher started {{count}} worker(s).",
+  dispatchLocked:
+    "Another dispatcher is already processing this board. Try again shortly.",
+  dispatchProfileBusy:
+    "No worker started: the assigned profile is at its concurrency limit.",
+  dispatchNonspawnable:
+    "No worker started: these tasks belong to a non-spawnable lane.",
+  dispatchGuarded:
+    "No worker started: recent runs or other guards prevented a restart.",
+  dispatchNoTasks:
+    "Dispatch finished; no worker started. Check task status, assigned profiles and worker limits.",
+  assignSkipped: "Assign skipped task",
+  dismissNotice: "Dismiss dispatch result",
   fieldPriority: "Priority",
   priorityNormal: "Normal (0)",
   priorityLow: "Low (P2)",
