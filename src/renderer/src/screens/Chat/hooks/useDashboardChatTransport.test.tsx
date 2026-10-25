@@ -83,6 +83,7 @@ interface HarnessApi {
     typeof useDashboardChatTransport
   >["respondApproval"];
   send?: ReturnType<typeof useDashboardChatTransport>["sendMessage"];
+  hasActiveSubagents?: boolean;
   sessionYolo?: boolean | null;
   toggleSessionYolo?: (enabled: boolean) => Promise<boolean>;
   setConnectionMode?: Dispatch<SetStateAction<"local" | "remote" | "ssh">>;
@@ -218,6 +219,7 @@ function Harness({
       respondApproval: transport.respondApproval,
       respondClarify: transport.respondClarify,
       send: transport.sendMessage,
+      hasActiveSubagents: transport.hasActiveSubagents,
       sessionYolo: transport.sessionYolo,
       toggleSessionYolo: transport.toggleSessionYolo,
       setConnectionMode,
@@ -237,6 +239,7 @@ function Harness({
     transport.respondClarify,
     transport.resyncAfterDetach,
     transport.hasDetachedTurn,
+    transport.hasActiveSubagents,
     transport.sessionYolo,
     transport.toggleSessionYolo,
     transport.abort,
@@ -286,6 +289,264 @@ describe("useDashboardChatTransport recovery", () => {
         })),
       },
     });
+  });
+
+  it.each(["startup", "connect"] as const)(
+    "discards eager roster acquisition resolved after unmount during %s",
+    async (stage) => {
+      let release!: () => void;
+      const pending = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const startDashboard = vi.fn(async () => {
+        if (stage === "startup") await pending;
+        return {
+          connection: { wsUrl: "ws://127.0.0.1:12345" },
+          running: true,
+        };
+      });
+      Object.defineProperty(window, "hermesAPI", {
+        configurable: true,
+        value: { startDashboard },
+      });
+      if (stage === "connect") {
+        dashboardMock.connect.mockImplementationOnce(async () => {
+          await pending;
+          return undefined;
+        });
+      }
+      const view = render(<Harness api={{}} hermesSessionId="stored-parent" />);
+      await waitFor(() => {
+        expect(startDashboard).toHaveBeenCalledTimes(1);
+        if (stage === "connect") {
+          expect(dashboardMock.connect).toHaveBeenCalledTimes(1);
+        }
+      });
+      view.unmount();
+      await act(async () => {
+        release();
+        await pending;
+      });
+      if (stage === "startup") {
+        expect(dashboardMock.instances).toHaveLength(0);
+      } else {
+        expect(dashboardMock.instances).toHaveLength(1);
+        expect(dashboardMock.instances[0].close).toHaveBeenCalledTimes(1);
+      }
+      expect(dashboardMock.request).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not reconnect from a delayed drop probe after unmount", async () => {
+    dashboardMock.request.mockImplementation(async (method: string) => {
+      if (method === "session.resume") {
+        return {
+          session_id: "runtime-parent",
+          stored_session_id: "stored-parent",
+          running: true,
+        };
+      }
+      return {};
+    });
+    const api: HarnessApi = {};
+    const view = render(<Harness api={api} hermesSessionId="stored-parent" />);
+    await waitFor(() =>
+      expect(dashboardMock.request).toHaveBeenCalledWith("subagent.list", {
+        session_id: "runtime-parent",
+      }),
+    );
+    vi.useFakeTimers();
+    try {
+      act(() => dashboardMock.onClose?.());
+      expect(api.hasDetachedTurn).toBe(true);
+      view.unmount();
+      dashboardMock.request.mockClear();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1500);
+      });
+      expect(dashboardMock.instances).toHaveLength(1);
+      expect(dashboardMock.connect).toHaveBeenCalledTimes(1);
+      expect(dashboardMock.request).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shares a cold resume between the roster probe and a user send", async () => {
+    let resume!: (value: unknown) => void;
+    const pending = new Promise((resolve) => {
+      resume = resolve;
+    });
+    dashboardMock.request.mockImplementation(async (method: string) => {
+      if (method === "session.resume") return pending;
+      if (method === "subagent.list")
+        return { subagents: [{ status: "running" }] };
+      if (method === "model.options")
+        return { model: "bad-model", provider: "bad-provider", providers: [] };
+      return {};
+    });
+    const api: HarnessApi = {};
+    render(<Harness api={api} hermesSessionId="stored-parent" />);
+    await waitFor(() =>
+      expect(dashboardMock.request).toHaveBeenCalledWith(
+        "session.resume",
+        expect.objectContaining({ session_id: "stored-parent" }),
+      ),
+    );
+    let sending!: ReturnType<NonNullable<HarnessApi["send"]>>;
+    act(() => {
+      sending = api.send!("hello");
+    });
+    await act(async () => {
+      resume({
+        session_id: "runtime-parent",
+        stored_session_id: "stored-parent",
+        running: false,
+      });
+      await sending;
+    });
+    expect(
+      dashboardMock.request.mock.calls.filter(
+        ([method]) => method === "session.resume",
+      ),
+    ).toHaveLength(1);
+    expect(dashboardMock.request).toHaveBeenCalledWith("subagent.list", {
+      session_id: "runtime-parent",
+    });
+    expect(api.hasActiveSubagents).toBe(true);
+  });
+
+  it("does not bind a delayed resume to a different stored chat on the same socket", async () => {
+    let resumeOld!: (value: unknown) => void;
+    const old = new Promise((resolve) => {
+      resumeOld = resolve;
+    });
+    dashboardMock.request.mockImplementation(
+      async (method: string, params: Record<string, unknown>) => {
+        if (method === "session.resume") {
+          if (params.session_id === "stored-old") return old;
+          return {
+            session_id: "runtime-new",
+            stored_session_id: "stored-new",
+            running: false,
+          };
+        }
+        if (method === "subagent.list")
+          return {
+            subagents:
+              params.session_id === "runtime-old"
+                ? [{ status: "running" }]
+                : [],
+          };
+        return {};
+      },
+    );
+    const api: HarnessApi = {};
+    const { rerender } = render(
+      <Harness api={api} hermesSessionId="stored-old" />,
+    );
+    await waitFor(() =>
+      expect(dashboardMock.request).toHaveBeenCalledWith(
+        "session.resume",
+        expect.objectContaining({ session_id: "stored-old" }),
+      ),
+    );
+    rerender(<Harness api={api} hermesSessionId="stored-new" />);
+    await act(async () => {
+      resumeOld({
+        session_id: "runtime-old",
+        stored_session_id: "stored-old",
+        running: false,
+      });
+    });
+    await waitFor(() =>
+      expect(dashboardMock.request).toHaveBeenCalledWith(
+        "session.resume",
+        expect.objectContaining({ session_id: "stored-new" }),
+      ),
+    );
+    expect(dashboardMock.request).not.toHaveBeenCalledWith("subagent.list", {
+      session_id: "runtime-old",
+    });
+    expect(api.hasActiveSubagents).toBe(false);
+  });
+
+  it("does not let a roster resume absorb forced recovery after a failed turn", async () => {
+    let releaseResume!: (value: unknown) => void;
+    const pending = new Promise((resolve) => {
+      releaseResume = resolve;
+    });
+    let resumingAfterDrop = false;
+    dashboardMock.request.mockImplementation(async (method: string) => {
+      if (method === "session.resume") {
+        if (resumingAfterDrop) return pending;
+        return {
+          session_id: "runtime-parent",
+          stored_session_id: "stored-parent",
+          running: false,
+        };
+      }
+      if (method === "session.create")
+        return {
+          session_id: "runtime-clean",
+          stored_session_id: "stored-parent",
+        };
+      if (method === "model.options")
+        return { model: "bad-model", provider: "bad-provider", providers: [] };
+      if (method === "subagent.list") return { subagents: [] };
+      return {};
+    });
+    const api: HarnessApi = {};
+    render(<Harness api={api} hermesSessionId="stored-parent" />);
+    await waitFor(() =>
+      expect(dashboardMock.request).toHaveBeenCalledWith("subagent.list", {
+        session_id: "runtime-parent",
+      }),
+    );
+    await act(async () => {
+      await api.send!("bad provider turn");
+      dashboardMock.onEvent?.({
+        type: "message.complete",
+        session_id: "runtime-parent",
+        payload: { error: "Invalid API Key", status: "error" },
+      });
+      resumingAfterDrop = true;
+      dashboardMock.onClose?.();
+    });
+    await waitFor(
+      () =>
+        expect(
+          dashboardMock.request.mock.calls.filter(
+            ([method]) => method === "session.resume",
+          ),
+        ).toHaveLength(2),
+      { timeout: 3500 },
+    );
+    let sending!: ReturnType<NonNullable<HarnessApi["send"]>>;
+    act(() => {
+      api.activeTurnRef!.current = { ...activeRecoveryTurn };
+      sending = api.send!("recovery turn");
+    });
+    await act(async () => {
+      releaseResume({
+        session_id: "runtime-resumed",
+        stored_session_id: "stored-parent",
+        running: false,
+      });
+      await sending;
+    });
+    expect(dashboardMock.request).toHaveBeenCalledWith(
+      "session.create",
+      expect.any(Object),
+    );
+    expect(dashboardMock.request).toHaveBeenLastCalledWith(
+      "prompt.submit",
+      expect.objectContaining({ session_id: "runtime-clean" }),
+    );
+    expect(window.hermesAPI.recordSessionContinuation).toHaveBeenCalledWith(
+      "stored-parent",
+      expect.arrayContaining([{ kind: "user", content: "bad provider turn" }]),
+    );
   });
 
   it("routes /stop to interrupt without synchronizing the selected model", async () => {

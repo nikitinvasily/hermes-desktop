@@ -17,6 +17,7 @@ export default {
   remoteRetry: "Retry",
   subagents: "Subagents",
   subagentDied: "died with a gateway restart",
+  waitingSubagents: "Waiting for subagents",
   todoTasklist: "TODO",
   pinned: "Pinned",
   archiveSection: "Archive",

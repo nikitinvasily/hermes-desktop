@@ -439,9 +439,8 @@ describe("SidebarRecentSessions single pagination (backlog #92)", () => {
     // renderer its top 51, the page fetch walks the rest by offset.
     const serverRows = chatsFixture(61);
     syncSessionCache.mockImplementation(async () => serverRows.slice(0, 51));
-    listCachedSessions.mockImplementation(
-      async (_l: number, offset: number) =>
-        serverRows.slice(offset, offset + 31),
+    listCachedSessions.mockImplementation(async (_l: number, offset: number) =>
+      serverRows.slice(offset, offset + 31),
     );
     renderSidebar(() => undefined);
 
@@ -503,9 +502,8 @@ describe("SidebarRecentSessions single pagination (backlog #92)", () => {
     const serverRows = chatsFixture(61);
     syncSessionCache.mockImplementation(async () => serverRows.slice(0, 51));
     const heldPage = [...serverRows.slice(0, 29), serverRows[0], serverRows[1]];
-    listCachedSessions.mockImplementation(
-      async (_l: number, offset: number) =>
-        offset < 30 ? serverRows.slice(offset, offset + 31) : heldPage,
+    listCachedSessions.mockImplementation(async (_l: number, offset: number) =>
+      offset < 30 ? serverRows.slice(offset, offset + 31) : heldPage,
     );
     renderSidebar(() => undefined);
     await screen.findByText("Chat 0");
@@ -1087,6 +1085,86 @@ describe("SidebarRecentSessions maybe-changed force refresh (issue #97)", () => 
 });
 
 describe("SidebarRecentSessions state bullets", () => {
+  it("prioritizes approval > running > waiting > unread and aggregates waiting projects", async () => {
+    const rows = [
+      {
+        id: "parent",
+        title: "Waiting parent",
+        contextFolder: "/tmp/proj",
+        unread: true,
+      },
+    ];
+    listCachedSessions.mockResolvedValue(rows);
+    syncSessionCache.mockResolvedValue(rows);
+    const props = {
+      open: true,
+      connectionId: "connection-main",
+      activeProfile: "default",
+      degraded: false,
+      resyncNonce: 0,
+      currentSessionId: null,
+      loadingSessionIds: new Set<string>(),
+      approvalSessionIds: new Set<string>(),
+      subagentSessionIds: new Set(["parent"]),
+      resumingSessionId: null,
+      onSelect: vi.fn(),
+      onSessionDeleted: vi.fn(),
+      scrollRootRef: { current: null },
+    };
+    const { rerender } = render(<SidebarRecentSessions {...props} />);
+    await screen.findByText("Waiting parent");
+    const row = (): Element =>
+      screen.getByText("Waiting parent").closest(".sidebar-recent-session")!;
+    expect(
+      row()
+        .querySelector(".sidebar-recent-session-waiting-subagents")
+        ?.getAttribute("aria-label"),
+    ).toBe("navigation.waitingSubagents");
+    await waitFor(() =>
+      expect(
+        document.querySelector(
+          ".sidebar-recent-project-heading .sidebar-recent-session-waiting-subagents",
+        ),
+      ).not.toBeNull(),
+    );
+    rerender(
+      <SidebarRecentSessions
+        {...props}
+        loadingSessionIds={new Set(["parent"])}
+      />,
+    );
+    expect(
+      row().querySelector(".sidebar-recent-session-spinner"),
+    ).not.toBeNull();
+    expect(
+      row().querySelector(".sidebar-recent-session-waiting-subagents"),
+    ).toBeNull();
+    rerender(
+      <SidebarRecentSessions
+        {...props}
+        loadingSessionIds={new Set(["parent"])}
+        approvalSessionIds={new Set(["parent"])}
+      />,
+    );
+    expect(
+      row().querySelector(".sidebar-recent-session-dot--approval"),
+    ).not.toBeNull();
+    rerender(
+      <SidebarRecentSessions {...props} subagentSessionIds={new Set()} />,
+    );
+    expect(
+      row().querySelector(".sidebar-recent-session-waiting-subagents"),
+    ).toBeNull();
+    expect(
+      row().querySelector(".sidebar-recent-session-dot--unread"),
+    ).not.toBeNull();
+    expect(
+      document.querySelector(
+        ".sidebar-recent-project-heading .sidebar-recent-session-waiting-subagents",
+      ),
+    ).toBeNull();
+  });
+
   function bulletFor(title: string): SVGSVGElement | null {
     const row = screen.getByText(title).closest(".sidebar-recent-session");
     return (

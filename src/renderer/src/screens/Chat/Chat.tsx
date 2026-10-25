@@ -126,6 +126,7 @@ interface ChatProps {
   /** Sidebar approval bullet (issue #90): reports whether this chat currently
    *  holds a pending command approval so Layout can lift it onto the run. */
   onApprovalChange?: (runId: string, pending: boolean) => void;
+  onSubagentsChange?: (runId: string, active: boolean) => void;
   /** Reports the gateway session id once known, so the parent can map
    *  runId ↔ sessionId (live re-attach, spinners, titles). */
   onSessionIdChange?: (runId: string, sessionId: string | null) => void;
@@ -155,6 +156,7 @@ function Chat({
   onOpenDiagnose,
   onLoadingChange,
   onApprovalChange,
+  onSubagentsChange,
   onSessionIdChange,
   onTitleChange,
   onContextFolderChange,
@@ -795,6 +797,10 @@ function Chat({
   const resyncAfterDetach = dashboardTransport.resyncAfterDetach;
   const hasDetachedTurn = dashboardTransport.hasDetachedTurn;
   const hasPendingApproval = dashboardTransport.hasPendingApproval;
+  const hasActiveSubagents = dashboardTransport.hasActiveSubagents;
+  useEffect(() => {
+    onSubagentsChange?.(runId, hasActiveSubagents);
+  }, [runId, hasActiveSubagents, onSubagentsChange]);
   // When this chat becomes visible again after its transport was torn down
   // mid-turn (connection switch, issue #76), catch up: reconnect, resume the
   // session (a still-running agent re-attaches its event stream) and

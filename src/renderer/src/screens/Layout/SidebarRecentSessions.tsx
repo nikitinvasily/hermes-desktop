@@ -297,6 +297,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   currentSessionId,
   loadingSessionIds,
   approvalSessionIds,
+  subagentSessionIds,
   resumingSessionId,
   onSelect,
   onNewChatInProject,
@@ -323,6 +324,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   loadingSessionIds: Set<string>;
   /** Session ids with a pending command approval (issue #90 bullets). */
   approvalSessionIds: Set<string>;
+  subagentSessionIds?: ReadonlySet<string>;
   /** A session whose history is being fetched for resume (transient spinner). */
   resumingSessionId: string | null;
   onSelect: (sessionId: string) => void;
@@ -1436,6 +1438,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
       ? (s.pendingLoading ?? true)
       : resumingSessionId === s.id || loadingSessionIds.has(s.id);
     const awaitingApproval = approvalSessionIds.has(s.id);
+    const waitingSubagents = subagentSessionIds?.has(s.id) === true;
     const unread = s.unread === true && !loading && !awaitingApproval;
     // The active highlight persists while the agent works (loading) — the
     // spinner already signals activity, dropping the highlight made the
@@ -1546,6 +1549,13 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
             className="sidebar-recent-session-spinner"
             aria-label={t("sessions.newConversation")}
             role="img"
+          />
+        ) : waitingSubagents ? (
+          <span
+            className="sidebar-recent-session-waiting-subagents"
+            role="img"
+            aria-label={t("navigation.waitingSubagents")}
+            title={t("navigation.waitingSubagents")}
           />
         ) : unread ? (
           <Circle
@@ -1725,6 +1735,15 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
                               className="sidebar-recent-session-spinner"
                               role="img"
                               aria-label={t("sessions.running")}
+                            />
+                          ) : group.sessions.some((s) =>
+                              subagentSessionIds?.has(s.id),
+                            ) ? (
+                            <span
+                              className="sidebar-recent-session-waiting-subagents"
+                              role="img"
+                              aria-label={t("navigation.waitingSubagents")}
+                              title={t("navigation.waitingSubagents")}
                             />
                           ) : (
                             <Folder size={13} />

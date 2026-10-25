@@ -17,6 +17,7 @@ import {
   runIdAtOrdinal,
   loadingSessionIds as deriveLoadingSessionIds,
   approvalPendingSessionIds,
+  waitingSubagentSessionIds,
 } from "./chatRuns";
 import { ActiveSessionsBar } from "./ActiveSessionsBar";
 import { StatusBar } from "./StatusBar";
@@ -339,6 +340,22 @@ function Layout({
   const approvalSessionIds = useMemo(
     () => approvalPendingSessionIds(runs),
     [runs],
+  );
+  const subagentSessionIds = useMemo(
+    () => waitingSubagentSessionIds(runs, connectionId, activeProfile),
+    [runs, connectionId, activeProfile],
+  );
+
+  const handleRunSubagents = useCallback(
+    (runId: string, active: boolean): void => {
+      setRuns((prev) => {
+        const current = prev.find((r) => r.runId === runId);
+        if (!current || (current.hasActiveSubagents ?? false) === active)
+          return prev;
+        return patchRun(prev, runId, { hasActiveSubagents: active });
+      });
+    },
+    [],
   );
 
   const updateSidebarScrollbar = useCallback((visible: boolean) => {
@@ -1199,6 +1216,7 @@ function Layout({
                   currentSessionId={currentSessionId}
                   loadingSessionIds={loadingSessionIds}
                   approvalSessionIds={approvalSessionIds}
+                  subagentSessionIds={subagentSessionIds}
                   resumingSessionId={resumingSessionId}
                   onSelect={handleResumeSession}
                   onNewChatInProject={handleNewChatInProject}
@@ -1396,6 +1414,7 @@ function Layout({
                   }
                   onLoadingChange={handleRunLoading}
                   onApprovalChange={handleRunApproval}
+                  onSubagentsChange={handleRunSubagents}
                   onSessionIdChange={handleRunSessionId}
                   onTitleChange={handleRunTitle}
                   onContextFolderChange={handleRunContextFolder}
