@@ -20,6 +20,12 @@ Drag-drop uses agent lifecycle verbs for done, blocked, ready, scheduled and arc
 
 In-place editing of a live card's title/body/priority is unavailable — the CLI `edit` verb only backfills a result on already-`done` tasks.
 
+## Card sorting
+
+The board offers priority order (the existing default) and newest-first order. The renderer applies the selected order to each lane for every transport, including the read-only HQ mirror.
+
+Newest-first compares creation timestamps descending without a priority override, places missing dates last, and breaks equal timestamps by task ID. The localStorage preference survives refreshes, archive filtering and reopening. Editing or moving a card does not change its creation timestamp. Polls and mutation refreshes feed the same grouping and sorting path. Renderer regression coverage lives in `src/renderer/src/screens/Kanban/Kanban.sort.test.tsx`.
+
 ## Refresh model
 
 The board stays current without a live event stream, using three refresh triggers instead.

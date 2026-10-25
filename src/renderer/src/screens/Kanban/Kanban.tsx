@@ -171,6 +171,18 @@ const HQ_BOARD_SLUG = "__claw3d_hq__";
 // localStorage key for remembering which board the user last viewed across
 // sessions. Stored value is either a real board slug or HQ_BOARD_SLUG.
 const ACTIVE_BOARD_LS_KEY = "hermes:kanban:active-board";
+const SORT_ORDER_LS_KEY = "hermes:kanban:sort-order";
+type SortOrder = "priority" | "newest";
+
+function readStoredSortOrder(): SortOrder {
+  try {
+    return window.localStorage.getItem(SORT_ORDER_LS_KEY) === "newest"
+      ? "newest"
+      : "priority";
+  } catch {
+    return "priority";
+  }
+}
 
 function readStoredActiveBoard(): string | null {
   try {
@@ -261,6 +273,15 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
   } | null>(null);
   const [blockReason, setBlockReason] = useState("");
   const [showArchived, setShowArchived] = useState(false);
+  const [sortOrder, setSortOrder] = useState<SortOrder>(readStoredSortOrder);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SORT_ORDER_LS_KEY, sortOrder);
+    } catch {
+      // Sorting still works for this view when storage is unavailable.
+    }
+  }, [sortOrder]);
 
   // When the Claw3D HQ virtual board is active we route reads to the
   // task-store JSON on the remote (via kanbanListClaw3dHqTasks) and hide all
@@ -549,15 +570,23 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
       grouped[col] = grouped[col] || [];
       grouped[col].push(task);
     }
-    // Stable ordering: priority DESC, created_at ASC (matches backend)
+    // @lat: [[kanban#Kanban board tab#Card sorting]]
     for (const k of Object.keys(grouped)) {
-      grouped[k].sort((a, b) => {
+      grouped[k].sort((a, b): number => {
+        if (sortOrder === "newest") {
+          if (a.created_at == null && b.created_at != null) return 1;
+          if (b.created_at == null && a.created_at != null) return -1;
+          return (
+            (b.created_at ?? 0) - (a.created_at ?? 0) ||
+            (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+          );
+        }
         if (b.priority !== a.priority) return b.priority - a.priority;
         return (a.created_at || 0) - (b.created_at || 0);
       });
     }
     return grouped;
-  }, [tasks, renderedColumns]);
+  }, [tasks, renderedColumns, sortOrder]);
 
   function resetCreateForm(): void {
     setNewTitle("");
@@ -937,6 +966,21 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
           <h2 className="schedules-title">{t("kanban.title")}</h2>
         </div>
         <div className="schedules-header-actions">
+          <label className="btn btn-secondary">
+            {t("kanban.sortLabel")}
+            <select
+              aria-label={t("kanban.sortLabel")}
+              value={sortOrder}
+              onChange={(event): void =>
+                setSortOrder(
+                  event.target.value === "newest" ? "newest" : "priority",
+                )
+              }
+            >
+              <option value="priority">{t("kanban.sortPriority")}</option>
+              <option value="newest">{t("kanban.sortNewest")}</option>
+            </select>
+          </label>
           <button
             className="btn btn-secondary"
             onClick={() => loadAll()}

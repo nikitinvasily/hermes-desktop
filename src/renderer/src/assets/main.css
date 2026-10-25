@@ -17595,10 +17595,17 @@ body:has(.shell-vibrant),
 
 .kanban-header {
   display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
   align-items: flex-start;
   justify-content: space-between;
   margin-bottom: 14px;
   flex-shrink: 0;
+}
+
+.kanban-header .schedules-header-actions {
+  flex-wrap: wrap;
+  max-width: 100%;
 }
 
 .kanban-empty {
