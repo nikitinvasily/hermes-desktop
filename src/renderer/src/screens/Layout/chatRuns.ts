@@ -20,6 +20,8 @@ export interface ChatRun {
   /** True while this run's chat holds a pending command approval (issue #90);
    *  drives the sidebar's warning bullet and lifts out of the transport. */
   pendingApproval?: boolean;
+  /** Session-scoped gateway roster, never inferred from unfinished DB rows. */
+  hasActiveSubagents?: boolean;
   /** Best-effort title (first user message) for the active-sessions bar. */
   title?: string;
   /** Seed transcript when the run was opened from history. */
@@ -226,7 +228,26 @@ export function loadingSessionIds(runs: ChatRun[]): Set<string> {
   return ids;
 }
 
-/** Session ids of every run blocked on a command approval (issue #90). */
+/** Scoped to the sidebar machine/profile; equal session IDs must not leak. */
+export function waitingSubagentSessionIds(
+  runs: ChatRun[],
+  connectionId: string,
+  profile: string,
+): Set<string> {
+  return new Set(
+    runs
+      .filter(
+        (r) =>
+          r.connectionId === connectionId &&
+          r.profile === profile &&
+          r.hasActiveSubagents &&
+          !r.loading &&
+          r.sessionId,
+      )
+      .map((r) => r.sessionId!),
+  );
+}
+
 export function approvalPendingSessionIds(runs: ChatRun[]): Set<string> {
   const ids = new Set<string>();
   for (const r of runs) {

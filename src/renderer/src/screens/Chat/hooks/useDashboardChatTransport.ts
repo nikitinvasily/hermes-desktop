@@ -11,6 +11,10 @@ import {
   type DashboardStreamEvent,
 } from "../dashboardEventAdapter";
 import { DashboardGatewayClient } from "../dashboardGatewayClient";
+import {
+  useLiveSubagents,
+  type LiveSubagentSnapshot,
+} from "./useLiveSubagents";
 import { executeSlash, type SlashExecOutcome } from "../slashExec";
 import {
   dbItemsToChatMessages,
@@ -155,6 +159,7 @@ interface UseDashboardChatTransportResult {
   hasDetachedTurn: boolean;
   /** True while this chat holds a pending command approval (issue #90). */
   hasPendingApproval: boolean;
+  hasActiveSubagents: boolean;
   /** Catch the chat up after its transport was torn down mid-turn (issue
    *  #76): reconnect, resume the stored session (re-attaching the event
    *  stream of a still-running agent), and reconcile the transcript with
@@ -1089,6 +1094,7 @@ export function useDashboardChatTransport({
   // immediately. Reset on connection change (see the effect below).
   const dashboardUnavailableRef = useRef(false);
   const runtimeSessionIdRef = useRef<string | null>(null);
+  const sessionBindingGenerationRef = useRef(0);
   const storedSessionIdRef = useRef<string | null>(hermesSessionId);
   const reasoningSegmentClosedRef = useRef(false);
   const appliedModelRef = useRef<string | null>(null);
@@ -1252,6 +1258,7 @@ export function useDashboardChatTransport({
 
   useEffect(() => {
     if (hermesSessionId === storedSessionIdRef.current) return;
+    sessionBindingGenerationRef.current += 1;
     expirePendingApprovalsRef.current();
     storedSessionIdRef.current = hermesSessionId;
     runtimeSessionIdRef.current = null;
@@ -1328,8 +1335,13 @@ export function useDashboardChatTransport({
   // is declared later in the hook.
   const resyncAfterDetachRef = useRef<() => Promise<void>>(async () => {});
   const probeRestoreAfterDrop = useCallback((): void => {
+    const generation = clientGenerationRef.current;
     window.setTimeout(() => {
-      if (detachedSessionIdRef.current) void resyncAfterDetachRef.current();
+      if (
+        clientGenerationRef.current === generation &&
+        detachedSessionIdRef.current
+      )
+        void resyncAfterDetachRef.current();
     }, 1500);
   }, []);
   const probeRestoreAfterDropRef = useRef(probeRestoreAfterDrop);
@@ -1845,7 +1857,7 @@ export function useDashboardChatTransport({
     [activeTurnRef, messagesRef, setIsLoading],
   );
 
-  const ensureRuntimeSession = useCallback(
+  const resolveRuntimeSession = useCallback(
     async (
       client: DashboardGatewayClient,
       options: {
@@ -1853,11 +1865,28 @@ export function useDashboardChatTransport({
         forceCreate?: boolean;
       } = {},
     ): Promise<string> => {
+      const generation = sessionBindingGenerationRef.current;
+      const stored = storedSessionIdRef.current;
+      const checkBinding = (): void => {
+        if (
+          clientRef.current !== client ||
+          !client.connected ||
+          sessionBindingGenerationRef.current !== generation ||
+          storedSessionIdRef.current !== stored
+        )
+          throw new Error("Hermes dashboard session binding was superseded");
+      };
+      if (options.forceCreate && runtimeSessionIdRef.current) {
+        await client
+          .request("session.close", { session_id: runtimeSessionIdRef.current })
+          .catch(() => undefined);
+        checkBinding();
+        runtimeSessionIdRef.current = null;
+      }
       let targetSessionId = runtimeSessionIdRef.current;
       let justCreated = false;
 
       if (!targetSessionId) {
-        const stored = storedSessionIdRef.current;
         const excludeSeedUserId =
           options.excludeSeedUserId ?? activeTurnRef.current?.userId ?? null;
         const response = await ensureDashboardRuntimeSession({
@@ -1869,6 +1898,7 @@ export function useDashboardChatTransport({
           profile,
           storedSessionId: stored,
         });
+        checkBinding();
         const recordRuntimeInfo = window.hermesAPI.recordAgentRuntimeInfo;
         if (typeof recordRuntimeInfo === "function") {
           void recordRuntimeInfo(response.info, profile, connectionId).catch(
@@ -1927,7 +1957,7 @@ export function useDashboardChatTransport({
         }
         const storedId = response.storedSessionId;
         storedSessionIdRef.current = storedId;
-        recreateRuntimeSessionRef.current = false;
+        if (options.forceCreate) recreateRuntimeSessionRef.current = false;
         setHermesSessionId(storedId);
         // Restore the persisted per-session approval bypass (issue #115):
         // the backend keeps it in process memory only, so after an app
@@ -1999,10 +2029,102 @@ export function useDashboardChatTransport({
     ],
   );
 
+  const runtimeBindingRef = useRef<{
+    client: DashboardGatewayClient;
+    storedSessionId: string | null;
+    generation: number;
+    forceCreate: boolean;
+    promise: Promise<string>;
+  } | null>(null);
+  const ensureRuntimeSession = useCallback(
+    (
+      client: DashboardGatewayClient,
+      options: {
+        excludeSeedUserId?: string | null;
+        forceCreate?: boolean;
+      } = {},
+    ): Promise<string> => {
+      // The roster probe and a user send can both reach a cold resume.
+      const storedSessionId = storedSessionIdRef.current;
+      const generation = sessionBindingGenerationRef.current;
+      const pending = runtimeBindingRef.current;
+      const matching =
+        pending?.client === client &&
+        pending.storedSessionId === storedSessionId &&
+        pending.generation === generation;
+      if (matching && (!options.forceCreate || pending.forceCreate)) {
+        return pending.promise;
+      }
+      // A forced recovery cannot inherit an ordinary roster resume. Wait for
+      // that binding, then close it and create the clean continuation runtime.
+      const promise = matching
+        ? pending.promise
+            .catch(() => undefined)
+            .then(() => {
+              if (
+                clientRef.current !== client ||
+                !client.connected ||
+                storedSessionIdRef.current !== storedSessionId ||
+                sessionBindingGenerationRef.current !== generation
+              ) {
+                throw new Error(
+                  "Hermes dashboard session binding was superseded",
+                );
+              }
+              return resolveRuntimeSession(client, options);
+            })
+        : resolveRuntimeSession(client, options);
+      const binding = {
+        client,
+        storedSessionId,
+        generation,
+        forceCreate: !!options.forceCreate,
+        promise,
+      };
+      runtimeBindingRef.current = binding;
+      void promise
+        .finally(() => {
+          if (runtimeBindingRef.current === binding)
+            runtimeBindingRef.current = null;
+        })
+        .catch(() => undefined);
+      return promise;
+    },
+    [resolveRuntimeSession],
+  );
+
+  const hasActiveSubagents = useLiveSubagents(
+    JSON.stringify([
+      connectionId,
+      profile,
+      connectionRevision,
+      hermesSessionId,
+    ]),
+    enabled && !!hermesSessionId,
+    async (): Promise<LiveSubagentSnapshot> => {
+      const client = await ensureClient();
+      const sessionId = await ensureRuntimeSession(client);
+      const snapshot = await client.request<LiveSubagentSnapshot>(
+        "subagent.list",
+        {
+          session_id: sessionId,
+        },
+      );
+      if (
+        clientRef.current !== client ||
+        !client.connected ||
+        runtimeSessionIdRef.current !== sessionId
+      ) {
+        throw new Error("Hermes subagent roster binding was superseded");
+      }
+      return snapshot;
+    },
+  );
+
   // Eagerly resume a chat whose persisted approval bypass is ON (issue #115):
   // opening the chat (not just sending a message) must light the shield and
-  // re-apply the flag to the fresh backend. Nothing else on chat open calls
-  // ensureRuntimeSession, and the restore inside it is the authoritative point.
+  // re-apply the flag to the fresh backend. The roster also resumes stored
+  // chats on open; ensureRuntimeSession is the authoritative restore point.
   const sessionYoloEagerRestoredRef = useRef<string | null>(null);
   useEffect(() => {
     if (!enabled) return;
@@ -2961,6 +3083,8 @@ export function useDashboardChatTransport({
 
   useEffect(
     () => () => {
+      // Invalidate acquisitions still awaiting dashboard startup or connect.
+      clientGenerationRef.current += 1;
       expirePendingClarifyRef.current();
       expirePendingApprovalsRef.current();
       clientRef.current?.close();
@@ -3073,6 +3197,7 @@ export function useDashboardChatTransport({
     enabled,
     hasDetachedTurn: detachedSessionId !== null,
     hasPendingApproval,
+    hasActiveSubagents,
     resyncAfterDetach,
     sessionYolo,
     toggleSessionYolo,
