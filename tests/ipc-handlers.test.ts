@@ -40,6 +40,10 @@ const mainChannels = extractIpcHandleChannels(indexSrc);
 const preloadChannels = extractPreloadInvokeChannels(preloadSrc);
 
 describe("IPC Handler ↔ Preload Consistency", () => {
+  it("exposes the confirmed manual triage move in both processes", () => {
+    expect(mainChannels).toContain("kanban-move-to-todo-task");
+    expect(preloadChannels).toContain("kanban-move-to-todo-task");
+  });
   it("main process registers IPC handlers", () => {
     expect(mainChannels.length).toBeGreaterThan(30);
   });

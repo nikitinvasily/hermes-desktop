@@ -89,6 +89,10 @@ export default {
   blockReasonPrompt: "Reason for blocking?",
   confirmMarkDone: 'Mark "{{title}}" as done?',
   confirmArchive: 'Archive "{{title}}"?',
+  confirmTriageToTodo: 'Move "{{title}}" out of Triage?',
+  triageToTodoWarning:
+    "This may immediately move the task to Ready and start an agent if one is assigned. Its title and description will not be changed by AI.",
+  moveToTodoConfirm: "Move to To-do",
 
   // Errors
   moveNotAllowed:

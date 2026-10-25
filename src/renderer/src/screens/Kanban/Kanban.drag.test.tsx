@@ -37,6 +37,7 @@ function setup(status = "ready"): {
   complete: ReturnType<typeof vi.fn>;
   archive: ReturnType<typeof vi.fn>;
   schedule: ReturnType<typeof vi.fn>;
+  moveToTodo: ReturnType<typeof vi.fn>;
   listTasks: ReturnType<typeof vi.fn>;
 } {
   let current = [fixtureTask(status, "t_fixture")];
@@ -58,6 +59,10 @@ function setup(status = "ready"): {
     current = [fixtureTask("scheduled", "t_fixture")];
     return { success: true };
   });
+  const moveToTodo = vi.fn(async (): Promise<{ success: boolean }> => {
+    current = [fixtureTask("todo", "t_fixture")];
+    return { success: true };
+  });
   const listTasks = vi.fn(async () => ({ success: true, data: current }));
   Object.defineProperty(window, "hermesAPI", {
     configurable: true,
@@ -75,9 +80,10 @@ function setup(status = "ready"): {
       kanbanCompleteTask: complete,
       kanbanArchiveTask: archive,
       kanbanScheduleTask: schedule,
+      kanbanMoveToTodoTask: moveToTodo,
     },
   });
-  return { block, complete, archive, schedule, listTasks };
+  return { block, complete, archive, schedule, moveToTodo, listTasks };
 }
 
 async function dragTo(targetStatus: string): Promise<void> {
@@ -213,25 +219,47 @@ describe("Kanban drag transitions", () => {
     expect(archive).not.toHaveBeenCalled();
   });
 
-  it("shows why a triage card cannot be dropped into todo", async () => {
-    setup("triage");
+  it("warns before moving triage to todo, which can be dispatched automatically", async () => {
+    const { moveToTodo } = setup("triage");
     render(<Kanban profile="default" visible={false} />);
     await screen.findByText("Fixture t_fixture");
     await dragTo("todo");
-    await waitFor(() =>
-      expect(screen.getByText(/kanban.moveNotAllowed/)).toBeTruthy(),
-    );
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.textContent).toContain("kanban.triageToTodoWarning");
+    expect(moveToTodo).not.toHaveBeenCalled();
     expect(
       screen.getByText("Fixture t_fixture").closest(".kanban-column")
         ?.textContent,
     ).toContain("kanban.status.triage");
+    fireEvent.click(dialog.querySelector(".btn-primary")!);
+    await waitFor(() =>
+      expect(moveToTodo).toHaveBeenCalledWith("t_fixture", "default"),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByText("Fixture t_fixture").closest(".kanban-column")
+          ?.textContent,
+      ).toContain("kanban.status.todo"),
+    );
+  });
+
+  it("cancels triage to todo without writing a status", async () => {
+    const { moveToTodo } = setup("triage");
+    render(<Kanban profile="default" visible={false} />);
+    await screen.findByText("Fixture t_fixture");
+    await dragTo("todo");
+    fireEvent.click(
+      screen.getByRole("dialog").querySelector(".btn-secondary")!,
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(moveToTodo).not.toHaveBeenCalled();
   });
 
   it("keeps an invalid-move error visible across a silent background refresh", async () => {
     setup("triage");
     render(<Kanban profile="default" visible />);
     await screen.findByText("Fixture t_fixture");
-    await dragTo("todo");
+    await dragTo("running");
     expect(screen.getByText(/kanban.moveNotAllowed/)).toBeTruthy();
     await act(async () => {
       window.dispatchEvent(new Event("focus"));

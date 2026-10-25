@@ -3557,6 +3557,52 @@ export function buildRemoteHermesCmd(args: string[], extraShell = ""): string {
   return `sh -c ${shellQuote(script)}`;
 }
 
+// A fixed Desktop operation occasionally needs the agent's Python API rather
+// than a CLI verb. Probe only agent venvs; system python3 may not have Hermes.
+export function buildRemoteHermesPythonCmd(
+  source: string,
+  args: string[],
+): string {
+  const quotedArgs = args.map(shellQuote).join(" ");
+  const candidates = REMOTE_HERMES_CLI_CANDIDATES.filter((p) =>
+    p.includes("/hermes-agent/"),
+  ).map((p) => p.replace(/\/hermes$/, "/python"));
+  // Quote HOME as a variable and the suffix as a literal so paths with spaces
+  // still expand to the remote user's home without shell word splitting.
+  const quotePath = (p: string): string =>
+    p.startsWith("$HOME/")
+      ? `"$HOME"/${shellQuote(p.slice(6))}`
+      : shellQuote(p);
+  const probe = candidates
+    .map((p) => {
+      const agentRoot = p.replace(/\/\.?venv\/bin\/python$/, "");
+      return `if [ -x ${quotePath(p)} ]; then cd ${quotePath(agentRoot)} || exit 1; exec ${quotePath(p)} -c ${shellQuote(source)} ${quotedArgs}; fi`;
+    })
+    .join("; ");
+  return `sh -c ${shellQuote(`${probe}; echo "ERR: Hermes agent venv Python not found on SSH host" >&2; exit 1`)}`;
+}
+
+export async function sshRunKanbanPython<T>(
+  config: SshConfig,
+  source: string,
+  args: string[],
+): Promise<SshKanbanResult<T>> {
+  try {
+    const stdout = await sshExec(
+      config,
+      buildRemoteHermesPythonCmd(source, args),
+      undefined,
+      20000,
+    );
+    return { success: true, data: JSON.parse(stdout) as T };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : "Remote Kanban move failed",
+    };
+  }
+}
+
 export async function sshRunDoctor(config: SshConfig): Promise<string> {
   try {
     // `hermes doctor` writes diagnostics to stdout; redirect stderr too so

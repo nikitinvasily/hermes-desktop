@@ -116,12 +116,8 @@ const STATUS_TONE: Record<string, string> = Object.fromEntries(
   [...COLUMNS, ARCHIVED_COLUMN].map((c) => [c.key, c.tone]),
 );
 
-// The `hermes kanban` CLI verb a drag from one column to another maps to.
-// Unlike the web dashboard — which writes the status column directly into
-// kanban.db and can therefore move a card anywhere — the desktop shells the
-// CLI, which only exposes lifecycle verbs. So a drag is allowed only when the
-// target column corresponds to a verb. `todo`, `triage`, and `review` have no
-// CLI verb to set them and thus cannot be drop targets here.
+// A drag maps to a lifecycle verb or the dedicated manual Triage → To-do path.
+// Other direct status writes are unavailable in local/SSH mode.
 type DragAction =
   | "complete"
   | "block"
@@ -129,6 +125,7 @@ type DragAction =
   | "reclaim"
   | "promote"
   | "schedule"
+  | "moveToTodo"
   | "archive";
 
 function dragAction(from: string, to: string): DragAction | null {
@@ -151,8 +148,10 @@ function dragAction(from: string, to: string): DragAction | null {
       return null;
     case "scheduled":
       return ["todo", "ready", "blocked"].includes(from) ? "schedule" : null;
+    case "todo":
+      return from === "triage" ? "moveToTodo" : null;
     default:
-      // todo / triage / review — no CLI verb sets these.
+      // triage / review — no direct CLI verb sets these.
       return null;
   }
 }
@@ -248,7 +247,7 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
   const [pendingMove, setPendingMove] = useState<{
     task: KanbanTask;
     target: string;
-    kind: "block" | "complete" | "archive";
+    kind: "block" | "complete" | "archive" | "moveToTodo";
   } | null>(null);
   const [blockReason, setBlockReason] = useState("");
   const [showArchived, setShowArchived] = useState(false);
@@ -632,6 +631,9 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
             profile,
           );
           break;
+        case "moveToTodo":
+          res = await window.hermesAPI.kanbanMoveToTodoTask(task.id, profile);
+          break;
       }
       if (!res.success) {
         setError(res.error || t("kanban.errMoveTask"));
@@ -674,6 +676,8 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
     } else if (target === "blocked") {
       setBlockReason("");
       setPendingMove({ task, target, kind: "block" });
+    } else if (target === "todo" && task.status === "triage") {
+      setPendingMove({ task, target, kind: "moveToTodo" });
     } else {
       await handleMove(task, target);
     }
@@ -1109,12 +1113,16 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
             aria-label={
               pendingMove.kind === "block"
                 ? t("kanban.blockReasonPrompt")
-                : t(
-                    pendingMove.kind === "archive"
-                      ? "kanban.confirmArchive"
-                      : "kanban.confirmMarkDone",
-                    { title: pendingMove.task.title },
-                  )
+                : pendingMove.kind === "moveToTodo"
+                  ? t("kanban.confirmTriageToTodo", {
+                      title: pendingMove.task.title,
+                    })
+                  : t(
+                      pendingMove.kind === "archive"
+                        ? "kanban.confirmArchive"
+                        : "kanban.confirmMarkDone",
+                      { title: pendingMove.task.title },
+                    )
             }
             onClick={(e) => e.stopPropagation()}
           >
@@ -1122,12 +1130,16 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
               <span>
                 {pendingMove.kind === "block"
                   ? t("kanban.blockReasonPrompt")
-                  : t(
-                      pendingMove.kind === "archive"
-                        ? "kanban.confirmArchive"
-                        : "kanban.confirmMarkDone",
-                      { title: pendingMove.task.title },
-                    )}
+                  : pendingMove.kind === "moveToTodo"
+                    ? t("kanban.confirmTriageToTodo", {
+                        title: pendingMove.task.title,
+                      })
+                    : t(
+                        pendingMove.kind === "archive"
+                          ? "kanban.confirmArchive"
+                          : "kanban.confirmMarkDone",
+                        { title: pendingMove.task.title },
+                      )}
               </span>
               <button
                 className="btn-ghost"
@@ -1148,6 +1160,11 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
                 />
               </div>
             )}
+            {pendingMove.kind === "moveToTodo" && (
+              <div className="schedules-modal-body" role="alert">
+                {t("kanban.triageToTodoWarning")}
+              </div>
+            )}
             <div className="schedules-modal-footer">
               <button
                 className="btn btn-secondary"
@@ -1159,9 +1176,11 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
                 {t(
                   pendingMove.kind === "block"
                     ? "kanban.cardBlock"
-                    : pendingMove.kind === "archive"
-                      ? "kanban.cardArchive"
-                      : "kanban.cardMarkDone",
+                    : pendingMove.kind === "moveToTodo"
+                      ? "kanban.moveToTodoConfirm"
+                      : pendingMove.kind === "archive"
+                        ? "kanban.cardArchive"
+                        : "kanban.cardMarkDone",
                 )}
               </button>
             </div>
