@@ -16,7 +16,7 @@ Cards expose status-appropriate actions, each calling a `hermes kanban` verb via
 
 Card actions are specify (triage), mark-done (ready), reclaim (running), unblock (blocked), block (todo/ready), and archive (any).
 
-Drag-drop moves route through `dragAction(from, to)`, which maps a target column to the single `hermes kanban` verb that effects it: `done`→complete, `blocked`→block, `ready`→unblock|reclaim|promote (by source), `scheduled`→schedule, `archived`→archive ([[src/main/kanban.ts#promoteTask]], [[src/main/kanban.ts#scheduleTask]]). The web dashboard can move a card to *any* column because it writes the status field directly in `kanban.db`; the desktop only has CLI verbs, so `todo`, `triage`, and `review` have no verb to set them and are not drop targets. `dragAction` returning a verb is also the drag-validity gate (`isValidDragTransition`).
+Drag-drop maps only transitions supported by the agent's lifecycle verbs: `done`→complete, `blocked`→block, `ready`→unblock|reclaim|promote (by source), `scheduled`→schedule, `archived`→archive ([[src/main/kanban.ts#promoteTask]], [[src/main/kanban.ts#scheduleTask]]). The web dashboard can set more statuses through the plugin, but the desktop keeps one transition policy for local, SSH and HTTP. `todo`, `triage`, and `review` are not drop targets. An unsupported hover shows a reason; a permitted drop opens an in-app dialog for block reason or done/archive confirmation instead of calling Chromium's unsupported `prompt`/`confirm`. Mutations update the board only after the backend accepts them; failures leave the card in place and show the returned error.
 
 In-place editing of a live card's title/body/priority is unavailable — the CLI `edit` verb only backfills a result on already-`done` tasks.
 
@@ -24,7 +24,7 @@ In-place editing of a live card's title/body/priority is unavailable — the CLI
 
 The board stays current without a live event stream, using three refresh triggers instead.
 
-A 6-second poll (`POLL_INTERVAL_MS`) runs while the tab is visible, a `focus` / `visibilitychange` listener refetches whenever the user returns to the app, and every mutation handler calls `loadAll(true)` so a UI action reflects immediately rather than waiting for the next tick.
+A 6-second poll (`POLL_INTERVAL_MS`) runs while the tab is visible, a `focus` / `visibilitychange` listener refetches whenever the user returns to the app, and every mutation handler calls `loadAll(true)` so a UI action reflects immediately rather than waiting for the next tick. Loads carry an epoch: explicit reloads and writes invalidate older responses, while concurrent polls share the epoch so slow responses still paint. Silent refresh preserves a visible mutation error until the user dismisses it or performs a new action.
 
 Boards and tasks are per-connection data, so a fourth trigger comes from [[src/renderer/src/hooks/useConnectionChangeReload.ts#useConnectionChangeReload]]: switching the active connection (local ↔ remote/ssh) reloads the board, keeping the user's board choice; a slug missing on the new source falls back to the boards list's `is_current` entry.
 
@@ -49,6 +49,8 @@ It is a renderer-only mirror — selecting it routes reads to the remote store, 
 ## Remote plugin transport tests
 
 Unit tests for the remote adapter live in `tests/kanban-remote.test.ts`. They stub `remoteDashboardRequestJson` and assert routing and payload mapping.
+
+The renderer's drag-transition tests live in `src/renderer/src/screens/Kanban/Kanban.drag.test.tsx`. They cover the in-app block/confirmation dialogs, saved status refresh, backend rejection, and an unsupported drop.
 
 ### Routes every verb to the plugin API
 Each kanban IPC function in remote mode calls the matching plugin endpoint (boards CRUD + switch, /board flattened task list, task detail, create, PATCH status verbs, comments, specify, reclaim, dispatch) with the expected method and body.

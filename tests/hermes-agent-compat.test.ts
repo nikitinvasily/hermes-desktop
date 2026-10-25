@@ -219,7 +219,7 @@ mount_spa(app)
     );
   });
 
-  // @lat: [[provider-setup#Provider setup#Models live under each provider (OpenCode-style)#Transport-consistent attachment identity#Explicit endpoint ports]]
+  // @lat: [[provider-setup#Provider setup#Models live under each provider (OpenCode-style)#Model attachment dedup#Explicit endpoint ports]]
   itPython("preserves explicit endpoint ports in both runtimes", () => {
     const values = [
       "http://localhost:0/v1",

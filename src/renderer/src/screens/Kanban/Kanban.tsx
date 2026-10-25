@@ -244,6 +244,13 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
   >([]);
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
   const [dragOverCol, setDragOverCol] = useState<string | null>(null);
+  const inFlightMoveRef = useRef(false);
+  const [pendingMove, setPendingMove] = useState<{
+    task: KanbanTask;
+    target: string;
+    kind: "block" | "complete" | "archive";
+  } | null>(null);
+  const [blockReason, setBlockReason] = useState("");
   const [showArchived, setShowArchived] = useState(false);
 
   // When the Claw3D HQ virtual board is active we route reads to the
@@ -260,6 +267,8 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
   // that, respect the user's explicit choice (including switching back to
   // Default), and never re-jump them to HQ on subsequent refreshes.
   const autoDefaultedRef = useRef(false);
+  const loadGenerationRef = useRef(0);
+  const loadingGenerationRef = useRef(0);
 
   // Create task form
   const [newTitle, setNewTitle] = useState("");
@@ -281,7 +290,15 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
 
   const loadAll = useCallback(
     async (silent = false): Promise<void> => {
-      if (!silent) setLoading(true);
+      // Polls share an epoch, so a slow response can still paint while the
+      // next poll is pending. Explicit reloads and writes invalidate older data.
+      const generation = silent
+        ? loadGenerationRef.current
+        : ++loadGenerationRef.current;
+      if (!silent) {
+        loadingGenerationRef.current = generation;
+        setLoading(true);
+      }
       try {
         // Always refresh the real boards list, plus either the active real
         // board's tasks OR the Claw3D HQ tasks depending on which is selected.
@@ -301,6 +318,7 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
               }),
           window.hermesAPI.kanbanListClaw3dHqTasks(),
         ]);
+        if (generation !== loadGenerationRef.current) return;
         if (!boardsRes.success) {
           // Only the genuine unsupported-mode result (plain remote HTTP)
           // flips the "switch modes" screen. A real SSH-Kanban failure
@@ -334,7 +352,7 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
           autoDefaultedRef.current = true;
           setActiveBoardSlug(HQ_BOARD_SLUG);
           setTasks(hqTasks);
-          setError("");
+          if (!silent) setError("");
           return;
         }
         autoDefaultedRef.current = true;
@@ -348,11 +366,13 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
           }
           setTasks(tasksRes.data || []);
         }
-        setError("");
+        if (!silent) setError("");
       } catch (e) {
-        setError((e as Error).message);
+        if (generation === loadGenerationRef.current)
+          setError((e as Error).message);
       } finally {
-        if (!silent) setLoading(false);
+        if (!silent && generation === loadingGenerationRef.current)
+          setLoading(false);
       }
     },
     [profile, activeBoardSlug, showArchived, t],
@@ -552,7 +572,12 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
     loadAll();
   }
 
-  async function handleMove(task: KanbanTask, target: string): Promise<void> {
+  async function handleMove(
+    task: KanbanTask,
+    target: string,
+    reason?: string,
+  ): Promise<void> {
+    if (inFlightMoveRef.current) return;
     const action = dragAction(task.status, target);
     if (!action) {
       setError(
@@ -563,55 +588,66 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
       );
       return;
     }
+    inFlightMoveRef.current = true;
+    ++loadGenerationRef.current;
     setActionBusy(task.id);
-    let res: { success: boolean; error?: string };
-    switch (action) {
-      case "complete":
-        res = await window.hermesAPI.kanbanCompleteTask(
-          task.id,
-          undefined,
-          profile,
-        );
-        break;
-      case "archive":
-        res = await window.hermesAPI.kanbanArchiveTask(task.id, profile);
-        break;
-      case "block": {
-        const reason = window.prompt(t("kanban.blockReasonPrompt")) || "";
-        res = await window.hermesAPI.kanbanBlockTask(
-          task.id,
-          reason || undefined,
-          profile,
-        );
-        break;
+    try {
+      let res: { success: boolean; error?: string };
+      switch (action) {
+        case "complete":
+          res = await window.hermesAPI.kanbanCompleteTask(
+            task.id,
+            undefined,
+            profile,
+          );
+          break;
+        case "archive":
+          res = await window.hermesAPI.kanbanArchiveTask(task.id, profile);
+          break;
+        case "block": {
+          res = await window.hermesAPI.kanbanBlockTask(
+            task.id,
+            reason?.trim() || undefined,
+            profile,
+          );
+          break;
+        }
+        case "unblock":
+          res = await window.hermesAPI.kanbanUnblockTask(task.id, profile);
+          break;
+        case "reclaim":
+          res = await window.hermesAPI.kanbanReclaimTask(
+            task.id,
+            "reclaimed from desktop",
+            profile,
+          );
+          break;
+        case "promote":
+          res = await window.hermesAPI.kanbanPromoteTask(task.id, profile);
+          break;
+        case "schedule":
+          res = await window.hermesAPI.kanbanScheduleTask(
+            task.id,
+            undefined,
+            profile,
+          );
+          break;
       }
-      case "unblock":
-        res = await window.hermesAPI.kanbanUnblockTask(task.id, profile);
-        break;
-      case "reclaim":
-        res = await window.hermesAPI.kanbanReclaimTask(
-          task.id,
-          "reclaimed from desktop",
-          profile,
-        );
-        break;
-      case "promote":
-        res = await window.hermesAPI.kanbanPromoteTask(task.id, profile);
-        break;
-      case "schedule":
-        res = await window.hermesAPI.kanbanScheduleTask(
-          task.id,
-          undefined,
-          profile,
-        );
-        break;
+      if (!res.success) {
+        setError(res.error || t("kanban.errMoveTask"));
+        return;
+      }
+      if (target === "archived" && detailTaskId === task.id)
+        setDetailTaskId(null);
+      setError("");
+      ++loadGenerationRef.current;
+      await loadAll(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t("kanban.errMoveTask"));
+    } finally {
+      inFlightMoveRef.current = false;
+      setActionBusy(null);
     }
-    setActionBusy(null);
-    if (!res.success) {
-      setError(res.error || t("kanban.errMoveTask"));
-      return;
-    }
-    loadAll(true);
   }
 
   async function handleSpecify(task: KanbanTask): Promise<void> {
@@ -626,29 +662,33 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
   }
 
   async function handleDrop(task: KanbanTask, target: string): Promise<void> {
-    if (!isValidDragTransition(task.status, target)) return;
-    if (target === "done") {
-      if (!window.confirm(t("kanban.confirmMarkDone", { title: task.title })))
-        return;
-    } else if (target === "archived") {
-      if (!window.confirm(t("kanban.confirmArchive", { title: task.title })))
-        return;
+    if (inFlightMoveRef.current || pendingMove) return;
+    if (!isValidDragTransition(task.status, target)) {
+      if (task.status !== target) await handleMove(task, target);
+      return;
     }
-    await handleMove(task, target);
+    if (target === "done") {
+      setPendingMove({ task, target, kind: "complete" });
+    } else if (target === "archived") {
+      setPendingMove({ task, target, kind: "archive" });
+    } else if (target === "blocked") {
+      setBlockReason("");
+      setPendingMove({ task, target, kind: "block" });
+    } else {
+      await handleMove(task, target);
+    }
   }
 
-  async function handleArchive(task: KanbanTask): Promise<void> {
-    if (!window.confirm(t("kanban.confirmArchive", { title: task.title })))
-      return;
-    setActionBusy(task.id);
-    const res = await window.hermesAPI.kanbanArchiveTask(task.id, profile);
-    setActionBusy(null);
-    if (!res.success) {
-      setError(res.error || t("kanban.errArchive"));
-      return;
-    }
-    if (detailTaskId === task.id) setDetailTaskId(null);
-    loadAll(true);
+  function handleArchive(task: KanbanTask): void {
+    if (inFlightMoveRef.current) return;
+    setPendingMove({ task, target: "archived", kind: "archive" });
+  }
+
+  async function confirmPendingMove(): Promise<void> {
+    if (!pendingMove) return;
+    const { task, target, kind } = pendingMove;
+    setPendingMove(null);
+    await handleMove(task, target, kind === "block" ? blockReason : undefined);
   }
 
   async function handleReclaim(task: KanbanTask): Promise<void> {
@@ -840,10 +880,15 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
                   : ""
               }`}
               onDragOver={(e) => {
-                if (isHqActive || !canDropHere) return;
+                if (isHqActive || !draggingTask || inFlightMoveRef.current)
+                  return;
                 e.preventDefault();
-                e.dataTransfer.dropEffect = "move";
-                if (dragOverCol !== col.key) setDragOverCol(col.key);
+                e.dataTransfer.dropEffect = canDropHere ? "move" : "none";
+                if (dragOverCol !== col.key) {
+                  setDragOverCol(col.key);
+                  if (!canDropHere && draggingTask.status !== col.key)
+                    void handleMove(draggingTask, col.key);
+                }
               }}
               onDragLeave={(e) => {
                 if (e.currentTarget.contains(e.relatedTarget as Node)) return;
@@ -880,9 +925,12 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
                           ? " kanban-card-dragging"
                           : ""
                       }${isHqActive ? " kanban-card-readonly" : ""}`}
-                      draggable={!isHqActive}
+                      draggable={!isHqActive && actionBusy === null}
                       onDragStart={(e) => {
-                        if (isHqActive) return;
+                        if (isHqActive || inFlightMoveRef.current) {
+                          e.preventDefault();
+                          return;
+                        }
                         e.dataTransfer.effectAllowed = "move";
                         e.dataTransfer.setData("text/plain", task.id);
                         setDraggingTaskId(task.id);
@@ -1018,7 +1066,7 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
                               title={t("kanban.cardBlock")}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleMove(task, "blocked");
+                                handleDrop(task, "blocked");
                               }}
                               disabled={actionBusy === task.id}
                             >
@@ -1048,6 +1096,78 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
           );
         })}
       </div>
+
+      {pendingMove && (
+        <div
+          className="skills-detail-overlay"
+          onClick={() => setPendingMove(null)}
+        >
+          <div
+            className="schedules-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label={
+              pendingMove.kind === "block"
+                ? t("kanban.blockReasonPrompt")
+                : t(
+                    pendingMove.kind === "archive"
+                      ? "kanban.confirmArchive"
+                      : "kanban.confirmMarkDone",
+                    { title: pendingMove.task.title },
+                  )
+            }
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="schedules-modal-header">
+              <span>
+                {pendingMove.kind === "block"
+                  ? t("kanban.blockReasonPrompt")
+                  : t(
+                      pendingMove.kind === "archive"
+                        ? "kanban.confirmArchive"
+                        : "kanban.confirmMarkDone",
+                      { title: pendingMove.task.title },
+                    )}
+              </span>
+              <button
+                className="btn-ghost"
+                onClick={() => setPendingMove(null)}
+                aria-label={t("common.cancel")}
+              >
+                <X size={14} />
+              </button>
+            </div>
+            {pendingMove.kind === "block" && (
+              <div className="schedules-modal-body">
+                <input
+                  className="input"
+                  aria-label={t("kanban.blockReasonPrompt")}
+                  value={blockReason}
+                  onChange={(e) => setBlockReason(e.target.value)}
+                  autoFocus
+                />
+              </div>
+            )}
+            <div className="schedules-modal-footer">
+              <button
+                className="btn btn-secondary"
+                onClick={() => setPendingMove(null)}
+              >
+                {t("common.cancel")}
+              </button>
+              <button className="btn btn-primary" onClick={confirmPendingMove}>
+                {t(
+                  pendingMove.kind === "block"
+                    ? "kanban.cardBlock"
+                    : pendingMove.kind === "archive"
+                      ? "kanban.cardArchive"
+                      : "kanban.cardMarkDone",
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showCreate && (
         <div
