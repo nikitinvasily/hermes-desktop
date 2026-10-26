@@ -7,6 +7,7 @@ This directory defines the high-level concepts, business logic, and architecture
 - [[chat-envelopes]] — how machine-authored bracketed envelopes (async delegation, out-of-band steers, system notes) render as notices instead of raw bubbles.
 - [[chat-input]] — the unified chat composer surface and its theme-aware animated border treatment.
 - [[chat-performance]] — how chat rendering stays responsive through contained transcript rows, batched textarea resizing, and fixed-row slash-command virtualization.
+- [[chat-search]] — active-chat message search, rendered Markdown/code highlights, keyboard navigation and bounded historical reveal.
 - [[chat-experience-preferences]] — user-message Markdown plus persisted completion-sound and native multi-language spell-check preferences.
 - [[model-context]] — the per-model context-window override that drives the context gauge and the agent's auto-compaction.
 - [[model-selection]] — the session-scoped in-chat model override that switches the model (and provider) for one conversation without touching the global default.

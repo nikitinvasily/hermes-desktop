@@ -112,6 +112,157 @@ function renderList(messages: ChatMessage[]): ReturnType<typeof render> {
 }
 
 describe("MessageList windowing", () => {
+  it("does not auto-expand a search with no selected result", () => {
+    const observed = vi.fn();
+    class ObserverStub {
+      observe(): void {
+        observed();
+      }
+      disconnect(): void {
+        // No active observer is retained by this observation-only stub.
+      }
+    }
+    vi.stubGlobal("IntersectionObserver", ObserverStub);
+    const messages = Array.from(
+      { length: 1000 },
+      (_, index): ChatMessage => bubble(`nohit${index}`),
+    );
+    const show = (searchOpen: boolean): React.JSX.Element => (
+      <div className="chat-messages">
+        <MessageList
+          {...{ searchOpen }}
+          messages={messages}
+          isLoading={false}
+          toolProgress={null}
+          onApprove={vi.fn()}
+          onDeny={vi.fn()}
+          onClarifyResolved={vi.fn()}
+          onApprovalRespond={vi.fn()}
+          onApprovalResolved={vi.fn()}
+        />
+      </div>
+    );
+    try {
+      const { rerender } = render(show(true));
+      expect(screen.getAllByTestId("bubble")).toHaveLength(TRANSCRIPT_WINDOW);
+      expect(observed).not.toHaveBeenCalled();
+      rerender(show(false));
+      expect(observed).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("retains the search window through no hits without changing the prior history budget", () => {
+    const messages = Array.from(
+      { length: 1000 },
+      (_, i): ChatMessage => bubble(`stable${i}`),
+    );
+    const show = (
+      searchOpen: boolean,
+      searchMessageId?: string,
+    ): React.JSX.Element => (
+      <div className="chat-messages">
+        <MessageList
+          {...{ searchOpen, searchMessageId }}
+          messages={messages}
+          isLoading={false}
+          toolProgress={null}
+          onApprove={vi.fn()}
+          onDeny={vi.fn()}
+          onClarifyResolved={vi.fn()}
+          onApprovalRespond={vi.fn()}
+          onApprovalResolved={vi.fn()}
+        />
+      </div>
+    );
+    const { container, rerender } = render(show(false));
+    fireEvent.click(screen.getByRole("button"));
+    expect(screen.getAllByTestId("bubble")).toHaveLength(200);
+    rerender(show(true, "stable10"));
+    expect(screen.getAllByTestId("bubble")).toHaveLength(100);
+    rerender(show(true));
+    expect(screen.queryByText("stable10")).not.toBeNull();
+    expect(screen.getAllByTestId("bubble")).toHaveLength(100);
+    const scroll = container.firstElementChild as HTMLElement;
+    Object.defineProperties(scroll, {
+      scrollHeight: { value: 1000 },
+      clientHeight: { value: 200 },
+    });
+    fireEvent.scroll(scroll);
+    rerender(show(false));
+    expect(screen.getAllByTestId("bubble")).toHaveLength(200);
+    expect(screen.queryByText("stable999")).not.toBeNull();
+  });
+
+  it("keeps pending interactions mounted outside the focused search window", () => {
+    const messages: ChatMessage[] = [
+      ...Array.from(
+        { length: 400 },
+        (_, index): ChatMessage => bubble(`m${index}`),
+      ),
+      {
+        id: "pending-search",
+        kind: "clarify",
+        role: "agent",
+        requestId: "request",
+        question: "Continue?",
+        choices: [],
+        resolved: false,
+      },
+    ];
+    render(
+      <MessageList
+        messages={messages}
+        searchMessageId="m2"
+        isLoading={false}
+        toolProgress={null}
+        onApprove={vi.fn()}
+        onDeny={vi.fn()}
+        onClarifyResolved={vi.fn()}
+        onApprovalRespond={vi.fn()}
+        onApprovalResolved={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText("m2")).not.toBeNull();
+    expect(screen.queryByTestId("clarify")).not.toBeNull();
+    expect(screen.getAllByTestId("bubble").length).toBeLessThanOrEqual(
+      TRANSCRIPT_WINDOW,
+    );
+  });
+
+  it("reveals an old search target in a bounded window and restores the tail on close", () => {
+    const messages = Array.from(
+      { length: 1000 },
+      (_, i): ChatMessage => bubble(`search${i}`),
+    );
+    const show = (searchMessageId?: string): React.JSX.Element => (
+      <MessageList
+        {...{ searchMessageId }}
+        messages={messages}
+        isLoading={false}
+        toolProgress={null}
+        onApprove={vi.fn()}
+        onDeny={vi.fn()}
+        onClarifyResolved={vi.fn()}
+        onApprovalRespond={vi.fn()}
+        onApprovalResolved={vi.fn()}
+      />
+    );
+    const { rerender } = render(show("search10"));
+    expect(screen.queryByText("search10")).not.toBeNull();
+    expect(screen.getAllByTestId("bubble").length).toBeLessThanOrEqual(
+      TRANSCRIPT_WINDOW,
+    );
+    rerender(show("search800"));
+    expect(screen.queryByText("search800")).not.toBeNull();
+    expect(screen.getAllByTestId("bubble").length).toBeLessThanOrEqual(
+      TRANSCRIPT_WINDOW,
+    );
+    rerender(show());
+    expect(screen.queryByText("search800")).toBeNull();
+    expect(screen.queryByText("search999")).not.toBeNull();
+  });
   // @lat: [[chat-performance#Chat message-list rendering performance#Transcript windowing#Pending interaction visibility]]
   it.each(["approval", "clarify"] as const)(
     "retains a pending %s before the trailing window",

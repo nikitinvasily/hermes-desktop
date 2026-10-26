@@ -193,6 +193,7 @@ export const AvatarSpacer = memo(function AvatarSpacer(): React.JSX.Element {
 
 interface MessageRowProps {
   msg: ChatMessage;
+  searchActive?: boolean;
   isLast: boolean;
   isLoading: boolean;
   onApprove: () => void;
@@ -212,6 +213,7 @@ export const MessageRow = memo(function MessageRow({
   onDeny,
   showAvatar = true,
   agent,
+  searchActive = false,
 }: MessageRowProps): React.JSX.Element | null {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
@@ -355,7 +357,8 @@ export const MessageRow = memo(function MessageRow({
 
   return (
     <div
-      className={`chat-message chat-message-${msg.role}${
+      data-chat-message-id={msg.id}
+      className={`chat-message chat-message-${msg.role}${searchActive ? " chat-message-search-target" : ""}${
         showAvatar ? "" : " chat-message--grouped"
       }`}
     >
@@ -412,7 +415,10 @@ export const MessageRow = memo(function MessageRow({
                     // every subsequent index, which would otherwise re-mount
                     // each downstream MediaSegmentView and re-fire its
                     // `mediaFileExists` probe.
-                    <AgentMarkdown key={`t-${segment.start}`}>
+                    <AgentMarkdown
+                      key={`t-${segment.start}`}
+                      searchActive={searchActive}
+                    >
                       {segment.value}
                     </AgentMarkdown>
                   ) : null
@@ -436,7 +442,10 @@ export const MessageRow = memo(function MessageRow({
                   segments.map((segment) =>
                     segment.type === "text" ? (
                       segment.value.trim() ? (
-                        <AgentMarkdown key={`t-${segment.start}`}>
+                        <AgentMarkdown
+                          key={`t-${segment.start}`}
+                          searchActive={searchActive}
+                        >
                           {segment.value}
                         </AgentMarkdown>
                       ) : null
@@ -455,7 +464,9 @@ export const MessageRow = memo(function MessageRow({
                     ),
                   )
                 ) : (
-                  <AgentMarkdown>{bubbleContent ?? msg.content}</AgentMarkdown>
+                  <AgentMarkdown searchActive={searchActive}>
+                    {bubbleContent ?? msg.content}
+                  </AgentMarkdown>
                 )}
               </div>
             ) : (

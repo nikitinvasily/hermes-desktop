@@ -5423,6 +5423,75 @@ body:has(.shell-vibrant),
   min-width: 0;
 }
 
+.chat-message-search {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--border-primary);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.chat-message-search input {
+  min-width: 0;
+  width: 240px;
+  flex: 0 1 240px;
+  max-width: 240px;
+  padding: 4px 8px;
+  font-size: 12px;
+  line-height: 18px;
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.chat-message-search [role="status"] {
+  white-space: nowrap;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-message-search button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.chat-message-search button:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.chat-message-search button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.chat-message.chat-message-search-target {
+  content-visibility: visible;
+}
+
+::highlight(chat-message-search) {
+  background-color: color-mix(in srgb, var(--accent) 35%, var(--bg-primary));
+  color: var(--text-primary);
+}
+
+::highlight(chat-message-search-current) {
+  background-color: var(--accent);
+  color: var(--bg-primary);
+  text-decoration: underline;
+}
+
 .chat-messages {
   flex: 1;
   overflow-y: auto;
@@ -6018,6 +6087,8 @@ body:has(.shell-vibrant),
 
 /* Diff view */
 .chat-diff-content {
+  /* Keep textual separators for search offsets, not anonymous layout lines. */
+  white-space: normal;
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.5;

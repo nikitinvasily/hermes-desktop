@@ -8,18 +8,25 @@ import type { ChatMessage } from "../types";
  * - Re-engages auto-scroll when a new user message is sent.
  * - Exposes the container ref and a bottom sentinel ref to be placed in JSX.
  */
-export function useChatScroll(messages: ChatMessage[]): {
+export function useChatScroll(
+  messages: ChatMessage[],
+  paused = false,
+  externalContainerRef?: React.RefObject<HTMLDivElement | null>,
+): {
   containerRef: React.RefObject<HTMLDivElement | null>;
   bottomRef: React.RefObject<HTMLDivElement | null>;
 } {
-  const containerRef = useRef<HTMLDivElement>(null);
+  const internalContainerRef = useRef<HTMLDivElement>(null);
+  const containerRef = externalContainerRef ?? internalContainerRef;
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
   const bottomRef = useRef<HTMLDivElement>(null);
   const userScrolledUpRef = useRef(false);
   const prevMessageCountRef = useRef(messages.length);
   const initialScrollDoneRef = useRef(false);
 
   const scrollToBottom = useCallback((force?: boolean, instant?: boolean) => {
-    if (!force && userScrolledUpRef.current) return;
+    if (pausedRef.current || (!force && userScrolledUpRef.current)) return;
     bottomRef.current?.scrollIntoView({
       behavior: instant ? "auto" : "smooth",
     });
@@ -36,12 +43,13 @@ export function useChatScroll(messages: ChatMessage[]): {
     }
     container.addEventListener("scroll", handleScroll, { passive: true });
     return () => container.removeEventListener("scroll", handleScroll);
-  }, []);
+  }, [containerRef]);
 
   // Auto-scroll on incoming messages; force-scroll when user sends a new one
   useEffect(() => {
     const prevCount = prevMessageCountRef.current;
     prevMessageCountRef.current = messages.length;
+    if (pausedRef.current) return;
     // History (re)load — first non-empty paint of a transcript: jump to the
     // bottom instantly. A smooth multi-frame scroll from the top races the
     // transcript windowing's auto-expand observer (the top marker is still in
