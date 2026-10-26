@@ -40,6 +40,12 @@ import ArchiveDialog, { type ArchiveFilter } from "./ArchiveDialog";
 import ProjectDialog, { type ProjectDialogState } from "./ProjectDialog";
 import type { ProjectInfo } from "../../../../shared/projects";
 
+import {
+  markSessionViewed,
+  SESSION_READ_EVENT,
+  type SessionReadChange,
+} from "./sessionReadState";
+
 interface RecentSession {
   id: string;
   title: string;
@@ -433,6 +439,43 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   // Pending delete confirmation (small inline dialog in a portal-free overlay).
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [pendingReads, setPendingReads] = useState<Set<string>>(new Set());
+  const [readRefresh, setReadRefresh] = useState(0);
+  // Fence list replies taken before a read write settled (including failures).
+  const readRevision = useRef(0);
+  useEffect(() => {
+    const onRead = (event: Event): void => {
+      const change = (event as CustomEvent<SessionReadChange>).detail;
+      if (
+        change.connectionId !== connectionId ||
+        change.profile !== activeProfile
+      )
+        return;
+      readRevision.current += 1;
+      setPendingReads((prev) => {
+        const next = new Set(prev);
+        if (change.phase === "pending") next.add(change.sessionId);
+        else next.delete(change.sessionId);
+        return next;
+      });
+      if (change.phase !== "settled") return;
+      if (change.committed) {
+        const clear = (rows: RecentSession[]): RecentSession[] =>
+          rows.map((row) =>
+            row.id === change.sessionId ? { ...row, unread: false } : row,
+          );
+        setSessions(clear);
+        setProjectGroupSessions((prev) =>
+          Object.fromEntries(
+            Object.entries(prev).map(([folder, rows]) => [folder, clear(rows)]),
+          ),
+        );
+      }
+      setReadRefresh((n) => n + 1);
+    };
+    window.addEventListener(SESSION_READ_EVENT, onRead);
+    return () => window.removeEventListener(SESSION_READ_EVENT, onRead);
+  }, [connectionId, activeProfile]);
   const lastRefreshRef = useRef(0);
   const sessionsRef = useRef<RecentSession[]>([]);
   const hasMoreRef = useRef(false);
@@ -594,6 +637,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
       const now = Date.now();
       if (!force && now - lastRefreshRef.current < REFRESH_THROTTLE_MS) return;
       lastRefreshRef.current = now;
+      const revision = readRevision.current;
       try {
         const synced = await window.hermesAPI.syncSessionCache(
           connectionId,
@@ -602,7 +646,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
           // shrink it (remote). Local ignores the extra arg (full set).
           syncWindowRows(sessionsRef.current.length),
         );
-        applyLoadedWindow(synced);
+        if (revision === readRevision.current) applyLoadedWindow(synced);
       } catch {
         // keep whatever we had — the list is best-effort UI sugar
       }
@@ -610,10 +654,15 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     [activeProfile, applyLoadedWindow, connectionId],
   );
 
+  useEffect(() => {
+    if (open && readRefresh > 0) void refresh(true);
+  }, [open, readRefresh, refresh]);
+
   const loadNextPage = useCallback(async (): Promise<void> => {
     if (!open || !hasMoreRef.current || loadingMoreRef.current) return;
     loadingMoreRef.current = true;
     setLoadingMore(true);
+    const revision = readRevision.current;
     try {
       const nextPage = await window.hermesAPI.listCachedSessions(
         RECENT_SESSIONS_PAGE_SIZE + 1,
@@ -621,6 +670,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         connectionId,
         activeProfile,
       );
+      if (revision !== readRevision.current) return;
       const appended = appendPage(nextPage);
       // End-detection for the recency-reorder race (backlog #92, kin to
       // #71): a FULL page that appended nothing means recency shifted rows
@@ -656,6 +706,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
+    const revision = readRevision.current;
     void (async () => {
       try {
         const cached = await window.hermesAPI.listCachedSessions(
@@ -666,7 +717,8 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
           connectionId,
           activeProfile,
         );
-        if (!cancelled) applyFirstPage(cached);
+        if (!cancelled && revision === readRevision.current)
+          applyFirstPage(cached);
       } catch {
         /* ignore cache read errors */
       }
@@ -676,7 +728,8 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
           connectionId,
           activeProfile,
         );
-        if (!cancelled) applyFirstPage(synced);
+        if (!cancelled && revision === readRevision.current)
+          applyFirstPage(synced);
       } catch {
         // cache read above already painted something
       }
@@ -774,10 +827,11 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
+    const revision = readRevision.current;
     void window.hermesAPI
       .listProjectGroupSessions(connectionId, activeProfile)
       .then((groups) => {
-        if (cancelled) return;
+        if (cancelled || revision !== readRevision.current) return;
         // Key every row by its own (binding-merged) folder, not the tree
         // node's folder: the main side re-homes rows per desktop bindings
         // (issue #66), so a moved chat must leave the original project's
@@ -792,6 +846,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
               contextFolder: rowFolder,
               startedAt: s.startedAt,
               lastActivityAt: s.lastActivityAt,
+              unread: s.unread === true,
               source: s.source,
               sessionKey: s.sessionKey,
             });
@@ -808,7 +863,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     return () => {
       cancelled = true;
     };
-  }, [open, connectionId, activeProfile, resyncNonce]);
+  }, [open, connectionId, activeProfile, resyncNonce, readRefresh]);
 
   // Load the agent's project list (issue #27) — same triggers as the names
   // map, plus an explicit refresh() after mutations. The registry read gives
@@ -1430,7 +1485,11 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
       : resumingSessionId === s.id || loadingSessionIds.has(s.id);
     const awaitingApproval = approvalSessionIds.has(s.id);
     const waitingSubagents = subagentSessionIds?.has(s.id) === true;
-    const unread = s.unread === true && !loading && !awaitingApproval;
+    const unread =
+      s.unread === true &&
+      !pendingReads.has(s.id) &&
+      !loading &&
+      !awaitingApproval;
     // The active highlight persists while the agent works (loading) — the
     // spinner already signals activity, dropping the highlight made the
     // current chat look unfocused on every command run (issue #72).
@@ -1482,6 +1541,15 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
       );
     }
 
+    const activate = (): void => {
+      if (isPending) {
+        onActivatePending?.(s.pendingRunId!);
+        return;
+      }
+      if (s.unread) void markSessionViewed(s.id, connectionId, activeProfile);
+      onSelect(s.id);
+    };
+
     // `div role=button` (not <button>) so the trailing "options" control can be
     // a real nested button without invalid button-in-button markup.
     return (
@@ -1492,33 +1560,11 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         className={`sidebar-recent-session ${project ? "project-child" : ""} ${
           active ? "active" : ""
         } ${menuOpen ? "menu-open" : ""}`}
-        onClick={() => {
-          if (isPending) {
-            onActivatePending?.(s.pendingRunId!);
-            return;
-          }
-          // Read-state bullet (issue #90): opening a session marks it read —
-          // optimistic local clear plus the durable watermark write.
-          if (s.unread) {
-            setSessions((prev) =>
-              prev.map((row) =>
-                row.id === s.id ? { ...row, unread: false } : row,
-              ),
-            );
-            void window.hermesAPI
-              .markSessionRead(s.id, connectionId, activeProfile)
-              .catch(() => undefined);
-          }
-          onSelect(s.id);
-        }}
+        onClick={activate}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            if (isPending) {
-              onActivatePending?.(s.pendingRunId!);
-            } else {
-              onSelect(s.id);
-            }
+            activate();
           }
         }}
         onContextMenu={(e) => {

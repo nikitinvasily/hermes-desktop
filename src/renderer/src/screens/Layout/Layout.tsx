@@ -25,6 +25,7 @@ import Agents from "../Agents/Agents";
 import Discover from "../Discover/Discover";
 import ProfileSwitcher from "./ProfileSwitcher";
 import SidebarRecentSessions from "./SidebarRecentSessions";
+import { markSessionViewed } from "./sessionReadState";
 import Skills from "../Skills/Skills";
 import Memory from "../Memory/Memory";
 import Tools from "../Tools/Tools";
@@ -288,6 +289,8 @@ function Layout({
   runsRef.current = runs;
   const activeRunIdRef = useRef(activeRunId);
   activeRunIdRef.current = activeRunId;
+  const visibleScopeRef = useRef({ view, connectionId, activeProfile });
+  visibleScopeRef.current = { view, connectionId, activeProfile };
   const sidebarChatScrollRef = useRef<HTMLDivElement | null>(null);
   const sidebarScrollbarHideRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -460,24 +463,57 @@ function Layout({
     [profileAppearance],
   );
 
+  // A mounted run can become visible without a sidebar click (shortcuts,
+  // connection/profile restoration, or returning from a utility screen).
+  // @lat: [[sidebar-navigation#Session read lifecycle]]
+  useEffect(() => {
+    if (view !== "chat") return;
+    const run = runsRef.current.find((r) => r.runId === activeRunId);
+    if (
+      run?.sessionId &&
+      run.connectionId === connectionId &&
+      run.profile === activeProfile
+    ) {
+      void markSessionViewed(run.sessionId, run.connectionId, run.profile);
+    }
+  }, [activeRunId, currentSessionId, view, connectionId, activeProfile]);
+
   // Per-run reporters wired into each <Chat>.
   const handleRunLoading = useCallback((runId: string, loading: boolean) => {
-    setRuns((prev) => patchRun(prev, runId, { loading }));
-    if (loading) return;
-    // Read-state bullet (issue #90): a finished turn in the VISIBLE chat means
-    // the user just saw the result — stamp the read watermark so the session
-    // does not light up as unread behind their back. Background runs keep
-    // their unread signal (the whole point of the bullet).
     const run = runsRef.current.find((r) => r.runId === runId);
-    if (run?.sessionId && run.runId === activeRunIdRef.current) {
-      void window.hermesAPI
-        .markSessionRead(run.sessionId, run.connectionId, run.profile)
-        .catch(() => undefined);
+    setRuns((prev) => patchRun(prev, runId, { loading }));
+    if (loading || !run?.loading) return;
+    const refresh = (): void => {
+      window.dispatchEvent(new CustomEvent("hermes-sessions-maybe-changed"));
+    };
+    const scope = visibleScopeRef.current;
+    if (
+      run.sessionId &&
+      run.runId === activeRunIdRef.current &&
+      scope.view === "chat" &&
+      run.connectionId === scope.connectionId &&
+      run.profile === scope.activeProfile
+    ) {
+      // The refresh must observe the completed write, not its stale snapshot.
+      void markSessionViewed(
+        run.sessionId,
+        run.connectionId,
+        run.profile,
+        (): boolean => {
+          const current = visibleScopeRef.current;
+          return (
+            activeRunIdRef.current === runId &&
+            current.view === "chat" &&
+            current.connectionId === run.connectionId &&
+            current.activeProfile === run.profile
+          );
+        },
+      ).then(refresh);
+    } else {
+      // Hidden completions remain unread, even when their run is selected
+      // behind a utility pane.
+      refresh();
     }
-    // A finished turn may also leave its session unread (background) or
-    // newly active — nudge the sidebar to re-sync instead of waiting for
-    // its 60s interval.
-    window.dispatchEvent(new CustomEvent("hermes-sessions-maybe-changed"));
   }, []);
   // Sidebar approval bullet (issue #90): lift the transport's pending
   // approval flag onto the run; guard so an unchanged flag doesn't re-render.

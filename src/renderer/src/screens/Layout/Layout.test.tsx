@@ -38,6 +38,9 @@ vi.mock("../Chat/Chat", () => ({
       <button onClick={() => props.onOpenSession("delegate-child")}>
         Open subagent
       </button>
+      <button onClick={() => props.onLoadingChange(props.runId, false)}>
+        Finish turn
+      </button>
       <button
         onClick={() => {
           props.onTitleChange(props.runId, "Working conversation");
@@ -121,9 +124,11 @@ vi.mock("../Kanban/Kanban", () => ({
 }));
 
 const abortChat = vi.fn();
+const markSessionRead = vi.fn(async (): Promise<boolean> => true);
 beforeEach(() => {
   localStorage.clear();
   vi.clearAllMocks();
+  markSessionRead.mockReset().mockResolvedValue(true);
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -151,6 +156,7 @@ beforeEach(() => {
         .mockResolvedValue({ connections: [], activeConnectionId: "local" }),
       getSessionMessages: vi.fn().mockResolvedValue([]),
       abortChat,
+      markSessionRead,
       onMenuNewChat: () => (): void => {},
       onMenuSearchSessions: () => (): void => {},
       onRemoteHealthChanged: () => (): void => {},
@@ -375,5 +381,135 @@ describe("sidebar-owned native window dragging", () => {
     });
     const { container } = shell();
     expect(container.querySelector(".sidebar-drag-region")).toBeNull();
+  });
+});
+
+// @lat: [[sidebar-navigation#Session read lifecycle]]
+describe("visible run read lifecycle", () => {
+  it("marks mounted chats on shortcut activation and utility return", async () => {
+    shell();
+    fireEvent.click(screen.getByRole("button", { name: "session-a" }));
+    await screen.findByText("session-a", {
+      selector: '[data-testid="mounted-chat"]',
+    });
+    expect(markSessionRead).toHaveBeenCalledWith(
+      "session-a",
+      "local",
+      "default",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "session-b" }));
+    await waitFor(() =>
+      expect(screen.getAllByTestId("mounted-chat")).toHaveLength(2),
+    );
+    markSessionRead.mockClear();
+    fireEvent.keyDown(window, { code: "Digit1", metaKey: true });
+    await waitFor(() =>
+      expect(markSessionRead).toHaveBeenCalledWith(
+        "session-a",
+        "local",
+        "default",
+      ),
+    );
+    fireEvent(
+      window,
+      new CustomEvent("navigation:goto", { detail: "discover" }),
+    );
+    markSessionRead.mockClear();
+    fireEvent.click(
+      screen.getByRole("button", { name: "navigation.backToChat" }),
+    );
+    await waitFor(() =>
+      expect(markSessionRead).toHaveBeenCalledWith(
+        "session-a",
+        "local",
+        "default",
+      ),
+    );
+  });
+  it("waits for the visible completion write before requesting list refresh", async () => {
+    shell();
+    fireEvent.click(screen.getByRole("button", { name: "session-a" }));
+    await screen.findByText("session-a", {
+      selector: '[data-testid="mounted-chat"]',
+    });
+    await act(async () => {});
+    let resolve!: (ok: boolean) => void;
+    markSessionRead.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((done) => {
+          resolve = done;
+        }),
+    );
+    const refreshed = vi.fn();
+    window.addEventListener("hermes-sessions-maybe-changed", refreshed);
+    try {
+      fireEvent.click(screen.getByText("Start turn"));
+      fireEvent.click(screen.getByText("Finish turn"));
+      await act(async () => {});
+      expect(refreshed).not.toHaveBeenCalled();
+      await act(async () => resolve(true));
+      expect(refreshed).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener("hermes-sessions-maybe-changed", refreshed);
+    }
+  });
+  it("does not mark a completed chat hidden by a utility pane", async () => {
+    shell();
+    fireEvent.click(screen.getByRole("button", { name: "session-a" }));
+    await screen.findByText("session-a", {
+      selector: '[data-testid="mounted-chat"]',
+    });
+    fireEvent.click(screen.getByText("Start turn"));
+    fireEvent(
+      window,
+      new CustomEvent("navigation:goto", { detail: "discover" }),
+    );
+    markSessionRead.mockClear();
+    fireEvent.click(screen.getByText("Finish turn"));
+    await act(async () => {});
+    expect(markSessionRead).not.toHaveBeenCalled();
+  });
+  it("does not reuse an older activation write for a newer completion", async () => {
+    let resolve!: (ok: boolean) => void;
+    markSessionRead.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((done) => {
+          resolve = done;
+        }),
+    );
+    shell();
+    fireEvent.click(screen.getByRole("button", { name: "session-a" }));
+    await screen.findByText("session-a", {
+      selector: '[data-testid="mounted-chat"]',
+    });
+    await waitFor(() => expect(markSessionRead).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByText("Start turn"));
+    fireEvent.click(screen.getByText("Finish turn"));
+    await act(async () => resolve(true));
+    await waitFor(() => expect(markSessionRead).toHaveBeenCalledTimes(2));
+  });
+
+  it("does not start a queued completion read after the chat becomes hidden", async () => {
+    let resolve!: (ok: boolean) => void;
+    markSessionRead.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((done) => {
+          resolve = done;
+        }),
+    );
+    shell();
+    fireEvent.click(screen.getByRole("button", { name: "session-a" }));
+    await screen.findByText("session-a", {
+      selector: '[data-testid="mounted-chat"]',
+    });
+    await waitFor(() => expect(markSessionRead).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByText("Start turn"));
+    fireEvent.click(screen.getByText("Finish turn"));
+    fireEvent(
+      window,
+      new CustomEvent("navigation:goto", { detail: "discover" }),
+    );
+    await act(async () => resolve(true));
+    expect(markSessionRead).toHaveBeenCalledTimes(1);
   });
 });

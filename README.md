@@ -37,6 +37,8 @@ Changes in this fork that are **not** in upstream.
 
 ### Fixes
 
+- **Viewed chats stop looking unread**: opening a chat with the mouse or keyboard clears its unread dot in project groups as well as the recent list. The app saves read state before refreshing the sidebar and uses the current backend's guarded read-state protocol over remote connections.
+
 - **Copy your messages while the agent replies**: Copy stays available on user bubbles during generation. Telegram and mid-turn messages keep their full text and Markdown when copied, without gateway metadata or envelope markers.
 
 - **Local files reach remote chats**: attach a PDF, document or archive from the picker, a drop or the clipboard. The app sends its actual bytes to the chat's agent, rather than a Mac path the server cannot read. Failed uploads stop the message instead of silently omitting the file.
