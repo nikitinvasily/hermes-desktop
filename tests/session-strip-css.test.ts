@@ -25,6 +25,13 @@ describe("session-strip-free shell CSS contract", () => {
     expect(rule(".content")).not.toMatch(/(?:padding|margin)-top/);
   });
 
+  it("aligns the floating context panel with the inset conversation top", () => {
+    const panel = rule(".chat-context-panel");
+    expect(panel).toMatch(/top:\s*0(?:px)?\s*;/);
+    expect(panel).toMatch(/position:\s*absolute/);
+    expect(panel).toMatch(/right:\s*12px/);
+  });
+
   it("confines main-window dragging above the traffic lights without covering controls", () => {
     const drag = rule(".is-mac .sidebar-drag-region");
     expect(drag).toMatch(/-webkit-app-region:\s*drag/);
