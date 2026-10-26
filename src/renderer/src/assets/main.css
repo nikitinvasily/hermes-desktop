@@ -4264,9 +4264,29 @@ body:has(.shell-vibrant),
 .utility-chat-navigation {
   display: flex;
   flex-shrink: 0;
-  height: 44px;
+  height: 38px;
   box-sizing: border-box;
-  padding: 6px 24px;
+  padding: 6px 24px 0;
+}
+
+/* Utility panes already have their own top padding; keep only a compact gap
+   below the shared arrow without changing modal or embedded screen spacing. */
+.utility-chat-navigation
+  ~ div
+  > :is(
+    .discover-container,
+    .agents-container,
+    .settings-container,
+    .skills-container,
+    .tools-container,
+    .schedules-container,
+    .kanban-container
+  ) {
+  padding-top: 8px;
+}
+
+.utility-chat-navigation ~ div > .tools-screen > .tools-tabs {
+  padding-top: 8px;
 }
 
 .utility-back-to-chat {
@@ -4304,7 +4324,7 @@ body:has(.shell-vibrant),
 
 /* Leave navigation outside the data shield, without raising it above modals. */
 .content.remote-degraded:has(> .utility-chat-navigation)::after {
-  top: 44px;
+  top: 38px;
 }
 
 /* ========================================================================

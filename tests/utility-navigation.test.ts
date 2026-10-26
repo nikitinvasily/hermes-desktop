@@ -12,6 +12,17 @@ function rule(selector: string): string {
 }
 
 describe("utility return navigation layering", () => {
+  it("keeps the arrow target while reducing the space before utility content", () => {
+    expect(rule(".utility-chat-navigation")).toContain("height: 38px");
+    expect(rule(".utility-chat-navigation")).toContain("padding: 6px 24px 0");
+    expect(rule(".utility-back-to-chat")).toContain("height: 32px");
+    expect(css).toMatch(
+      /\.utility-chat-navigation\s*~\s*div\s*>\s*:is\([\s\S]*?\)\s*\{\s*padding-top: 8px;/,
+    );
+    expect(
+      rule(".utility-chat-navigation ~ div > .tools-screen > .tools-tabs"),
+    ).toContain("padding-top: 8px");
+  });
   it("does not lift navigation above modal task details", () => {
     const navigation = rule(".utility-chat-navigation");
     const overlay = rule(".kanban-drawer-overlay");
