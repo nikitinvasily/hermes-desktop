@@ -5426,8 +5426,9 @@ body:has(.shell-vibrant),
 .chat-message-search {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 5px 12px;
   border-bottom: 1px solid var(--border-primary);
   background: var(--bg-secondary);
   color: var(--text-secondary);
@@ -5436,10 +5437,12 @@ body:has(.shell-vibrant),
 
 .chat-message-search input {
   min-width: 0;
-  width: 280px;
-  flex: 1;
-  max-width: 480px;
-  padding: 6px 10px;
+  width: 240px;
+  flex: 0 1 240px;
+  max-width: 240px;
+  padding: 4px 8px;
+  font-size: 12px;
+  line-height: 18px;
   border: 1px solid var(--border-primary);
   border-radius: 6px;
   background: var(--bg-primary);
