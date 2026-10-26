@@ -36,7 +36,7 @@ A native system strip pinned full-width beneath the sidebar+content row surfaces
 
 ## Sidebar-only conversation navigation
 
-Conversations have no top tab strip or reserved spacer. The sidebar creates and switches chats while background runs stay mounted.
+Conversations have no top tab strip. A 12px inset inside each chat gives its content breathing room; other app screens keep their original top alignment.
 
 [[src/renderer/src/screens/Layout/Layout.tsx]] renders the active chat directly in the content pane. Sidebar row selection restores an existing live run or opens a stored session; New Chat and project actions create conversations. Cmd/Ctrl+W, Cmd/Ctrl+1..9 and Cmd/Ctrl+Shift+[/] keep their existing run-management behavior without visible tabs.
 

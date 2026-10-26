@@ -18,6 +18,13 @@ describe("session-strip-free shell CSS contract", () => {
     expect(rule(".content")).not.toMatch(/(?:padding|margin)-top/);
   });
 
+  it("adds a small inset only inside chat panes, not the app-wide content", () => {
+    const chat = rule(".chat-container");
+    expect(chat).toMatch(/padding-top:\s*12px/);
+    expect(chat).toMatch(/box-sizing:\s*border-box/);
+    expect(rule(".content")).not.toMatch(/(?:padding|margin)-top/);
+  });
+
   it("confines main-window dragging above the traffic lights without covering controls", () => {
     const drag = rule(".is-mac .sidebar-drag-region");
     expect(drag).toMatch(/-webkit-app-region:\s*drag/);
