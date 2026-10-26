@@ -4261,6 +4261,35 @@ body:has(.shell-vibrant),
   position: relative;
 }
 
+.utility-chat-navigation {
+  display: flex;
+  flex-shrink: 0;
+  padding: 6px 24px;
+  position: relative;
+  /* Navigation remains available above the remote data-screen input shield. */
+  z-index: 61;
+}
+
+.utility-back-to-chat {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.utility-back-to-chat:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
 /* Remote connection lost (backlog #75): every remote data screen is dimmed
    and input-blocked while the connection is down, so stale server data can
    not be interacted with. The sidebar banner carries the recovery action. */

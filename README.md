@@ -9,6 +9,7 @@ Changes in this fork that are **not** in upstream.
 
 ### Features
 
+- **Back to your chat from utility screens**: a top-left arrow returns to the current conversation without losing its draft or interrupting work. With no session yet, it shows the empty chat on the same connection and profile.
 - **Find text in the current chat** — Cmd+F (Ctrl+F) searches user and assistant messages, including older history, with highlighted matches, a counter, previous/next buttons and Enter/Shift+Enter navigation. Markdown and fenced code are searchable without including hidden link targets or other chats; Escape closes search.
 - **Project management in the sidebar** — create, rename, and delete projects without leaving the app. Over SSH, a directory browser walks the agent host's filesystem. Projects show the names you gave them in the agent ("Infrastructure" instead of `infrastructure`), and empty projects stay visible.
 - **Project picker for the working folder** — the context-folder chip in the chat input lists your projects instead of raw recent paths; picking one sets its primary directory as the session's working folder.

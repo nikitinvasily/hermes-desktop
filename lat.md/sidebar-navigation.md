@@ -6,6 +6,14 @@ The sidebar starts with New Chat, keeps app destinations pinned, then gives conv
 
 Layout passes the selected connection ID and profile into both session surfaces. Cache reads, sync, pagination, search, rename, and deletion therefore remain on that machine/profile instead of consulting a later global selection; see [[connections#Session locations]].
 
+## Return from utility screens
+
+Every non-chat pane shares a top-left arrow that reveals the currently mounted chat without creating, resuming or interrupting a session.
+
+[[src/renderer/src/screens/Layout/Layout.tsx#Layout]] renders one navigation row for Discover, Profiles, Office (hidden), Providers, Skills, Memory, Capabilities, Schedules, Kanban and Gateway. The arrow calls the existing view transition only: chat components remain mounted, retaining their transcript, draft, running transport, connection and profile. A scratch run stays empty until the user sends. Modals retain their own close controls and do not get a second arrow.
+
+The navigation row is separate from utility data and remains clickable above the remote-outage input shield. It does not add height to the chat view. [[src/renderer/src/screens/Layout/Layout.test.tsx]] covers each utility pane and the unchanged chat element, plus draft, running state and non-default profile retention on local and remote connection scopes. Packaged-app checks exercise the real screen headers and chat controls.
+
 ## Active row highlight
 
 The current chat row carries a persistent quiet background fill (`--bg-tertiary` + `--text-primary`, the hover/focus treatment) instead of an accent tint (issue #72).
