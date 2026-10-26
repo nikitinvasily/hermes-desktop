@@ -44,7 +44,9 @@ Direct Remote management features share one main-process request client that sel
 
 [[src/main/remote-api.ts#remoteDashboardRequestJson]] resolves `auto` through the public status probe, routes OAuth through the persistent Electron partition, and routes token mode through the shared session request client with the same Bearer/Basic handling. Unexpected probe failures never guess another transport or fall back to local state.
 
-[[src/main/remote-api.ts#RemoteDashboardApiError]] normalizes HTTP status for feature adapters. A `404` marks only that feature unsupported; OAuth login-required errors retain their original reauthentication signal.
+[[src/main/remote-api.ts#RemoteDashboardApiError]] normalizes HTTP status for feature adapters before reporting health. A `404` marks only that feature unsupported; OAuth login-required errors retain their original reauthentication signal.
+
+[[src/main/remote-health.ts#reportRemoteHealth]] treats HTTP 4xx operation rejections as reachable, except 401 (sign in again) and 408 (unavailable). In particular, an expected `404` from the model-library probe before its compatibility fallback must not clear the sidebar on opening a chat. Network failures and server failures still report unavailable, and later successful requests restore health.
 
 ## Failure behavior
 
@@ -107,6 +109,10 @@ Once a Remote connection resolves to OAuth, shared request headers omit any stor
 ### Management authentication routing
 
 Management requests resolve `auto` before selecting token or OAuth transport, preserve profile scoping, skip probing for explicit modes, reject non-Remote callers, and retain OAuth login-required errors for reauthentication.
+
+### Application errors are not outages
+
+OAuth and token operation rejections, including model-library 404 and version-conflict 409 responses, keep the connection healthy and preserve rejection details. Auth expiry, timeouts, network failures and server failures remain visible.
 
 ### Management failure classification
 

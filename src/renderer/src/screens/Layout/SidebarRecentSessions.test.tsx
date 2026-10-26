@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import SidebarRecentSessions from "./SidebarRecentSessions";
@@ -1588,7 +1594,7 @@ describe("remote connection health (backlog #74/#75)", () => {
       b.textContent?.includes("navigation.chats"),
     ) as HTMLElement | null;
 
-  test("degraded clears stale rows and the sidebar renders its empty state", async () => {
+  test("degraded retains the sidebar snapshot but disables stale actions", async () => {
     const { rerender } = render(
       <SidebarRecentSessions
         open
@@ -1622,8 +1628,121 @@ describe("remote connection health (backlog #74/#75)", () => {
         scrollRootRef={{ current: null }}
       />,
     );
-    expect(screen.queryByText("Project chat")).toBeNull();
-    expect(screen.queryByText("Loose chat")).toBeNull();
+    // @lat: [[sidebar-navigation#Sidebar recent sessions#Connection recovery preserves browsing]]
+    expect(screen.queryByText("Project chat")).not.toBeNull();
+    expect(screen.queryByText("Loose chat")).not.toBeNull();
+    expect(
+      document
+        .querySelector(".sidebar-recent-sessions-wrap")
+        ?.hasAttribute("inert"),
+    ).toBe(true);
+  });
+
+  test("recovery replaces tree-only project chats only after group membership resolves", async () => {
+    listCachedSessions.mockResolvedValue([]);
+    syncSessionCache.mockResolvedValue([]);
+    const listGroups = vi.mocked(window.hermesAPI.listProjectGroupSessions);
+    listGroups.mockResolvedValue({
+      "/tmp/proj": [
+        {
+          id: "tree-only",
+          title: "Tree-only chat",
+          contextFolder: "/tmp/proj",
+          startedAt: 1,
+          lastActivityAt: 1,
+          source: "cli",
+          messageCount: 1,
+          model: "test",
+        },
+      ],
+    });
+    const props = {
+      open: true,
+      connectionId: "connection-main",
+      activeProfile: "default",
+      degraded: false,
+      resyncNonce: 0,
+      currentSessionId: null,
+      loadingSessionIds: new Set<string>(),
+      approvalSessionIds: new Set<string>(),
+      resumingSessionId: null,
+      onSelect: vi.fn(),
+      onSessionDeleted: vi.fn(),
+      scrollRootRef: { current: null },
+    };
+    const { rerender } = render(<SidebarRecentSessions {...props} />);
+    await screen.findByText("Tree-only chat");
+    const heading = screen.getByRole("button", { name: "Project" });
+    expect(heading.getAttribute("aria-expanded")).toBe("true");
+    rerender(<SidebarRecentSessions {...props} degraded />);
+    expect(screen.queryByText("Tree-only chat")).not.toBeNull();
+
+    // The chat was removed/archived on the server during the outage. Keep
+    // its snapshot until the recovery request returns, even an empty map.
+    type Groups = Awaited<
+      ReturnType<typeof window.hermesAPI.listProjectGroupSessions>
+    >;
+    let resolveGroups!: (groups: Groups) => void;
+    const recoveredGroups = new Promise<Groups>((resolve) => {
+      resolveGroups = resolve;
+    });
+    listGroups.mockReturnValue(recoveredGroups);
+    rerender(<SidebarRecentSessions {...props} resyncNonce={1} />);
+    expect(screen.queryByText("Tree-only chat")).not.toBeNull();
+    expect(heading.getAttribute("aria-expanded")).toBe("true");
+    await act(async () => {
+      resolveGroups({});
+      await recoveredGroups;
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("Tree-only chat")).toBeNull();
+    });
+    expect(listGroups).toHaveBeenCalledTimes(2);
+    expect(heading.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  test("recovery refreshes folder names without clearing the pending snapshot", async () => {
+    const listNames = vi.mocked(window.hermesAPI.listProjectFolderNames);
+    listNames.mockResolvedValue({ "/tmp/proj": "Old folder name" });
+    const props = {
+      open: true,
+      connectionId: "connection-main",
+      activeProfile: "default",
+      degraded: false,
+      resyncNonce: 0,
+      currentSessionId: null,
+      loadingSessionIds: new Set<string>(),
+      approvalSessionIds: new Set<string>(),
+      resumingSessionId: null,
+      onSelect: vi.fn(),
+      onSessionDeleted: vi.fn(),
+      scrollRootRef: { current: null },
+    };
+    const { rerender } = render(<SidebarRecentSessions {...props} />);
+    const heading = await screen.findByRole("button", {
+      name: "Old folder name",
+    });
+    fireEvent.click(heading);
+    expect(heading.getAttribute("aria-expanded")).toBe("false");
+    rerender(<SidebarRecentSessions {...props} degraded />);
+    let resolveNames!: (names: Record<string, string>) => void;
+    const recoveredNames = new Promise<Record<string, string>>((resolve) => {
+      resolveNames = resolve;
+    });
+    listNames.mockReturnValue(recoveredNames);
+    rerender(<SidebarRecentSessions {...props} resyncNonce={1} />);
+    expect(
+      screen.queryByRole("button", { name: "Old folder name" }),
+    ).not.toBeNull();
+    await act(async () => {
+      resolveNames({ "/tmp/proj": "New folder name" });
+      await recoveredNames;
+    });
+    expect(await screen.findByRole("button", { name: "New folder name" })).toBe(
+      heading,
+    );
+    expect(heading.getAttribute("aria-expanded")).toBe("false");
+    expect(listNames).toHaveBeenCalledTimes(2);
   });
 
   test("collapsed Chats stays collapsed across a forced resync (resyncNonce)", async () => {

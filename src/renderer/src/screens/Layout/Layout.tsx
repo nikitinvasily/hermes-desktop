@@ -1212,6 +1212,7 @@ function Layout({
             <div className="sidebar-nav-sessions">
               <div className="sidebar-chat-scroll" ref={sidebarChatScrollRef}>
                 <SidebarRecentSessions
+                  key={`${connectionId}\0${activeProfile}`}
                   open={!sidebarCollapsed}
                   connectionId={connectionId}
                   activeProfile={activeProfile}
