@@ -119,11 +119,12 @@ export async function remoteListProjects(
   config: RemoteSessionConfig,
 ): Promise<ProjectInfo[]> {
   const result: ProjectInfo[] = [];
+  // Reject failed reads so the sidebar does not interpret them as deletions.
+  const data = (await remoteRequestJson(
+    config,
+    "/api/profiles/projects/tree?preview_limit=1",
+  )) as { projects?: unknown };
   try {
-    const data = (await remoteRequestJson(
-      config,
-      "/api/profiles/projects/tree?preview_limit=1",
-    )) as { projects?: unknown };
     const projects = Array.isArray(data?.projects) ? data.projects : [];
     for (const project of projects) {
       if (!project || typeof project !== "object") continue;
@@ -177,7 +178,7 @@ export async function remoteListProjects(
       });
     }
   } catch {
-    // A failed probe leaves an empty list; the sidebar shows the slug groups.
+    // Malformed tree rows are best-effort; transport failures reject above.
   }
   return result;
 }

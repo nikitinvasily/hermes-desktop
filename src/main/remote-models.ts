@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { SavedModel } from "./models";
 import type { ConnectionConfig } from "./config";
 import {
@@ -14,14 +15,45 @@ type RemoteModelConfig =
   | RemoteSessionConfig
   | (ConnectionConfig & { profile?: string });
 
+const inFlightModelReads = new Map<string, Promise<unknown>>();
+
 function remoteModelRequestJson(
   config: RemoteModelConfig,
   path: string,
   options: RemoteDashboardRequestOptions,
 ): Promise<unknown> {
-  return "mode" in config
-    ? remoteDashboardRequestJson(config, path, options, config.profile)
-    : remoteRequestJson(config, path, options);
+  const request = (): Promise<unknown> =>
+    "mode" in config
+      ? remoteDashboardRequestJson(config, path, options, config.profile)
+      : remoteRequestJson(config, path, options);
+  if ((options.method ?? "GET") !== "GET") return request();
+
+  // Include the entire transport/auth/profile config and request options.
+  // Sort object keys so separately constructed equivalent configs share, and
+  // hash the key so credentials are not retained as readable map keys.
+  const key = createHash("sha256")
+    .update(
+      JSON.stringify(
+        [config, path, options],
+        (_key, value: unknown): unknown =>
+          value && typeof value === "object" && !Array.isArray(value)
+            ? Object.fromEntries(
+                Object.entries(value).sort(([a], [b]) => a.localeCompare(b)),
+              )
+            : value,
+      ),
+    )
+    .digest("hex");
+  const existing = inFlightModelReads.get(key);
+  if (existing) return existing;
+
+  // Store the finally-derived promise, not an ignored rejecting cleanup chain.
+  // Evict on both success and error: this is never a completed-response cache.
+  const pending = request().finally(() => {
+    inFlightModelReads.delete(key);
+  });
+  inFlightModelReads.set(key, pending);
+  return pending;
 }
 
 type RemoteRecord = Record<string, unknown>;

@@ -89,7 +89,8 @@ export async function remoteDashboardRequestJson<T>(
     reportRemoteHealthOk(connection);
     return result;
   } catch (error) {
-    reportRemoteHealth(connection, error);
-    throw normalizeRemoteDashboardError(error);
+    const normalized = normalizeRemoteDashboardError(error);
+    reportRemoteHealth(connection, normalized);
+    throw normalized;
   }
 }

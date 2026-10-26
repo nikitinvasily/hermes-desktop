@@ -345,6 +345,47 @@ describe("ChatInput — border beam", () => {
 });
 
 describe("ChatInput model readiness", () => {
+  it("keeps model loading out of the alert banner without enabling Enter", () => {
+    const onSubmit = vi.fn();
+    const props = {
+      isLoading: false,
+      hasSession: true,
+      onSubmit,
+      onQuickAsk: vi.fn(),
+      onAbort: vi.fn(),
+    };
+    const { rerender } = render(
+      <ChatInput
+        {...props}
+        readiness={{ ok: false, code: "model_loading", message: "Loading..." }}
+        toolbarExtras={<span>Loading model</span>}
+      />,
+    );
+    const textarea = screen.getByPlaceholderText(
+      "chat.typeMessage",
+    ) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "keep my draft" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(textarea.value).toBe("keep my draft");
+    expect(screen.queryByTestId("chat-readiness-banner")).toBeNull();
+    expect(screen.getByText("Loading model")).toBeVisible();
+    rerender(
+      <ChatInput
+        {...props}
+        readiness={{ ok: false, message: "Authentication expired" }}
+      />,
+    );
+    expect(screen.getByTestId("chat-readiness-banner")).toHaveTextContent(
+      "Authentication expired",
+    );
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSubmit).not.toHaveBeenCalled();
+    rerender(<ChatInput {...props} readiness={{ ok: true }} />);
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSubmit).toHaveBeenCalledWith("keep my draft", []);
+  });
+
   it("keeps an immediate Enter draft until the selected agent model is ready", () => {
     const onSubmit = vi.fn();
     const props = {

@@ -312,8 +312,8 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   connectionId: string;
   /** Active profile — the list is per-profile, so switching forces a reload. */
   activeProfile: string;
-  /** Remote connection is down (auth or network): render the empty state
-   * instead of a stale cached list (backlog #74/#75). */
+  /** Remote connection is down (auth or network): retain the last complete
+   * snapshot, but make it inert until recovery refreshes the data. */
   degraded: boolean;
   /** Bumped by Layout when remote health returns to ok — forces a full
    * resync of sessions AND projects from the server, restoring group
@@ -737,17 +737,9 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     if (open) void refresh();
   }, [open, currentSessionId, refresh]);
 
-  // While the remote connection is degraded, drop the stale cached rows: the
-  // sidebar renders its empty state instead of "chats visible, projects gone"
-  // partial data (backlog #75). Recovery repopulates via the resync above.
-  useEffect(() => {
-    if (degraded) {
-      setSessions([]);
-      setHasMore(false);
-      setProjects(null);
-      setProjectGroupSessions({});
-    }
-  }, [degraded]);
+  // Keep the rendered snapshot and child Show-more state through an outage.
+  // The health banner remains visible; inert prevents using stale actions.
+  // @lat: [[sidebar-navigation#Sidebar recent sessions#Connection recovery preserves browsing]]
 
   // Switching agent points the list at a different profile's DB. Force a
   // reload immediately (bypassing the throttle) so the list isn't stale.
@@ -758,8 +750,8 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     void refresh(true);
   }, [activeProfile, refresh]);
 
-  // Load folder→name once the section is open; reloaded on connection/profile
-  // switch so a different agent's projects get their own names (issue #23).
+  // Load folder→name once the section is open; reload on recovery and
+  // connection/profile switches so project names follow the active agent.
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
@@ -774,15 +766,14 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     return () => {
       cancelled = true;
     };
-  }, [open, connectionId, activeProfile]);
+  }, [open, connectionId, activeProfile, resyncNonce]);
 
-  // Load the complete per-project session lists (issue #57, stage 2) on the
-  // same triggers as the names map. A failure or local connection leaves an
-  // empty map — the window-derived groups stay in effect untouched.
+  // Load the complete per-project session lists (issue #57, stage 2),
+  // including on recovery. Keep the displayed snapshot while pending or
+  // failed; a successful response replaces it even when the map is empty.
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    setProjectGroupSessions({});
     void window.hermesAPI
       .listProjectGroupSessions(connectionId, activeProfile)
       .then((groups) => {
@@ -817,7 +808,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     return () => {
       cancelled = true;
     };
-  }, [open, connectionId, activeProfile]);
+  }, [open, connectionId, activeProfile, resyncNonce]);
 
   // Load the agent's project list (issue #27) — same triggers as the names
   // map, plus an explicit refresh() after mutations. The registry read gives
@@ -1601,6 +1592,8 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     <div
       className={`sidebar-recent-sessions-wrap ${expanded ? "expanded" : ""}`}
       aria-hidden={!expanded}
+      inert={degraded}
+      aria-busy={degraded}
     >
       <div className="sidebar-recent-sessions">
         {pinnedSessions.length > 0 && (

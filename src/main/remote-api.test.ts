@@ -54,6 +54,7 @@ vi.mock("./remote-oauth", () => ({
 
 import { remoteDashboardRequestJson } from "./remote-api";
 import type { ConnectionConfig } from "./config";
+import { onRemoteHealthChanged, type RemoteHealthEvent } from "./remote-health";
 
 function remoteConnection(
   remoteAuthMode: ConnectionConfig["remoteAuthMode"],
@@ -83,6 +84,98 @@ beforeEach(() => {
 });
 
 describe("remote dashboard API client", () => {
+  it.each([
+    ["oauth", 404],
+    ["token", 404],
+    ["oauth", 409],
+    ["token", 409],
+  ] as const)(
+    "%s HTTP %i feature rejection preserves healthy connection state and the original error",
+    async (authMode, status) => {
+      // @lat: [[remote-dashboard-oauth#Test specifications#Application errors are not outages]]
+      const events: RemoteHealthEvent[] = [];
+      const unsubscribe = onRemoteHealthChanged((event) => events.push(event));
+      const message =
+        status === 404
+          ? '404: {"detail":"No such API endpoint: /api/model/library"}'
+          : '409: {"detail":"client_upgrade_required"}';
+      const error =
+        authMode === "oauth"
+          ? new RemoteOAuthError(message, "oauth_request_failed", status)
+          : new Error(message);
+      const transport =
+        authMode === "oauth" ? requestRemoteOAuthJson : remoteRequestJson;
+      transport.mockRejectedValue(error);
+      try {
+        await expect(
+          remoteDashboardRequestJson(
+            remoteConnection(authMode),
+            status === 404 ? "/api/model/library" : "/api/example",
+          ),
+        ).rejects.toMatchObject({ statusCode: status, message });
+        expect(events).toEqual([
+          { remoteUrl: "https://remote.example:9119", state: "ok" },
+        ]);
+      } finally {
+        unsubscribe();
+      }
+    },
+  );
+
+  it.each(["oauth", "token"] as const)(
+    "%s keeps auth loss and transport/server outages distinct from feature rejections",
+    async (authMode) => {
+      const events: RemoteHealthEvent[] = [];
+      const unsubscribe = onRemoteHealthChanged((event) => events.push(event));
+      const transport =
+        authMode === "oauth" ? requestRemoteOAuthJson : remoteRequestJson;
+      try {
+        for (const [status, state] of [
+          [401, "authLost"],
+          [404, "ok"],
+          [405, "ok"],
+          [422, "ok"],
+          [429, "ok"],
+          [408, "unreachable"],
+          [503, "unreachable"],
+        ] as const) {
+          transport.mockRejectedValueOnce(
+            authMode === "oauth"
+              ? new RemoteOAuthError(
+                  `${status}: rejected`,
+                  "oauth_request_failed",
+                  status,
+                )
+              : new Error(`${status}: rejected`),
+          );
+          await expect(
+            remoteDashboardRequestJson(
+              remoteConnection(authMode),
+              "/api/example",
+            ),
+          ).rejects.toMatchObject({ statusCode: status });
+          expect(events.at(-1)?.state).toBe(state);
+        }
+        transport.mockRejectedValueOnce(new Error("connect ECONNREFUSED"));
+        await expect(
+          remoteDashboardRequestJson(
+            remoteConnection(authMode),
+            "/api/example",
+          ),
+        ).rejects.toThrow("ECONNREFUSED");
+        expect(events.at(-1)?.state).toBe("unreachable");
+        transport.mockResolvedValueOnce({ ok: true });
+        await remoteDashboardRequestJson(
+          remoteConnection(authMode),
+          "/api/example",
+        );
+        expect(events.at(-1)?.state).toBe("ok");
+      } finally {
+        unsubscribe();
+      }
+    },
+  );
+
   it("uses token dashboard transport with profile scoping", async () => {
     remoteRequestJson.mockResolvedValue({ ok: true });
 

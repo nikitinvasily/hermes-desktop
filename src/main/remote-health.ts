@@ -8,9 +8,10 @@ import type { ConnectionConfig } from "./config";
  *
  * - `authLost` — the dashboard answered 401 / `session_expired` / the OAuth
  *   cookies no longer authenticate: the user must sign in again.
- * - `unreachable` — network-level failure (DNS, WG tunnel down, timeout):
- *   retryable, no credentials are at fault.
- * - `ok` — the last request on this connection succeeded.
+ * - `unreachable` — transport or server failure (DNS, WG tunnel down,
+ *   timeout or HTTP 5xx): retryable, no credentials are at fault.
+ * - `ok` — the dashboard answered successfully or rejected an operation
+ *   with a non-authentication/non-timeout HTTP 4xx response.
  */
 export type RemoteHealthState = "ok" | "authLost" | "unreachable";
 
@@ -42,6 +43,16 @@ function classifyRemoteError(error: unknown): RemoteHealthState {
     if (e.statusCode === 401) return "authLost";
     if (typeof e.message === "string" && e.message.includes("session_expired"))
       return "authLost";
+    // A rejected operation still reached the dashboard. The model-library
+    // probe legitimately returns 404 before its compatibility fallback.
+    // Treating that as a lost connection clears the sidebar on chat open.
+    if (
+      e.statusCode &&
+      e.statusCode >= 400 &&
+      e.statusCode < 500 &&
+      e.statusCode !== 408
+    )
+      return "ok";
   }
   return "unreachable";
 }

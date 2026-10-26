@@ -1278,6 +1278,7 @@ function Chat({
                 (!modelConfig.currentModel && modelConfig.loadError))
                 ? {
                     ok: false,
+                    code: modelConfig.isLoading ? "model_loading" : undefined,
                     message: modelConfig.isLoading
                       ? t("common.loading")
                       : modelConfig.loadError,

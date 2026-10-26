@@ -1212,6 +1212,7 @@ function Layout({
             <div className="sidebar-nav-sessions">
               <div className="sidebar-chat-scroll" ref={sidebarChatScrollRef}>
                 <SidebarRecentSessions
+                  key={`${connectionId}\0${activeProfile}`}
                   open={!sidebarCollapsed}
                   connectionId={connectionId}
                   activeProfile={activeProfile}
@@ -1255,9 +1256,9 @@ function Layout({
           </div>
 
           <div className="sidebar-footer">
-            {/* Remote connection lost (auth or network): the sidebar shows no
-                stale remote data and the user gets a one-click re-login /
-                retry affordance next to the update banner (backlog #74/#75). */}
+            {/* Remote connection lost (auth or network): retain an inert
+                sidebar snapshot and offer one-click re-login or retry
+                next to the update banner. */}
             {remoteDegraded && (
               <div
                 className={`sidebar-remote-health ${remoteHealth}`}
