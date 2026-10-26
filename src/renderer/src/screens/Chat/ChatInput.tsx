@@ -371,7 +371,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
     function handleSend(): void {
       const text = input.trim();
       const hasPayload = text.length > 0 || attachments.length > 0;
-      if (!hasPayload) return;
+      if (!hasPayload || readiness?.ok === false) return;
       setSlashMenuOpen(false);
       const sendAttachments = attachments;
       clearAfterSend(text);

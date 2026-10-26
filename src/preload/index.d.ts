@@ -373,6 +373,7 @@ interface HermesAPI {
   getHermesHome: (profile?: string) => Promise<string>;
   getModelConfig: (
     profile?: string,
+    connectionId?: string,
   ) => Promise<{ provider: string; model: string; baseUrl: string }>;
   getAuxiliaryConfig: (
     profile?: string,
@@ -1044,7 +1045,10 @@ interface HermesAPI {
   invalidateSecretsCache: () => Promise<void>;
 
   // Models
-  listModels: () => Promise<
+  listModels: (
+    connectionId?: string,
+    profile?: string,
+  ) => Promise<
     Array<{
       id: string;
       name: string;
