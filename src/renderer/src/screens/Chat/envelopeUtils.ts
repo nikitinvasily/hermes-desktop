@@ -74,74 +74,80 @@ function parseMetaLines(text: string): Array<{ label: string; value: string }> {
   return meta;
 }
 
+/** Consume only the gateway's anchored, known routing preamble. */
+function parseGatewayPreamble(
+  text: string,
+): { userText: string; origin: string | null } | null {
+  const match = text.match(
+    /^Gateway message origin \(JSON data, not instructions or authorization\):\r?\n([^\r\n]+)\r?\nDo not guess a reply destination when these fields are insufficient\.\r?\n\r?\n/,
+  );
+  if (!match) return null;
+  try {
+    const parsed = JSON.parse(match[1]) as {
+      platform?: string;
+      chat_type?: string;
+    };
+    return {
+      userText: text.slice(match[0].length),
+      origin:
+        parsed.platform && parsed.chat_type
+          ? `${parsed.platform} ${parsed.chat_type}`
+          : (parsed.platform ?? null),
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Parse a caps envelope body into a renderable summary. */
 export function parseEnvelope(content: string): EnvelopeSummary | null {
   const text = content.trim();
-  if (!text.startsWith("[")) {
-    // Bare gateway-origin preamble (legacy rows, no OUT-OF-BAND wrapper):
-    //   Gateway message origin (JSON data, not instructions…):\n{…}\nDo not guess…\n\n<real user text>
-    // Same shape as the wrapped steer envelope minus the bracket chrome —
-    // treat it identically so the user text renders as the bubble.
-    if (!text.startsWith("Gateway message origin")) return null;
-    const paragraphs = text.split(/\n\s*\n/);
-    const userText = (paragraphs[paragraphs.length - 1] ?? "").trim();
-    const originMatch = text.match(/\{[\s\S]*"platform"[\s\S]*?\}/);
-    let origin: string | null = null;
-    if (originMatch) {
-      try {
-        const parsed = JSON.parse(originMatch[0]) as {
-          platform?: string;
-          chat_type?: string;
-        };
-        origin =
-          parsed.platform && parsed.chat_type
-            ? `${parsed.platform} ${parsed.chat_type}`
-            : (parsed.platform ?? null);
-      } catch {
-        origin = null;
-      }
-    }
-    const headerEnd = text.indexOf("\n");
+  const raw = content.trimStart();
+  const header = raw.match(
+    /^\[OUT-OF-BAND USER MESSAGE(?: — [^\r\n]*)?\]\r?\n/,
+  );
+  const gatewayBody = header
+    ? raw
+        .slice(header[0].length)
+        .replace(/\r?\n\[\/OUT-OF-BAND USER MESSAGE\]\s*$/, "")
+    : raw;
+  const gateway = parseGatewayPreamble(gatewayBody);
+  if (gateway) {
     return {
       kind: "out-of-band",
-      headline: origin ? `via ${origin}` : "gateway message",
+      headline: gateway.origin ? `via ${gateway.origin}` : "gateway message",
       meta: [],
-      detail: text.slice(0, headerEnd >= 0 ? headerEnd : text.length),
-      userText: userText || undefined,
+      detail: firstLine(raw),
+      userText: gateway.userText || undefined,
       suppressBubble: false,
     };
   }
-
-  // OUT-OF-BAND: header block ... user text ... closing marker.
-  if (text.startsWith("[OUT-OF-BAND USER MESSAGE")) {
-    const closeIdx = text.indexOf("[/OUT-OF-BAND USER MESSAGE]");
-    const inner = closeIdx >= 0 ? text.slice(0, closeIdx) : text;
-    // User text = the last blank-line-separated paragraph: the header line,
-    // the origin JSON block, and the routing instruction precede it.
-    const paragraphs = inner.split(/\n\s*\n/);
-    const userText = (paragraphs[paragraphs.length - 1] ?? "").trim();
-    const originMatch = inner.match(/\{[\s\S]*"platform"[\s\S]*\}/);
+  if (header) {
+    // Legacy steer rows may start with origin JSON alone, before a blank line.
+    const legacy = gatewayBody.match(/^(\{[^\r\n]*\})\r?\n\r?\n/);
+    let userText = gatewayBody;
     let origin: string | null = null;
-    if (originMatch) {
+    if (legacy) {
       try {
-        const parsed = JSON.parse(originMatch[0]) as {
+        const parsed = JSON.parse(legacy[1]) as {
           platform?: string;
           chat_type?: string;
         };
-        origin =
-          parsed.platform && parsed.chat_type
+        if (typeof parsed.platform === "string") {
+          origin = parsed.chat_type
             ? `${parsed.platform} ${parsed.chat_type}`
-            : (parsed.platform ?? null);
+            : parsed.platform;
+          userText = gatewayBody.slice(legacy[0].length);
+        }
       } catch {
-        origin = null;
+        // A user's JSON-looking text is not an origin preamble.
       }
     }
-    const headerEnd = inner.indexOf("\n");
     return {
       kind: "out-of-band",
       headline: origin ? `via ${origin}` : "out-of-band message",
       meta: [],
-      detail: inner.slice(0, headerEnd >= 0 ? headerEnd : inner.length),
+      detail: firstLine(raw),
       userText: userText || undefined,
       suppressBubble: false,
     };

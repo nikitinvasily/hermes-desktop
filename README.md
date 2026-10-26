@@ -36,6 +36,8 @@ Changes in this fork that are **not** in upstream.
 
 ### Fixes
 
+- **Copy your messages while the agent replies**: Copy stays available on user bubbles during generation. Telegram and mid-turn messages keep their full text and Markdown when copied, without gateway metadata or envelope markers.
+
 - **Local files reach remote chats**: attach a PDF, document or archive from the picker, a drop or the clipboard. The app sends its actual bytes to the chat's agent, rather than a Mac path the server cannot read. Failed uploads stop the message instead of silently omitting the file.
 
 - **Chat models follow their agent connection**: switching Local/Remote shows loading instead of the previous agent's model. Model identity loads without waiting for the library, late replies cannot replace the current selection, and Enter keeps your draft until the model is ready.
