@@ -649,26 +649,30 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
             </div>
           </div>
         )}
-        {!readinessOk && readiness?.message && (
-          <div
-            className="chat-readiness-banner"
-            role="alert"
-            data-testid="chat-readiness-banner"
-          >
-            <span className="chat-readiness-message">
-              {readiness.expectedEnvKey
-                ? t("chat.validation.missingKey", {
-                    key: readiness.expectedEnvKey,
-                  })
-                : readiness.message}
-            </span>
-            {readiness.fixLocation && (
-              <span className="chat-readiness-fix">
-                {readinessFixLabel(readiness.fixLocation)}
+        {/* Initial model loading is already shown by the model picker. Keep
+            Send/Enter blocked, but reserve this alert for actionable failures. */}
+        {!readinessOk &&
+          readiness?.code !== "model_loading" &&
+          readiness?.message && (
+            <div
+              className="chat-readiness-banner"
+              role="alert"
+              data-testid="chat-readiness-banner"
+            >
+              <span className="chat-readiness-message">
+                {readiness.expectedEnvKey
+                  ? t("chat.validation.missingKey", {
+                      key: readiness.expectedEnvKey,
+                    })
+                  : readiness.message}
               </span>
-            )}
-          </div>
-        )}
+              {readiness.fixLocation && (
+                <span className="chat-readiness-fix">
+                  {readinessFixLabel(readiness.fixLocation)}
+                </span>
+              )}
+            </div>
+          )}
         {(attachments.length > 0 || attachmentError) && (
           <div className="chat-attachment-strip">
             {attachments.map((att) => (
