@@ -235,9 +235,7 @@ export const MessageRow = memo(function MessageRow({
   const oob =
     rawContent && msg.role === "user" ? parseEnvelope(rawContent) : null;
   const bubbleContent =
-    oob && oob.kind === "out-of-band" && oob.userText
-      ? oob.userText
-      : rawContent;
+    oob && oob.kind === "out-of-band" ? (oob.userText ?? "") : rawContent;
   const segments = useMemo(
     () =>
       bubbleContent &&
@@ -375,19 +373,23 @@ export const MessageRow = memo(function MessageRow({
             msg.error ? " chat-bubble-error" : ""
           }`}
         >
-          {msg.content && !isLoading && !msg.isSlashLoader && (
-            <div className="chat-bubble-actions">
-              <button
-                type="button"
-                className="chat-bubble-copy"
-                onClick={handleCopy}
-                title={copied ? t("common.copied") : t("chat.copyMessage")}
-                aria-label={copied ? t("common.copied") : t("chat.copyMessage")}
-              >
-                {copied ? <Check size={14} /> : <Copy size={14} />}
-              </button>
-            </div>
-          )}
+          {bubbleContent &&
+            (msg.role === "user" || !isLoading) &&
+            !msg.isSlashLoader && (
+              <div className="chat-bubble-actions">
+                <button
+                  type="button"
+                  className="chat-bubble-copy"
+                  onClick={handleCopy}
+                  title={copied ? t("common.copied") : t("chat.copyMessage")}
+                  aria-label={
+                    copied ? t("common.copied") : t("chat.copyMessage")
+                  }
+                >
+                  {copied ? <Check size={14} /> : <Copy size={14} />}
+                </button>
+              </div>
+            )}
           {hasAttachments && (
             <div className="chat-message-attachments">
               {msg.attachments!.map((att) => (
