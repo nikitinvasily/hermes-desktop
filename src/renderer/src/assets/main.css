@@ -18566,7 +18566,8 @@ body:has(.shell-vibrant),
    edge; absolute (not sticky-in-scroller) keeps it pinned during scroll. */
 .chat-context-panel {
   position: absolute;
-  top: 0;
+  top: 12px;
+  margin-right: 12px;
   /* Match the padded, centered 1300px transcript column, not the pane edge. */
   right: max(
     calc(24px + var(--chat-scrollbar-gutter, 0px)),
@@ -18574,7 +18575,7 @@ body:has(.shell-vibrant),
   );
   z-index: 30;
   width: 300px;
-  max-width: min(300px, calc(100% - 48px - var(--chat-scrollbar-gutter, 0px)));
+  max-width: min(300px, calc(100% - 60px - var(--chat-scrollbar-gutter, 0px)));
   padding: 4px 2px 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg, 10px);

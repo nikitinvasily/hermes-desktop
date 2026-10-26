@@ -25,16 +25,17 @@ describe("session-strip-free shell CSS contract", () => {
     expect(rule(".content")).not.toMatch(/(?:padding|margin)-top/);
   });
 
-  it("aligns the floating context panel with the inset conversation top", () => {
+  it("insets the floating context panel 12px down and left from the conversation edge", () => {
     const panel = rule(".chat-context-panel");
-    expect(panel).toMatch(/top:\s*0(?:px)?\s*;/);
+    expect(panel).toMatch(/top:\s*12px\s*;/);
+    expect(panel).toMatch(/margin-right:\s*12px\s*;/);
     expect(panel).toMatch(/position:\s*absolute/);
     expect(panel).toContain("calc(24px + var(--chat-scrollbar-gutter, 0px))");
     expect(panel).toContain(
       "calc((100% - 1300px + var(--chat-scrollbar-gutter, 0px)) / 2)",
     );
     expect(panel).toContain(
-      "max-width: min(300px, calc(100% - 48px - var(--chat-scrollbar-gutter, 0px)))",
+      "max-width: min(300px, calc(100% - 60px - var(--chat-scrollbar-gutter, 0px)))",
     );
   });
 
