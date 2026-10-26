@@ -25,6 +25,10 @@ import type {
   DesktopSessionLocalError,
 } from "../../shared/session-continuation";
 import { stageAttachment, clearStagedAttachments } from "../attachment-staging";
+import {
+  remoteListSubagentSessions,
+  sshListSubagentSessions,
+} from "../subagent-sessions-remote";
 import { persistPromptImageAttachments } from "../session-attachment-store";
 import {
   discoverProviderModels,
@@ -2472,9 +2476,8 @@ export function registerIpcHandlers(context: IpcContext): void {
   );
 
   // Sessions
-  // Floating chat context panel (issue #122): delegate-subagent children of a
-  // chat session. Remote dashboards list children-free (issue #95), so the
-  // panel stays hidden there until the core grows a parent_id filter.
+  // Floating chat context panel: persisted delegate children, scoped to the
+  // connection/profile. SSH reads do not acquire the singleton dashboard tunnel.
   ipcMain.handle(
     "list-subagent-sessions",
     (
@@ -2484,8 +2487,17 @@ export function registerIpcHandlers(context: IpcContext): void {
       profile?: string,
     ) => {
       const conn = sessionConnection(connectionId);
-      if (conn.mode !== "local") return [];
       const scopedProfile = activeSshProfile(profile);
+      if (conn.mode === "remote")
+        return remoteListSubagentSessions(conn, parentSessionId, scopedProfile);
+      if (conn.mode === "ssh") {
+        if (!conn.ssh) throw new Error("SSH connection is not configured");
+        return sshListSubagentSessions(
+          conn.ssh,
+          parentSessionId,
+          scopedProfile,
+        );
+      }
       return listSubagentSessions(parentSessionId, scopedProfile);
     },
   );

@@ -17,9 +17,13 @@ vi.mock("../Chat/Chat", () => ({
     active: boolean;
     onTitleChange: (id: string, title: string) => void;
     onLoadingChange: (id: string, loading: boolean) => void;
+    onOpenSession: (id: string) => void;
   }): React.JSX.Element => (
     <div data-testid="mounted-chat" data-active={props.active}>
       {props.initialSessionId || "scratch"}
+      <button onClick={() => props.onOpenSession("delegate-child")}>
+        Open subagent
+      </button>
       <button
         onClick={() => {
           props.onTitleChange(props.runId, "Working conversation");
@@ -35,8 +39,14 @@ vi.mock("./SidebarRecentSessions", () => ({
   default: (props: {
     currentSessionId: string | null;
     onSelect: (id: string) => void;
+    pendingSessions: Array<{ id: string; title: string }>;
   }): React.JSX.Element => (
     <div>
+      {props.pendingSessions.map((row) => (
+        <span key={row.id} data-testid="pending-sidebar-row">
+          {row.title}
+        </span>
+      ))}
       {["session-a", "session-b"].map((id) => (
         <button
           key={id}
@@ -151,6 +161,24 @@ function expectNoSessionStrip(container: HTMLElement): void {
 }
 
 describe("Layout without top session tabs", () => {
+  it("opens a child transcript without injecting its title into sidebar pending rows", async () => {
+    shell();
+    fireEvent.click(screen.getByText("Open subagent"));
+    await screen.findByText("delegate-child");
+    fireEvent.click(screen.getByText("Start turn"));
+    expect(screen.queryByTestId("pending-sidebar-row")).toBeNull();
+    expect(screen.getByTestId("mounted-chat")).toHaveTextContent(
+      "delegate-child",
+    );
+  });
+
+  it("keeps send-time sidebar rows for new chats", () => {
+    shell();
+    fireEvent.click(screen.getByText("Start turn"));
+    expect(screen.getByTestId("pending-sidebar-row")).toHaveTextContent(
+      "Working conversation",
+    );
+  });
   it("has no strip for scratch, running, resumed or non-chat screens", async () => {
     const { container } = shell();
     expectNoSessionStrip(container);
