@@ -8,13 +8,13 @@ The absolutely positioned `.sidebar-drag-region` uses the sidebar's existing top
 
 `.app` fills the window (`height: 100vh`) so the chrome reaches every edge. The sidebar rounds only its **top-left** corner (`border-radius: 16px 0 0 0`); the full-width status strip owns the window's bottom edge and rounds both bottom corners (`0 0 16px 16px`), so the sidebar's bottom-left is square against it. A hairline seam (`.content` `border-inline-start`) separates the content pane from the sidebar.
 
-## Translucent sidebar (macOS vibrancy)
+## Sidebar surfaces and macOS vibrancy
 
-The sidebar is frosted glass on macOS — the window material shows through it — while the content pane stays opaque and readable.
+The sidebar and floating Subagents/TODO panel share the opaque `--bg-tertiary` surface. In the default dark theme it is lighter than the conversation and darker than the active chat highlight. The status strip retains macOS vibrancy.
 
 [[src/main/app/start.ts#createWindow]] gives the window `vibrancy: "under-window"` + `visualEffectState: "active"` + a transparent `backgroundColor` on macOS. The material's light/dark **tone follows the app theme**, not the system appearance: [[src/renderer/src/components/ThemeProvider.tsx#ThemeProvider]] pushes the resolved theme's `appearance` to the main process via the `set-native-appearance` IPC ([[src/main/ipc/register.ts#registerIpcHandlers]] → `nativeTheme.themeSource`), passing `"system"` through only for the "System" theme so its `prefers-color-scheme` still tracks the OS. This is the fix for the earlier milky-sidebar bug: `under-window` alone follows the *system* appearance, so a dark theme on a light-mode Mac frosted light; syncing `themeSource` keeps a dark theme's frost dark. `createWindow` seeds `themeSource = "dark"` (the default theme) so the first paint isn't milky before the renderer refines it.
 
-For the material to paint, the renderer leaves surfaces transparent: [[src/renderer/src/App.tsx]] adds `shell-vibrant` to `.app` only on macOS and only on the `main` screen (onboarding stays solid). Under it, `body`/`#root`/`.app` go transparent, the `.sidebar` and `.status-bar` become a translucent `--bg-secondary` tint, and `.content` keeps an opaque `--bg-primary`. Because a transparent window is no longer masked to its rounded shape by macOS, `.content` also rounds its own top-right corner (`0 16px 0 0`) — the sidebar owns top-left, the status bar owns the bottom two — so the opaque panes don't show square corners.
+For the material to paint, the renderer leaves surfaces transparent: [[src/renderer/src/App.tsx]] adds `shell-vibrant` to `.app` only on macOS and only on the `main` screen (onboarding stays solid). Under it, `body`/`#root`/`.app` go transparent, the `.status-bar` becomes a translucent `--bg-secondary` tint, and the sidebar stays opaque `--bg-tertiary` while `.content` keeps opaque `--bg-primary`. Because a transparent window is no longer masked to its rounded shape by macOS, `.content` also rounds its own top-right corner (`0 16px 0 0`) — the sidebar owns top-left, the status bar owns the bottom two — so the opaque panes don't show square corners.
 
 ## Modal & popover glass is near-opaque (compositing-independent)
 

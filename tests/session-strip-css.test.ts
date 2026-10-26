@@ -38,6 +38,19 @@ describe("session-strip-free shell CSS contract", () => {
     );
   });
 
+  it("uses the existing raised surface for the sidebar and floating context panel", () => {
+    expect(rule(".sidebar")).toMatch(/background:\s*var\(--bg-tertiary\)/);
+    expect(rule(".app.shell-vibrant .sidebar")).toMatch(
+      /background:\s*var\(--bg-tertiary\)/,
+    );
+    expect(rule(".chat-context-panel")).toMatch(
+      /background:\s*var\(--bg-tertiary\)/,
+    );
+    expect(rule(".sidebar-recent-session.active")).toMatch(
+      /background:\s*var\(--sidebar-hover-bg\)/,
+    );
+  });
+
   it("confines main-window dragging above the traffic lights without covering controls", () => {
     const drag = rule(".is-mac .sidebar-drag-region");
     expect(drag).toMatch(/-webkit-app-region:\s*drag/);

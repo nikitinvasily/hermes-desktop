@@ -576,13 +576,10 @@ body {
   background: var(--bg-primary);
 }
 
-/* ── Translucent sidebar (macOS vibrancy) ──
-   On the main screen the shell goes transparent so the window material shows
-   through the sidebar as frosted glass. The material's tone tracks the theme
-   (see ThemeProvider → nativeTheme.themeSource), so a dark theme gets a dark
-   frost, never a milky light one. Only the sidebar is translucent — the content
-   pane stays opaque and readable. Gated to mac + main screen in App.tsx, so
-   onboarding and other platforms are untouched. */
+/* macOS shell material stays visible through the status strip. The sidebar
+   uses the same opaque raised surface as the floating context panel, so its
+   contrast with the conversation does not depend on the desktop wallpaper.
+   Gated to mac + main screen in App.tsx. */
 body:has(.shell-vibrant),
 #root:has(.shell-vibrant) {
   background: transparent;
@@ -599,7 +596,7 @@ body:has(.shell-vibrant),
   border-radius: 0 16px 0 0;
 }
 .app.shell-vibrant .sidebar {
-  background: color-mix(in srgb, var(--bg-secondary) 55%, transparent);
+  background: var(--bg-tertiary);
 }
 .app.shell-vibrant .status-bar {
   background: color-mix(in srgb, var(--bg-secondary) 55%, transparent);
@@ -2405,7 +2402,7 @@ body:has(.shell-vibrant),
   width: 250px;
   /* Anchor for the resize handle (abs-positioned at the right edge). */
   position: relative;
-  background: var(--bg-secondary);
+  background: var(--bg-tertiary);
   border-right: none;
   display: flex;
   flex-direction: column;
@@ -18581,8 +18578,7 @@ body:has(.shell-vibrant),
   padding: 4px 2px 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg, 10px);
-  background: color-mix(in srgb, var(--bg-primary, var(--bg)) 88%, transparent);
-  backdrop-filter: blur(10px);
+  background: var(--bg-tertiary);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
 }
 
