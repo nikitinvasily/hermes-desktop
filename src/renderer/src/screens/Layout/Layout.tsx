@@ -19,7 +19,6 @@ import {
   approvalPendingSessionIds,
   waitingSubagentSessionIds,
 } from "./chatRuns";
-import { ActiveSessionsBar } from "./ActiveSessionsBar";
 import { StatusBar } from "./StatusBar";
 import Sessions from "../Sessions/Sessions";
 import Agents from "../Agents/Agents";
@@ -430,8 +429,7 @@ function Layout({
     };
   }, [updateSidebarScrollbar]);
 
-  // Per-profile avatar/colour, so the active-sessions bar (which only knows a
-  // run's profile name) can render real avatars. Refreshed when the selected
+  // Per-profile avatar/colour for each mounted Chat. Refreshed when the selected
   // profile or the current view changes — e.g. after editing on the Agents page.
   const [profileAppearance, setProfileAppearance] = useState<
     Record<string, { color?: string | null; avatar?: string | null }>
@@ -825,7 +823,7 @@ function Layout({
 
   const handleNewChat = useCallback(() => {
     // Open a fresh run WITHOUT aborting others — any in-flight session keeps
-    // streaming in the background and stays reachable via the active bar. If the
+    // streaming in the background and stays reachable via the sidebar. If the
     // current chat is already a blank scratch, reuse it instead of stacking
     // another empty tab.
     const active = runs.find((r) => r.runId === activeRunId);
@@ -924,7 +922,7 @@ function Layout({
     [runs, activeRunId, connectionId, goTo],
   );
 
-  // Jump to an already-open run (e.g. from the active-sessions bar), switching
+  // Jump to an already-open run from the sidebar or shortcuts, switching
   // the selected profile so the rest of the app follows the agent.
   const handleActivateRun = useCallback(
     (runId: string) => {
@@ -1148,6 +1146,9 @@ function Layout({
           className={`sidebar ${sidebarResizing ? "resizing" : ""}`}
           style={{ width: sidebarCollapsed ? undefined : sidebarWidth }}
         >
+          {window.electron?.process?.platform === "darwin" && (
+            <div className="sidebar-drag-region" aria-hidden="true" />
+          )}
           <div className="sidebar-brand">
             <button
               className="sidebar-collapse-toggle"
@@ -1371,15 +1372,6 @@ function Layout({
         </aside>
 
         <main className={`content${remoteDegraded ? " remote-degraded" : ""}`}>
-          {/* Doubles as the window drag strip — keep it first so it owns the top
-            band; the warning banner (if any) sits just below it. */}
-          <ActiveSessionsBar
-            runs={runs}
-            activeRunId={activeRunId}
-            onClose={handleCloseRun}
-            onNew={handleNewChat}
-            getAppearance={getAppearance}
-          />
           {verifyWarning && onReinstall && onDismissVerifyWarning && (
             <VerifyWarningBanner
               onReinstall={onReinstall}

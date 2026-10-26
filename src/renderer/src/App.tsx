@@ -271,7 +271,9 @@ function App(): React.JSX.Element {
                     isMac && screen === "main" ? " shell-vibrant" : ""
                   }`}
                 >
-                  {isMac && <div className="drag-region" />}
+                  {isMac && screen !== "main" && (
+                    <div className="drag-region" />
+                  )}
                   <div className="app-content">{renderScreen()}</div>
                 </div>
                 <Toaster
