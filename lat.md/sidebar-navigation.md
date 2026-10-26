@@ -92,7 +92,7 @@ The native sidebar scrollbar is hidden to avoid layout shifts. [[src/renderer/sr
 
 Connection failures retain the last complete sidebar snapshot, with inactive controls and a visible connection banner, rather than clearing the list and losing its browsing position.
 
-[[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx]] keeps rows, project groups and Show-more caps mounted during outages and marks its wrapper inert. Recovery refreshes the loaded window and projects in place. [[src/renderer/src/screens/Layout/Layout.tsx#Layout]] keys that snapshot by connection and profile so another agent cannot inherit it. Application-level rejections do not enter degraded state; see [[remote-dashboard-oauth#Authenticated management request boundary]].
+[[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx]] keeps rows, project groups and Show-more caps mounted during outages and marks its wrapper inert. Recovery refreshes the loaded window and projects in place. Remote project-list, folder-name and complete-membership reads reject transport failures instead of returning false empty snapshots; successful empty trees still remove obsolete rows. [[src/renderer/src/screens/Layout/Layout.tsx#Layout]] keys that snapshot by connection and profile so another agent cannot inherit it. Application-level rejections do not enter degraded state; see [[remote-dashboard-oauth#Authenticated management request boundary]].
 
 ## First-turn sidebar visibility
 

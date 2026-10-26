@@ -150,14 +150,15 @@ describe("remoteProjectGroupSessions", () => {
     ).toEqual(["s1"]);
   });
 
-  it("returns empty groups when the tree request fails", async () => {
+  it("rejects when the tree request fails so callers retain their snapshot", async () => {
     const { server, port } = await startServer(() => {
       throw new Error("boom");
     });
     servers.push(server);
 
-    const result = await remoteProjectGroupSessions(configFor(port));
-    expect(result.groups.size).toBe(0);
+    await expect(remoteProjectGroupSessions(configFor(port))).rejects.toThrow(
+      "500",
+    );
   });
 
   it("sends a large preview_limit so slices are full membership", async () => {

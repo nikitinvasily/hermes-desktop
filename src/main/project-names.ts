@@ -195,11 +195,12 @@ export async function remoteProjectFolderNames(
   config: RemoteSessionConfig,
 ): Promise<ProjectFolderNames> {
   const result: ProjectFolderNames = {};
+  // Preserve the caller's last names on transport failure, not a slug fallback.
+  const data = (await remoteRequestJson(
+    config,
+    "/api/profiles/projects/tree?preview_limit=1",
+  )) as { projects?: unknown };
   try {
-    const data = (await remoteRequestJson(
-      config,
-      "/api/profiles/projects/tree?preview_limit=1",
-    )) as { projects?: unknown };
     const projects = Array.isArray(data?.projects) ? data.projects : [];
     for (const project of projects) {
       if (!project || typeof project !== "object") continue;
@@ -246,7 +247,7 @@ export async function remoteProjectFolderNames(
       }
     }
   } catch {
-    // Display sugar — a failed probe leaves the slug fallback.
+    // Malformed tree rows are display sugar; transport failures reject above.
   }
   return result;
 }

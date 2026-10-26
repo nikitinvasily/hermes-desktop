@@ -142,13 +142,13 @@ describe("remoteProjectFolderNames", () => {
     }
   });
 
-  it("returns an empty map when the tree endpoint fails", async () => {
+  it("rejects failed tree reads so callers retain the last folder names", async () => {
     const config: RemoteSessionConfig = {
       remoteUrl: "http://127.0.0.1:1",
       apiKey: "test-key",
     };
-    // A failed probe must resolve (not reject): names are display sugar.
-    await expect(remoteProjectFolderNames(config)).resolves.toEqual({});
+    // Network failure is not a successful empty name map.
+    await expect(remoteProjectFolderNames(config)).rejects.toThrow();
   });
 });
 

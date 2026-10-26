@@ -18,8 +18,8 @@ import { mergeDesktopBindingsIntoRemoteList } from "./project-names";
  * rows the tree already implies.
  *
  * Rows are best-effort: titles/models fall back the same way the window list's
- * do, and any failure returns an empty list (callers keep the window-derived
- * groups).
+ * do. Transport failures reject so callers can retain the last complete tree;
+ * a successful empty response still means no project membership.
  */
 
 const PREVIEW_LIMIT = 500;
@@ -130,11 +130,12 @@ export async function remoteProjectGroupSessions(
   config: RemoteSessionConfig,
 ): Promise<ProjectGroupSessions> {
   const groups = new Map<string, CachedSession[]>();
+  // A failed read is not an empty tree: let the renderer retain its snapshot.
+  const data = (await remoteRequestJson(
+    config,
+    `/api/profiles/projects/tree?preview_limit=${PREVIEW_LIMIT}`,
+  )) as { projects?: unknown };
   try {
-    const data = (await remoteRequestJson(
-      config,
-      `/api/profiles/projects/tree?preview_limit=${PREVIEW_LIMIT}`,
-    )) as { projects?: unknown };
     const projects = asArray(asRecord(data)?.projects);
     for (const projectRow of projects) {
       const project = asRecord(projectRow);
@@ -161,8 +162,7 @@ export async function remoteProjectGroupSessions(
       if (sessions.length > 0) groups.set(path, sessions);
     }
   } catch {
-    // Best-effort: an unreachable dashboard leaves the caller with the
-    // window-derived groups.
+    // Malformed tree rows remain best-effort; transport failures reject above.
   }
   return { groups };
 }
