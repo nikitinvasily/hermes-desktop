@@ -36,6 +36,8 @@ Changes in this fork that are **not** in upstream.
 
 ### Fixes
 
+- **Local files reach remote chats**: attach a PDF, document or archive from the picker, a drop or the clipboard. The app sends its actual bytes to the chat's agent, rather than a Mac path the server cannot read. Failed uploads stop the message instead of silently omitting the file.
+
 - **Chat models follow their agent connection**: switching Local/Remote shows loading instead of the previous agent's model. Model identity loads without waiting for the library, late replies cannot replace the current selection, and Enter keeps your draft until the model is ready.
 
 - **Kanban cards move without browser dialogs** — dragging a card to a supported column opens an in-app confirmation or block-reason form when needed, then saves its new status. Moving Triage to To-do warns that the agent may start working automatically. Unsupported moves and server rejections explain why the card stayed put.

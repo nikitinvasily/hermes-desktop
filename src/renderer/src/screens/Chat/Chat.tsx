@@ -1267,6 +1267,8 @@ function Chat({
             isLoading={isLoading}
             hasSession={!!hermesSessionId}
             sessionId={hermesSessionId}
+            runId={runId}
+            connectionId={connectionId}
             remoteMode={remoteMode}
             profile={profile}
             contextUsage={contextUsage}

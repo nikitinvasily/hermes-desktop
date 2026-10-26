@@ -9,7 +9,9 @@ export interface Attachment {
   name: string;
   mime: string;
   size: number;
-  // Images: data:image/<mime>;base64,<...>
+  // Images and pending non-local path-ref files: data:<mime>;base64,<...>.
+  // Binary bytes are uploaded with file.attach on the bound session;
+  // they must never be replaced with a client-local filesystem path.
   dataUrl?: string;
   // Images: present iff the renderer transcoded/downsampled the source
   // before pushing the attachment (e.g. a 12 MB photo compressed to fit

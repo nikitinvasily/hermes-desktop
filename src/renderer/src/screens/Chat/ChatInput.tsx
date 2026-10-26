@@ -59,6 +59,9 @@ interface ChatInputProps {
   isLoading: boolean;
   hasSession: boolean;
   sessionId?: string | null;
+  /** Stable conversation identity; backend session assignment must not reset drafts. */
+  runId?: string;
+  connectionId?: string;
   remoteMode?: boolean;
   /** Active profile — used to resolve the provider for voice transcription. */
   profile?: string;
@@ -82,6 +85,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
       isLoading,
       hasSession,
       sessionId,
+      runId,
+      connectionId,
       remoteMode,
       profile,
       contextUsage,
@@ -104,6 +109,19 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
     const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
     const [attachments, setAttachments] = useState<Attachment[]>([]);
     const [attachmentError, setAttachmentError] = useState<string | null>(null);
+    const [readingAttachments, setReadingAttachments] = useState(false);
+    const attachmentGenerationRef = useRef(0);
+    const attachmentReadsRef = useRef(0);
+    useLayoutEffect(() => {
+      attachmentGenerationRef.current += 1;
+      attachmentReadsRef.current = 0;
+      setReadingAttachments(false);
+      setAttachments([]);
+      setAttachmentError(null);
+      return () => {
+        attachmentGenerationRef.current += 1;
+      };
+    }, [connectionId, profile, runId, remoteMode]);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const slashMenuRef = useRef<HTMLDivElement>(null);
     const slashMenuListRef = useRef<HTMLDivElement>(null);
@@ -190,23 +208,25 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
 
     const ingestFiles = useCallback(
       async (files: File[] | FileList): Promise<AttachmentError[]> => {
-        const { attachments: added, errors } = await processFiles(
-          files,
-          attachments.length,
-          {
-            sessionId: sessionId || undefined,
-            remoteMode: !!remoteMode,
-          },
-        );
-        if (added.length > 0) {
-          setAttachments((prev) => [...prev, ...added]);
+        const generation = attachmentGenerationRef.current;
+        attachmentReadsRef.current += 1;
+        setReadingAttachments(true);
+        try {
+          const { attachments: added, errors } = await processFiles(
+            files,
+            attachments.length,
+            { sessionId: sessionId || undefined, remoteMode: !!remoteMode },
+          );
+          if (generation !== attachmentGenerationRef.current) return [];
+          if (added.length > 0) setAttachments((prev) => [...prev, ...added]);
+          setAttachmentError(errors.length > 0 ? formatError(errors[0]) : null);
+          return errors;
+        } finally {
+          if (generation === attachmentGenerationRef.current) {
+            attachmentReadsRef.current -= 1;
+            setReadingAttachments(attachmentReadsRef.current > 0);
+          }
         }
-        if (errors.length > 0) {
-          setAttachmentError(formatError(errors[0]));
-        } else {
-          setAttachmentError(null);
-        }
-        return errors;
       },
       [attachments.length, formatError, sessionId, remoteMode],
     );
@@ -237,6 +257,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
           });
         },
         clear(): void {
+          attachmentGenerationRef.current += 1;
+          attachmentReadsRef.current = 0;
+          setReadingAttachments(false);
           setInput("");
           setAttachments([]);
           setAttachmentError(null);
@@ -371,7 +394,12 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
     function handleSend(): void {
       const text = input.trim();
       const hasPayload = text.length > 0 || attachments.length > 0;
-      if (!hasPayload || readiness?.ok === false) return;
+      if (
+        !hasPayload ||
+        readiness?.ok === false ||
+        attachmentReadsRef.current > 0
+      )
+        return;
       setSlashMenuOpen(false);
       const sendAttachments = attachments;
       clearAfterSend(text);
@@ -380,7 +408,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
 
     function handleQuickAsk(): void {
       const text = input.trim();
-      if (!text) return;
+      if (!text || attachmentReadsRef.current > 0) return;
       const sendAttachments = attachments;
       clearAfterSend(text);
       onQuickAsk(text, sendAttachments);
@@ -501,7 +529,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
     // can queue messages while the agent is mid-response.
     const readinessOk = readiness?.ok !== false;
     const canSend =
-      (input.trim().length > 0 || attachments.length > 0) && readinessOk;
+      (input.trim().length > 0 || attachments.length > 0) &&
+      readinessOk &&
+      !readingAttachments;
 
     // Map fixLocation → user-facing call to action. The strings are
     // wrapped in i18n; the location ids come from main/validation.ts.

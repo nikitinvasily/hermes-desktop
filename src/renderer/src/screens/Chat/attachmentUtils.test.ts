@@ -155,15 +155,25 @@ describe("processFiles", () => {
     ).not.toHaveBeenCalled();
   });
 
-  it("blocks path-ref attachments in remote mode", async () => {
+  it("carries remote document bytes without exposing their Mac origin path", async () => {
+    const stage = vi.fn();
+    const getPath = vi.fn(() => "/Users/me/report.pdf");
+    (window as unknown as { hermesAPI: Record<string, unknown> }).hermesAPI = {
+      getPathForFile: getPath,
+      stageAttachment: stage,
+    };
     const file = makeFile("report.pdf", "application/pdf", "%PDF-1.4");
     const out = await processFiles([file], 0, { remoteMode: true });
-    expect(out.attachments).toEqual([]);
-    expect(out.errors).toHaveLength(1);
-    expect(out.errors[0]).toEqual({
-      code: "remote-mode-binary",
-      filename: "report.pdf",
-    });
+    expect(out.errors).toEqual([]);
+    expect(out.attachments).toEqual([
+      expect.objectContaining({
+        kind: "path-ref",
+        dataUrl: "data:application/pdf;base64," + btoa("%PDF-1.4"),
+      }),
+    ]);
+    expect(out.attachments[0].path).toBeUndefined();
+    expect(getPath).not.toHaveBeenCalled();
+    expect(stage).not.toHaveBeenCalled();
   });
 
   it("rejects a text file over the size limit", async () => {

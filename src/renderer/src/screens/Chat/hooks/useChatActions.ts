@@ -4,7 +4,11 @@ import type { DashboardSendResult } from "./useDashboardChatTransport";
 export type SubmissionOutcome = "accepted" | "rejected" | "uncertain";
 
 import type { ChatInputHandle } from "../ChatInput";
-import { createTurn, shouldSendToAgent } from "../chatMessages";
+import {
+  createTurn,
+  markActiveTurnFailed,
+  shouldSendToAgent,
+} from "../chatMessages";
 import type { SlashExecOutcome } from "../slashExec";
 import { handleSlashCommand } from "../slash/handleSlashCommand";
 import { parseSlashCommand } from "../slash/parseSlashCommand";
@@ -179,6 +183,26 @@ export function useChatActions({
           if (handled === "rejected" || handled === "uncertain") return handled;
         }
         lastSendTransportRef.current = "legacy";
+        // This payload is known to be unsupported before IPC starts a turn.
+        // Do not classify it as a lost ACK or silently send only its text.
+        if (
+          attachments?.some(
+            (attachment) =>
+              attachment.kind === "path-ref" &&
+              attachment.dataUrl !== undefined,
+          )
+        ) {
+          const message =
+            "Binary file uploads require the Dashboard transport; legacy transport cannot send these bytes. Switch chat transport to Auto or Dashboard and try again.";
+          const activeTurn = activeTurnRef.current;
+          if (activeTurn) activeTurn.status = "failed";
+          setMessages((prev) =>
+            markActiveTurnFailed(prev, message, activeTurn),
+          );
+          activeTurnRef.current = null;
+          setIsLoading(false);
+          return "rejected";
+        }
         await window.hermesAPI.sendMessage(
           text,
           profile,
@@ -206,6 +230,9 @@ export function useChatActions({
       hermesSessionId,
       contextFolder,
       sendViaDashboard,
+      activeTurnRef,
+      setMessages,
+      setIsLoading,
     ],
   );
 

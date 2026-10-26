@@ -8,6 +8,14 @@ The transcript parser recognizes explicit `MEDIA:<path-or-url>` tokens, markdown
 
 [[src/renderer/src/screens/Chat/mediaUtils.ts#parseMediaTokens]] is the single entry point. Text segments render through AgentMarkdown; media segments render through [[src/renderer/src/components/MediaImage.tsx#MediaSegmentView]], which trusts explicit tokens eagerly and verifies inferred bare-path candidates via `mediaFileExists` before replacing them. Local paths resolve to data URLs through `readMediaFile`, whose main-process side falls back to the remote dashboard (`fs/read-data-url`) — so server-side files render identically in remote sessions.
 
+## Remote file attachments
+
+Non-local document attachments carry bytes until the bound chat runtime stores them with `file.attach`; the agent receives its own server-side reference, never a Mac path.
+
+[[src/renderer/src/screens/Chat/attachmentUtils.ts#processFiles]] keeps images and small text inline, retains local origin/staging paths, and reads non-local binaries into a `path-ref` data URL. [[src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts#syncDashboardAttachmentsForSubmit]] uploads that data URL with the selected runtime session ID, so the backend chooses the session profile's attachment directory and returns `ref_text` for the prompt. Authentication and connection routing use the existing chat socket. Upload failures and unsupported transports reject the send without dropping the file into a legacy text-only fallback.
+
+[[src/renderer/src/screens/Chat/ChatInput.tsx#ChatInput]] blocks submission while file reads are pending. A generation scoped to connection, profile and conversation discards late reads after scope changes, clear or unmount, including switching away and back. Regression tests live in [[src/renderer/src/screens/Chat/attachmentUtils.test.ts]], [[src/renderer/src/screens/Chat/ChatInput.test.tsx]] and the transport tests.
+
 ## Platform delivery markers
 
 Directives the agent emits for messaging platforms (`[[audio_as_voice]]`, `[[as_document]]`) are stripped before display; the voice directive marks the message's audio tokens as voice messages.

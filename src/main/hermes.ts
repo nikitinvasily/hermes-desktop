@@ -1473,6 +1473,19 @@ type ChatContent =
       | { type: "image_url"; image_url: { url: string } }
     >;
 
+function assertLegacyAttachmentsSupported(attachments?: Attachment[]): void {
+  if (
+    attachments?.some(
+      (attachment) =>
+        attachment.kind === "path-ref" && attachment.dataUrl !== undefined,
+    )
+  ) {
+    throw new Error(
+      "Binary file uploads require the Dashboard transport; legacy transport cannot send these bytes.",
+    );
+  }
+}
+
 /**
  * Build the OpenAI-compatible `content` payload for a user turn.
  *
@@ -1491,6 +1504,7 @@ export function buildUserContent(
   text: string,
   attachments?: Attachment[],
 ): ChatContent {
+  assertLegacyAttachmentsSupported(attachments);
   if (!attachments || attachments.length === 0) return text;
 
   const textFiles = attachments.filter((a) => a.kind === "text-file");
@@ -3566,6 +3580,7 @@ export async function sendMessage(
   conn: ConnectionConfig = getConnectionConfig(),
   connectionId?: string,
 ): Promise<ChatHandle> {
+  assertLegacyAttachmentsSupported(attachments);
   ensureInitialized();
 
   // Remote mode: always use API, no CLI fallback. Cross-provider session

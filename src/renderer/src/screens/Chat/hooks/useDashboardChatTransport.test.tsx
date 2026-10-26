@@ -15,7 +15,7 @@ import { useTranscriptState } from "./useTranscriptState";
 import { useChatActions } from "./useChatActions";
 import { useChatQueue } from "./useChatQueue";
 import type { SlashCommandCatalog } from "../slash/types";
-import type { ActiveTurn, ChatMessage, UsageState } from "../types";
+import type { ActiveTurn, Attachment, ChatMessage, UsageState } from "../types";
 
 type SetUsageMock = Mock<(value: SetStateAction<UsageState | null>) => void>;
 
@@ -2246,6 +2246,151 @@ describe("useDashboardChatTransport approvals", () => {
       api.respondApproval?.("approval-second", "once"),
     ).resolves.toBe(true);
   });
+});
+
+describe("binary attachment Auto transport safety", () => {
+  const binary = {
+    id: "binary",
+    kind: "path-ref" as const,
+    name: "report.zip",
+    mime: "application/octet-stream",
+    size: 6,
+    dataUrl: "data:application/octet-stream;base64,AP9QSwAB",
+  };
+
+  beforeEach(() => {
+    dashboardMock.request.mockReset();
+    dashboardMock.connect.mockReset().mockResolvedValue(undefined);
+    dashboardMock.request.mockImplementation(
+      async (method: string): Promise<unknown> => {
+        if (method === "session.create")
+          return {
+            session_id: "runtime-binary",
+            stored_session_id: "stored-binary",
+          };
+        if (method === "model.options")
+          return { provider: "bad-provider", model: "bad-model" };
+        if (method === "file.attach")
+          return { attached: true, ref_text: "@file:/server/report.zip" };
+        return {};
+      },
+    );
+    Object.defineProperty(window, "hermesAPI", {
+      configurable: true,
+      value: {
+        startDashboard: vi.fn(async () => ({
+          running: true,
+          connection: { wsUrl: "ws://binary-dashboard" },
+        })),
+      },
+    });
+  });
+
+  it("submits the returned server ref with no client path or inline binary", async () => {
+    const api: HarnessApi = {};
+    render(
+      <Harness
+        api={api}
+        initialConnectionMode="remote"
+        fallbackOnUnavailable
+      />,
+    );
+    await act(async () => {
+      expect(
+        await api.send?.("inspect", [
+          { ...binary, path: "/Users/private/report.zip" },
+        ]),
+      ).toBe(true);
+    });
+    expect(dashboardMock.request).toHaveBeenCalledWith("file.attach", {
+      session_id: "runtime-binary",
+      name: "report.zip",
+      data_url: binary.dataUrl,
+    });
+    expect(dashboardMock.request).toHaveBeenCalledWith(
+      "prompt.submit",
+      expect.objectContaining({
+        session_id: "runtime-binary",
+        text: "@file:/server/report.zip\n\ninspect",
+      }),
+    );
+    expect(JSON.stringify(dashboardMock.request.mock.calls)).not.toContain(
+      "/Users/private",
+    );
+  });
+
+  it.each([
+    "startup",
+    "invalid-binary",
+    "unhandled-image",
+    "sync-unhandled",
+    "unsupported",
+    "upload-error",
+    "upload-rejected",
+    "missing-ref",
+  ])(
+    "rejects instead of falling back or submitting without the file: %s",
+    async (failure) => {
+      const attachments: Attachment[] = [{ ...binary }];
+      if (failure === "startup") {
+        Object.defineProperty(window, "hermesAPI", {
+          configurable: true,
+          value: {
+            startDashboard: vi.fn(async () => ({
+              running: false,
+              error: "Dashboard unavailable",
+            })),
+          },
+        });
+      }
+      if (failure === "invalid-binary")
+        attachments[0].dataUrl = "not a data URL";
+      if (failure === "unhandled-image")
+        attachments.push({ ...binary, kind: "image", dataUrl: "broken" });
+      if (failure === "sync-unhandled")
+        attachments.push({
+          ...binary,
+          kind: "image",
+          dataUrl: "data:image/png;base64,AAA=",
+        });
+      const normalRequest = dashboardMock.request.getMockImplementation()!;
+      dashboardMock.request.mockImplementation(
+        async (method: string, params: unknown): Promise<unknown> => {
+          // Change after prompt validation to exercise sync's handled:false boundary.
+          if (failure === "sync-unhandled" && method === "model.options")
+            attachments[1].dataUrl = "broken";
+          if (method === "file.attach") {
+            if (failure === "unsupported")
+              throw new Error("unknown method file.attach");
+            if (failure === "upload-error") throw new Error("disk full");
+            if (failure === "upload-rejected")
+              return { attached: false, message: "Upload rejected" };
+            if (failure === "missing-ref") return { attached: true };
+          }
+          return normalRequest(method, params);
+        },
+      );
+      const api: HarnessApi = {};
+      render(
+        <Harness
+          api={api}
+          initialConnectionMode="remote"
+          fallbackOnUnavailable
+        />,
+      );
+      await act(async () => {
+        expect(await api.send?.("inspect", attachments)).toBe("rejected");
+      });
+      expect(
+        dashboardMock.request.mock.calls.some(
+          ([method]) => method === "prompt.submit",
+        ),
+      ).toBe(false);
+      expect(
+        api.messages?.some((message) => "error" in message && !!message.error),
+      ).toBe(true);
+    },
+  );
 });
 
 describe("useDashboardChatTransport unavailable fallback (issue #667)", () => {

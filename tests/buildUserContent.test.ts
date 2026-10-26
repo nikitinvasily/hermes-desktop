@@ -57,7 +57,8 @@ vi.mock("../src/main/process-options", () => ({
   HIDDEN_SUBPROCESS_OPTIONS: {},
 }));
 
-import { buildUserContent } from "../src/main/hermes";
+import { buildUserContent, sendMessage } from "../src/main/hermes";
+import * as config from "../src/main/config";
 import type { Attachment } from "../src/shared/attachments";
 
 // ── helpers ──────────────────────────────────────────────
@@ -112,6 +113,53 @@ function pathRef(
 // ── tests ────────────────────────────────────────────────
 
 describe("buildUserContent", () => {
+  it.each([undefined, "/Users/private/report.zip"])(
+    "rejects binary data URLs in legacy composition even when path is %s",
+    (path) => {
+      expect(() =>
+        buildUserContent("inspect", [
+          {
+            ...pathRef("report.zip", path),
+            dataUrl: "data:application/octet-stream;base64,AP9QSwAB",
+          },
+        ]),
+      ).toThrow(/binary.*Dashboard/i);
+    },
+  );
+
+  it("rejects binary uploads before legacy routing or model lookup", async () => {
+    vi.useFakeTimers();
+    const modelLookup = vi
+      .spyOn(config, "getModelConfig")
+      .mockImplementation(() => {
+        throw new Error("legacy routing must not start");
+      });
+    try {
+      await expect(
+        sendMessage(
+          "inspect",
+          {
+            onChunk: vi.fn(),
+            onDone: vi.fn(),
+            onError: vi.fn(),
+          },
+          undefined,
+          undefined,
+          undefined,
+          [
+            {
+              ...pathRef("report.zip", undefined),
+              dataUrl: "data:application/octet-stream;base64,AP9QSwAB",
+            },
+          ],
+        ),
+      ).rejects.toThrow(/binary.*Dashboard/i);
+      expect(modelLookup).not.toHaveBeenCalled();
+    } finally {
+      modelLookup.mockRestore();
+      vi.useRealTimers();
+    }
+  });
   it("returns the plain string verbatim when no attachments arg", () => {
     const result = buildUserContent("hello world");
     expect(result).toBe("hello world");
