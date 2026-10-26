@@ -25,11 +25,31 @@ describe("session-strip-free shell CSS contract", () => {
     expect(rule(".content")).not.toMatch(/(?:padding|margin)-top/);
   });
 
-  it("aligns the floating context panel with the inset conversation top", () => {
+  it("insets the floating context panel 12px down and left from the conversation edge", () => {
     const panel = rule(".chat-context-panel");
-    expect(panel).toMatch(/top:\s*0(?:px)?\s*;/);
+    expect(panel).toMatch(/top:\s*12px\s*;/);
+    expect(panel).toMatch(/margin-right:\s*12px\s*;/);
     expect(panel).toMatch(/position:\s*absolute/);
-    expect(panel).toMatch(/right:\s*12px/);
+    expect(panel).toContain("calc(24px + var(--chat-scrollbar-gutter, 0px))");
+    expect(panel).toContain(
+      "calc((100% - 1300px + var(--chat-scrollbar-gutter, 0px)) / 2)",
+    );
+    expect(panel).toContain(
+      "max-width: min(300px, calc(100% - 60px - var(--chat-scrollbar-gutter, 0px)))",
+    );
+  });
+
+  it("uses the existing raised surface for the sidebar and floating context panel", () => {
+    expect(rule(".sidebar")).toMatch(/background:\s*var\(--bg-tertiary\)/);
+    expect(rule(".app.shell-vibrant .sidebar")).toMatch(
+      /background:\s*var\(--bg-tertiary\)/,
+    );
+    expect(rule(".chat-context-panel")).toMatch(
+      /background:\s*var\(--bg-tertiary\)/,
+    );
+    expect(rule(".sidebar-recent-session.active")).toMatch(
+      /background:\s*var\(--sidebar-hover-bg\)/,
+    );
   });
 
   it("confines main-window dragging above the traffic lights without covering controls", () => {

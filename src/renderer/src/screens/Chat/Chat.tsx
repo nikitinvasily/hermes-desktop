@@ -11,6 +11,7 @@ import { ReasoningEffortPicker } from "./ReasoningEffortPicker";
 import { ContextFolderChip } from "./ContextFolderChip";
 import { WorktreePanel } from "./WorktreePanel";
 import { ChatContextPanel } from "./ChatContextPanel";
+import { ChatMessagesWrap } from "./ChatMessagesWrap";
 import type { TodoSnapshot } from "./todoState";
 import { todoFromEvent, todoFromMessages } from "./todoState";
 import { WebPreviewPanel } from "./WebPreviewPanel";
@@ -1202,7 +1203,7 @@ function Chat({
       <ConfigHealthBanner profile={profile} onOpenDiagnose={onOpenDiagnose} />
 
       <div className="chat-body">
-        <div className="chat-messages-wrap">
+        <ChatMessagesWrap>
           <div className="chat-messages" ref={containerRef}>
             <div className="chat-content-column">
               {messages.length === 0 ? (
@@ -1237,7 +1238,7 @@ function Chat({
               todo={todoSnapshot}
             />
           )}
-        </div>
+        </ChatMessagesWrap>
 
         {contextFolder && worktreeVisible && (
           <WorktreePanel folderPath={contextFolder} remoteMode={remoteMode} />
