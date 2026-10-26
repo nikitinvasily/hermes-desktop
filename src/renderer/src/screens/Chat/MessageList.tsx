@@ -41,6 +41,9 @@ function isToolRow(m: ChatMessage): m is ToolCallMessage | ToolResultMessage {
 
 interface MessageListProps {
   messages: ChatMessage[];
+  /** Focus a bounded historical window without expanding the trailing transcript. */
+  searchMessageId?: string;
+  searchOpen?: boolean;
   isLoading: boolean;
   toolProgress: string | null;
   onApprove: () => void;
@@ -106,8 +109,16 @@ export const MessageList = memo(function MessageList({
   onApprovalRespond,
   onApprovalResolved,
   agentAvatar,
+  searchMessageId,
+  searchOpen = !!searchMessageId,
 }: MessageListProps): React.JSX.Element {
   const { t } = useI18n();
+  // No-hit/empty queries retain the current search window, not the history budget.
+  const [searchWindowId, setSearchWindowId] = useState(searchMessageId);
+  const focusedMessageId = searchOpen
+    ? (searchMessageId ?? searchWindowId)
+    : undefined;
+  if (searchWindowId !== focusedMessageId) setSearchWindowId(focusedMessageId);
   // Extra rows bound the tree while following the latest output. When the
   // reader scrolls up, retain the first mounted row until they return below.
   const [extraRows, setExtraRows] = useState(0);
@@ -150,6 +161,7 @@ export const MessageList = memo(function MessageList({
     const container = earlierMarkerRef.current?.closest(".chat-messages");
     if (!container) return;
     const onScroll = (): void => {
+      if (searchOpen) return;
       const atBottom =
         container.scrollHeight - container.scrollTop - container.clientHeight <
         60;
@@ -165,9 +177,10 @@ export const MessageList = memo(function MessageList({
     };
     container.addEventListener("scroll", onScroll, { passive: true });
     return () => container.removeEventListener("scroll", onScroll);
-  }, []);
+  }, [searchOpen]);
 
   const expandEarlier = useCallback(() => {
+    if (searchOpen) return;
     const container = earlierMarkerRef.current?.closest(
       ".chat-messages",
     ) as HTMLElement | null;
@@ -187,7 +200,7 @@ export const MessageList = memo(function MessageList({
       snapshot.messages[Math.max(0, snapshot.start - TRANSCRIPT_WINDOW)]?.id ??
         null,
     );
-  }, []);
+  }, [searchOpen]);
 
   // Restore the viewport after the newly revealed rows commit (pre-paint, so
   // there is no visible flicker): keep the previously-visible content where
@@ -268,9 +281,32 @@ export const MessageList = memo(function MessageList({
       (message.kind === "clarify" && !message.resolved),
   );
   if (pendingIndex >= 0) windowStart = Math.min(windowStart, pendingIndex);
+  const searchIndex = focusedMessageId
+    ? visibleMessages.findIndex((message) => message.id === focusedMessageId)
+    : -1;
+  let windowEnd = visibleMessages.length;
+  if (searchIndex >= 0) {
+    windowStart = Math.max(0, searchIndex - Math.floor(TRANSCRIPT_WINDOW / 2));
+    windowEnd = Math.min(
+      visibleMessages.length,
+      windowStart + TRANSCRIPT_WINDOW,
+    );
+  }
   const hiddenCount = windowStart;
-  const windowedMessages =
-    windowStart > 0 ? visibleMessages.slice(windowStart) : visibleMessages;
+  const windowedMessages = visibleMessages.slice(windowStart, windowEnd);
+  if (searchIndex >= 0) {
+    const isPending = (message: ChatMessage): boolean =>
+      (message.kind === "approval" &&
+        !message.resolved &&
+        !message.unavailable) ||
+      (message.kind === "clarify" && !message.resolved);
+    windowedMessages.unshift(
+      ...visibleMessages.slice(0, windowStart).filter(isPending),
+    );
+    windowedMessages.push(
+      ...visibleMessages.slice(windowEnd).filter(isPending),
+    );
+  }
   renderedCountRef.current = windowedMessages.length;
   windowSnapshotRef.current = { messages: visibleMessages, start: windowStart };
 
@@ -293,7 +329,7 @@ export const MessageList = memo(function MessageList({
   // the marker never leaves the zone and a persistent observer would go
   // silent. Recreating it re-delivers an initial entry, which keeps the
   // auto-load going until the marker is genuinely out of range.
-  const hasEarlier = hiddenCount > 0;
+  const hasEarlier = hiddenCount > 0 && !searchOpen && searchIndex < 0;
   useEffect(() => {
     const marker = earlierMarkerRef.current;
     if (!marker || !hasEarlier) return;
@@ -419,6 +455,7 @@ export const MessageList = memo(function MessageList({
       <MessageRow
         key={msg.id}
         msg={bubble}
+        searchActive={msg.id === searchMessageId}
         // Last-bubble marker (approval bar, active avatar) belongs to the
         // newest visible bubble even when reasoning/tool rows trail it.
         isLast={msg.id === lastVisibleBubbleId}

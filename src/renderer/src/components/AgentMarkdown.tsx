@@ -1,6 +1,7 @@
-import { useState, useEffect, memo } from "react";
+import { useState, useEffect, memo, Fragment } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { rehypeSearchBlocks } from "../screens/Chat/searchMarkdown";
 import { Copy } from "lucide-react";
 import { useI18n } from "./useI18n";
 import { MediaImage, DownloadChip } from "./MediaImage";
@@ -72,9 +73,10 @@ function DiffView({ code }: { code: string }): React.JSX.Element {
         else if (line.startsWith("-")) cls += " chat-diff-remove";
         else if (line.startsWith("@@")) cls += " chat-diff-hunk";
         return (
-          <div key={i} className={cls}>
-            {line || "\u00A0"}
-          </div>
+          <Fragment key={i}>
+            <div className={cls}>{line || <br />}</div>
+            {i < lines.length - 1 ? "\n" : null}
+          </Fragment>
         );
       })}
     </div>
@@ -100,10 +102,14 @@ function CodeBlock({
   className,
   children,
   blockId,
+  searchBlock,
+  searchActive = false,
 }: {
   className?: string;
   children?: React.ReactNode;
   blockId?: string;
+  searchBlock?: string;
+  searchActive?: boolean;
 }): React.JSX.Element {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
@@ -175,10 +181,15 @@ function CodeBlock({
           {copied ? t("common.copied") : <Copy size={13} />}
         </button>
       </div>
-      <div className={isLong && isCollapsed ? "chat-code-collapsed" : ""}>
-        {codeContent}
+      <div
+        className={
+          isLong && isCollapsed && !searchActive ? "chat-code-collapsed" : ""
+        }
+        data-chat-search-code=""
+      >
+        <div data-chat-search-block={searchBlock}>{codeContent}</div>
       </div>
-      {isLong && (
+      {isLong && !searchActive && (
         <button
           type="button"
           className="chat-code-expand-btn"
@@ -205,12 +216,15 @@ function CodeBlock({
 // Shared Markdown renderer that opens links externally
 const AgentMarkdown = memo(function AgentMarkdown({
   children,
+  searchActive = false,
 }: {
   children: string;
+  searchActive?: boolean;
 }): React.JSX.Element {
   return (
     <Markdown
       remarkPlugins={[remarkGfm]}
+      rehypePlugins={[rehypeSearchBlocks]}
       components={{
         a: ({ href, children }) => (
           <a
@@ -245,10 +259,14 @@ const AgentMarkdown = memo(function AgentMarkdown({
           // route those to the download chip instead of letting MediaImage
           // try to load a non-image MIME and fail. (Follow-up from #303.)
           const token = describeImageSrc(src);
-          return token.isImage ? (
-            <MediaImage token={token} />
-          ) : (
-            <DownloadChip token={token} />
+          return (
+            <span data-chat-search-ignore="" style={{ display: "contents" }}>
+              {token.isImage ? (
+                <MediaImage token={token} />
+              ) : (
+                <DownloadChip token={token} />
+              )}
+            </span>
           );
         },
         code: ({ className, children, node, ...props }) => {
@@ -272,7 +290,16 @@ const AgentMarkdown = memo(function AgentMarkdown({
               ? `${start.offset ?? start.line}:${className ?? ""}`
               : undefined;
           return (
-            <CodeBlock className={className} blockId={blockId}>
+            <CodeBlock
+              className={className}
+              blockId={blockId}
+              searchBlock={
+                node?.properties?.["data-chat-search-block"] as
+                  | string
+                  | undefined
+              }
+              searchActive={searchActive}
+            >
               {children}
             </CodeBlock>
           );

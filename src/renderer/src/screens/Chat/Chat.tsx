@@ -5,6 +5,7 @@ import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { ChatEmptyState } from "./ChatEmptyState";
 import { ApprovalToggle } from "./ApprovalToggle";
 import { MessageList } from "./MessageList";
+import { useMessageSearch } from "./useMessageSearch";
 import { ModelPicker } from "./ModelPicker";
 import { ReasoningEffortPicker } from "./ReasoningEffortPicker";
 import { ContextFolderChip } from "./ContextFolderChip";
@@ -503,7 +504,18 @@ function Chat({
     };
   }, [connectionId]);
 
-  const { containerRef, bottomRef } = useChatScroll(messages);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const messageSearch = useMessageSearch({
+    messages,
+    active,
+    scope: JSON.stringify([runId, connectionId, profile, initialSessionId]),
+    containerRef,
+  });
+  const { bottomRef } = useChatScroll(
+    messages,
+    messageSearch.open,
+    containerRef,
+  );
   const modelConfig = useModelConfig(profile, connectionId);
   const { reload: reloadModelConfig, selectModel } = modelConfig;
   const chatCurrentModel =
@@ -1186,6 +1198,7 @@ function Chat({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
+      {messageSearch.toolbar}
       <ConfigHealthBanner profile={profile} onOpenDiagnose={onOpenDiagnose} />
 
       <div className="chat-body">
@@ -1197,6 +1210,8 @@ function Chat({
               ) : (
                 <MessageList
                   messages={messages}
+                  searchMessageId={messageSearch.searchMessageId}
+                  searchOpen={messageSearch.open}
                   isLoading={isLoading}
                   toolProgress={toolProgress}
                   onApprove={actions.handleApprove}
