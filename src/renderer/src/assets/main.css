@@ -4285,7 +4285,7 @@ body:has(.shell-vibrant),
   flex-direction: column;
   height: 100%;
   box-sizing: border-box;
-  padding-top: 12px;
+  padding-top: 24px;
   position: relative;
 }
 

@@ -20,7 +20,7 @@ describe("session-strip-free shell CSS contract", () => {
 
   it("adds a small inset only inside chat panes, not the app-wide content", () => {
     const chat = rule(".chat-container");
-    expect(chat).toMatch(/padding-top:\s*12px/);
+    expect(chat).toMatch(/padding-top:\s*24px/);
     expect(chat).toMatch(/box-sizing:\s*border-box/);
     expect(rule(".content")).not.toMatch(/(?:padding|margin)-top/);
   });
