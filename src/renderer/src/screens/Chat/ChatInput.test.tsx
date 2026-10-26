@@ -1,4 +1,15 @@
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  cleanup,
+  act,
+  waitFor,
+} from "@testing-library/react";
+import { createRef } from "react";
+import * as attachmentUtils from "./attachmentUtils";
+import type { Attachment } from "../../../../shared/attachments";
+import type { ChatInputHandle } from "./ChatInput";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HTMLAttributes, PropsWithChildren } from "react";
 
@@ -46,7 +57,250 @@ vi.mock("../../components/useI18n", () => ({
 
 import { ChatInput } from "./ChatInput";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+describe("ChatInput remote file reads", () => {
+  const attachment: Attachment = {
+    id: "binary-1",
+    kind: "path-ref",
+    name: "report.pdf",
+    mime: "application/pdf",
+    size: 3,
+    dataUrl: "data:application/pdf;base64,YWJj",
+  };
+
+  it.each(["picker", "paste", "drop"])(
+    "sends actual remote file bytes from %s",
+    async (source) => {
+      const ref = createRef<ChatInputHandle>();
+      const onSubmit = vi.fn();
+      render(
+        <ChatInput
+          ref={ref}
+          isLoading={false}
+          hasSession={false}
+          remoteMode
+          connectionId="remote-a"
+          onSubmit={onSubmit}
+          onQuickAsk={vi.fn()}
+          onAbort={vi.fn()}
+        />,
+      );
+      const file = new File(["abc"], "report.pdf", { type: "application/pdf" });
+      const textarea = screen.getByPlaceholderText("chat.typeMessage");
+      if (source === "picker") {
+        fireEvent.change(document.querySelector('input[type="file"]')!, {
+          target: { files: [file] },
+        });
+      } else if (source === "paste") {
+        fireEvent.paste(textarea, {
+          clipboardData: {
+            items: [
+              { kind: "file", type: file.type, getAsFile: (): File => file },
+            ],
+          },
+        });
+      } else {
+        await act(async () => {
+          await ref.current!.addFiles([file]);
+        });
+      }
+      await waitFor(() =>
+        expect(
+          document.querySelector(".attachment-chip-name"),
+        ).toHaveTextContent("report.pdf"),
+      );
+      fireEvent.keyDown(textarea, { key: "Enter" });
+      expect(onSubmit).toHaveBeenCalledWith("", [
+        expect.objectContaining({
+          kind: "path-ref",
+          name: "report.pdf",
+          dataUrl: "data:application/pdf;base64,YWJj",
+        }),
+      ]);
+      expect(onSubmit.mock.calls[0][1][0].path).toBeUndefined();
+    },
+  );
+
+  it("keeps an Enter draft while a file is being read", async () => {
+    let finish!: (value: attachmentUtils.ProcessFilesResult) => void;
+    vi.spyOn(attachmentUtils, "processFiles").mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const ref = createRef<ChatInputHandle>();
+    const onSubmit = vi.fn();
+    render(
+      <ChatInput
+        ref={ref}
+        isLoading={false}
+        hasSession={true}
+        remoteMode
+        connectionId="remote-a"
+        profile="default"
+        onSubmit={onSubmit}
+        onQuickAsk={vi.fn()}
+        onAbort={vi.fn()}
+      />,
+    );
+    let pending!: Promise<attachmentUtils.AttachmentError[]>;
+    act(() => {
+      pending = ref.current!.addFiles([new File(["abc"], "report.pdf")]);
+    });
+    const textarea = screen.getByPlaceholderText(
+      "chat.typeMessage",
+    ) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "read this" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(textarea.value).toBe("read this");
+    expect(document.querySelector(".chat-send-btn")).toBeDisabled();
+    await act(async () => {
+      finish({ attachments: [attachment], errors: [] });
+      await pending;
+    });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSubmit).toHaveBeenCalledWith("read this", [attachment]);
+  });
+
+  it.each(["pending", "completed"])(
+    "preserves a %s follow-up attachment on the first backend session assignment",
+    async (readState) => {
+      let finish!: (value: attachmentUtils.ProcessFilesResult) => void;
+      vi.spyOn(attachmentUtils, "processFiles").mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const ref = createRef<ChatInputHandle>();
+      const props = {
+        runId: "run-a",
+        isLoading: false,
+        hasSession: false,
+        sessionId: null as string | null,
+        remoteMode: true,
+        connectionId: "remote-a",
+        profile: "default",
+        onSubmit: vi.fn(),
+        onQuickAsk: vi.fn(),
+        onAbort: vi.fn(),
+      };
+      const { rerender } = render(<ChatInput ref={ref} {...props} />);
+      let pending!: Promise<attachmentUtils.AttachmentError[]>;
+      act(() => {
+        pending = ref.current!.addFiles([new File(["abc"], "report.pdf")]);
+      });
+      const completeRead = async (): Promise<void> => {
+        await act(async () => {
+          finish({ attachments: [attachment], errors: [] });
+          await pending;
+        });
+      };
+      if (readState === "completed") await completeRead();
+      rerender(
+        <ChatInput ref={ref} {...props} hasSession sessionId="stored-a" />,
+      );
+      const textarea = screen.getByPlaceholderText("chat.typeMessage");
+      fireEvent.change(textarea, { target: { value: "follow-up" } });
+      if (readState === "pending") {
+        fireEvent.keyDown(textarea, { key: "Enter" });
+        expect(props.onSubmit).not.toHaveBeenCalled();
+        expect(document.querySelector(".chat-send-btn")).toBeDisabled();
+        await completeRead();
+      }
+      expect(document.querySelector(".attachment-chip-name")).toHaveTextContent(
+        "report.pdf",
+      );
+      fireEvent.keyDown(textarea, { key: "Enter" });
+      expect(props.onSubmit).toHaveBeenCalledWith("follow-up", [attachment]);
+    },
+  );
+
+  it("clears completed attachments when the stable run changes", async () => {
+    vi.spyOn(attachmentUtils, "processFiles").mockResolvedValueOnce({
+      attachments: [attachment],
+      errors: [],
+    });
+    const ref = createRef<ChatInputHandle>();
+    const props = {
+      isLoading: false,
+      hasSession: false,
+      remoteMode: true,
+      connectionId: "remote-a",
+      profile: "default",
+      sessionId: null,
+      onSubmit: vi.fn(),
+      onQuickAsk: vi.fn(),
+      onAbort: vi.fn(),
+    };
+    const { rerender } = render(
+      <ChatInput ref={ref} {...props} runId="run-a" />,
+    );
+    await act(async () => {
+      await ref.current!.addFiles([new File(["abc"], "report.pdf")]);
+    });
+    expect(document.querySelector(".attachment-chip")).not.toBeNull();
+    rerender(<ChatInput ref={ref} {...props} runId="run-b" />);
+    expect(document.querySelector(".attachment-chip")).toBeNull();
+  });
+
+  it.each(["connection", "profile", "run", "clear", "unmount"])(
+    "ignores a delayed read after %s changes",
+    async (change) => {
+      let finish!: (value: attachmentUtils.ProcessFilesResult) => void;
+      vi.spyOn(attachmentUtils, "processFiles").mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const ref = createRef<ChatInputHandle>();
+      const props = {
+        isLoading: false,
+        hasSession: true,
+        remoteMode: true,
+        runId: "run-a",
+        connectionId: "remote-a",
+        profile: "default",
+        onSubmit: vi.fn(),
+        onQuickAsk: vi.fn(),
+        onAbort: vi.fn(),
+      };
+      const { rerender, unmount } = render(<ChatInput ref={ref} {...props} />);
+      let pending!: Promise<attachmentUtils.AttachmentError[]>;
+      act(() => {
+        pending = ref.current!.addFiles([new File(["abc"], "report.pdf")]);
+      });
+      if (change === "clear") act(() => ref.current!.clear());
+      else if (change === "unmount") unmount();
+      else {
+        rerender(
+          <ChatInput
+            ref={ref}
+            {...props}
+            {...(change === "connection"
+              ? { connectionId: "remote-b" }
+              : change === "run"
+                ? { runId: "run-b" }
+                : { profile: "work" })}
+          />,
+        );
+        rerender(<ChatInput ref={ref} {...props} />);
+      }
+      await act(async () => {
+        finish({ attachments: [attachment], errors: [] });
+        await pending;
+      });
+      expect(document.querySelector(".attachment-chip")).toBeNull();
+    },
+  );
+});
 
 function renderInput(
   slashCommands?: React.ComponentProps<typeof ChatInput>["slashCommands"],

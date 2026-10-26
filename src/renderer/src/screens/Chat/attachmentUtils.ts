@@ -25,9 +25,8 @@ export interface ProcessFilesOptions {
   // Session id used to scope staged-paste attachments.  May be empty
   // before the agent has assigned one — staging falls back to "default".
   sessionId?: string;
-  // True when the chat is running against a non-local gateway (SSH or
-  // remote-URL mode).  Path-ref attachments require the file path to
-  // exist on the same host as the agent, so binaries are blocked.
+  // Non-local binaries carry bytes until file.attach stores them in the
+  // bound runtime session's profile. Never forward a client-local path.
   remoteMode?: boolean;
 }
 
@@ -331,10 +330,9 @@ export interface ProcessFilesResult {
  *     a data URL.
  *   - Text/code file (by MIME prefix or extension allowlist) → inline
  *     `text-file` attachment with UTF-8 contents.
- *   - Everything else → `path-ref` attachment carrying the file's
- *     absolute path.  Picker / drag-drop expose the path via
- *     `webUtils.getPathForFile`; clipboard-pasted blobs have no origin
- *     path and are staged to disk via the main process.
+ *   - Everything else → `path-ref`: non-local files carry a data URL for
+ *     session-native upload; local picker / drop files use their origin
+ *     path, and local clipboard blobs are staged by the main process.
  */
 export async function processFiles(
   files: File[] | FileList,
@@ -448,7 +446,22 @@ export async function processFiles(
     // read via its own file tools.  Requires a filesystem path that's
     // valid on the agent's host.
     if (options.remoteMode) {
-      errors.push({ code: "remote-mode-binary", filename: name });
+      try {
+        attachments.push({
+          id: newId(),
+          kind: "path-ref",
+          name,
+          mime: mime || "application/octet-stream",
+          size: file.size,
+          dataUrl: await readAsDataUrl(file),
+        });
+      } catch (err) {
+        errors.push({
+          code: "read-failed",
+          filename: name,
+          detail: err instanceof Error ? err.message : String(err),
+        });
+      }
       continue;
     }
 
@@ -460,7 +473,7 @@ export async function processFiles(
     }
 
     if (!path) {
-      // No origin path (clipboard paste) — stage the bytes to disk.
+      // No origin path (clipboard paste) needs local staging.
       try {
         const base64 = await readAsBase64(file);
         path = await window.hermesAPI.stageAttachment(

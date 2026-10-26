@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   dashboardChatEnabledForConnection,
   dashboardChatEnabledFromEnv,
@@ -290,6 +290,111 @@ describe("isTransientMoaTurn", () => {
 });
 
 describe("dashboard attachment sync", () => {
+  it("uploads binary bytes instead of a client path and uses the runtime session", async () => {
+    const dataUrl = "data:application/octet-stream;base64,AP9QSwAB";
+    const request = vi.fn(
+      async (): Promise<unknown> => ({
+        attached: true,
+        ref_text: "@file:/server/report.zip",
+      }),
+    );
+    const attachments = [
+      {
+        id: "binary",
+        kind: "path-ref" as const,
+        name: "report.zip",
+        mime: "application/octet-stream",
+        size: 6,
+        dataUrl,
+        path: "/Users/private/report.zip",
+      },
+    ];
+    expect(dashboardPromptTextForAttachments("inspect", attachments)).toBe(
+      "inspect",
+    );
+    const result = await syncDashboardAttachmentsForSubmit(
+      {
+        request: request as Parameters<
+          typeof syncDashboardAttachmentsForSubmit
+        >[0]["request"],
+      },
+      "runtime-binary",
+      attachments,
+    );
+    expect(result).toEqual({
+      handled: true,
+      refs: ["@file:/server/report.zip"],
+    });
+    expect(request).toHaveBeenCalledExactlyOnceWith("file.attach", {
+      session_id: "runtime-binary",
+      name: "report.zip",
+      data_url: dataUrl,
+    });
+    const payload = request.mock.calls[0] as unknown as [
+      string,
+      { data_url: string },
+    ];
+    expect(
+      Array.from(Buffer.from(payload[1].data_url.split(",")[1], "base64")),
+    ).toEqual([0, 255, 80, 75, 0, 1]);
+    expect(
+      dashboardPromptTextForAttachments("", [
+        { ...attachments[0], path: undefined },
+      ]),
+    ).toBe("");
+  });
+  it.each(["", "not a data URL"])(
+    "rejects invalid binary bytes without using its local path: %s",
+    async (dataUrl) => {
+      const attachment = {
+        id: "binary",
+        kind: "path-ref" as const,
+        name: "report.zip",
+        size: 6,
+        mime: "application/octet-stream",
+        dataUrl,
+        path: "/Users/private/report.zip",
+      };
+      const client = {
+        request: vi.fn(async (): Promise<never> => {
+          throw new Error("client path leaked");
+        }),
+      };
+      expect(
+        dashboardPromptTextForAttachments("inspect", [attachment]),
+      ).toBeNull();
+      await expect(
+        syncDashboardAttachmentsForSubmit(client, "runtime-binary", [
+          attachment,
+        ]),
+      ).rejects.toThrow(/invalid binary/i);
+      expect(client.request).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["unknown method file.attach", "disk full", "unsupported data_url"])(
+    "rejects binary uploads rather than returning unhandled: %s",
+    async (message) => {
+      const client = {
+        async request(): Promise<never> {
+          throw new Error(message);
+        },
+      };
+      await expect(
+        syncDashboardAttachmentsForSubmit(client, "runtime-binary", [
+          {
+            id: "binary",
+            kind: "path-ref",
+            name: "report.zip",
+            size: 6,
+            mime: "application/octet-stream",
+            dataUrl: "data:application/octet-stream;base64,AP9QSwAB",
+          },
+        ]),
+      ).rejects.toThrow(message);
+    },
+  );
+
   it("encodes text-file attachments as data URLs for file.attach", () => {
     expect(
       dashboardDataUrlForTextAttachment({

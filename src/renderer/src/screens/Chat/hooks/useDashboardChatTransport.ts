@@ -480,6 +480,17 @@ function dashboardAttachmentUnsupportedError(err: unknown): boolean {
   return /unknown method|method not found|not found|unsupported/i.test(message);
 }
 
+function isBinaryAttachmentDataUrl(dataUrl: string): boolean {
+  return /^data:[^,]*;base64,[A-Za-z0-9+/]*={0,2}$/.test(dataUrl);
+}
+
+function hasBinaryAttachment(attachments?: Attachment[]): boolean {
+  return !!attachments?.some(
+    (attachment) =>
+      attachment.kind === "path-ref" && attachment.dataUrl !== undefined,
+  );
+}
+
 export function dashboardPromptTextForAttachments(
   text: string,
   attachments?: Attachment[],
@@ -501,7 +512,12 @@ export function dashboardPromptTextForAttachments(
     if (attachment.kind === "text-file") {
       return typeof attachment.text === "string";
     }
-    return attachment.kind === "path-ref" && !!attachment.path;
+    return (
+      attachment.kind === "path-ref" &&
+      (attachment.dataUrl !== undefined
+        ? isBinaryAttachmentDataUrl(attachment.dataUrl)
+        : !!attachment.path)
+    );
   });
   if (!hasAttachableFiles) return null;
   if (text.trim()) return text;
@@ -550,7 +566,11 @@ export async function syncDashboardAttachmentsForSubmit(
       }
       attachedCount += 1;
     } catch (err) {
-      if (attachedCount === 0 && dashboardAttachmentUnsupportedError(err)) {
+      if (
+        !hasBinaryAttachment(attachments) &&
+        attachedCount === 0 &&
+        dashboardAttachmentUnsupportedError(err)
+      ) {
         return { handled: false, refs: [] };
       }
       throw err;
@@ -570,6 +590,14 @@ export async function syncDashboardAttachmentsForSubmit(
       const dataUrl = dashboardDataUrlForTextAttachment(attachment);
       if (!dataUrl) return { handled: false, refs: [] };
       params.data_url = dataUrl;
+    } else if (
+      attachment.kind === "path-ref" &&
+      attachment.dataUrl !== undefined
+    ) {
+      if (!isBinaryAttachmentDataUrl(attachment.dataUrl)) {
+        throw new Error(`Invalid binary attachment data URL: ${name}`);
+      }
+      params.data_url = attachment.dataUrl;
     } else if (attachment.kind === "path-ref" && attachment.path) {
       params.path = attachment.path;
     } else {
@@ -587,7 +615,11 @@ export async function syncDashboardAttachmentsForSubmit(
       refs.push(result.ref_text);
       attachedCount += 1;
     } catch (err) {
-      if (attachedCount === 0 && dashboardAttachmentUnsupportedError(err)) {
+      if (
+        !hasBinaryAttachment(attachments) &&
+        attachedCount === 0 &&
+        dashboardAttachmentUnsupportedError(err)
+      ) {
         return { handled: false, refs: [] };
       }
       throw err;
@@ -2497,7 +2529,12 @@ export function useDashboardChatTransport({
       attachments?: Attachment[],
     ): Promise<DashboardSendResult> => {
       legacyFallbackUsedRef.current = false;
-      const fallback = (): false => {
+      const fallback = (): DashboardSendResult => {
+        if (hasBinaryAttachment(attachments)) {
+          return failActiveTurn(
+            "Binary file uploads require the Dashboard transport. The file was not sent; retry after connecting to a Dashboard that supports file.attach.",
+          );
+        }
         legacyFallbackUsedRef.current = true;
         return false;
       };
