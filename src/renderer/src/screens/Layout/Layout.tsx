@@ -49,7 +49,7 @@ import {
   PanelLeftOpen,
   Plus,
 } from "../../assets/icons";
-import type { LucideIcon } from "lucide-react";
+import { ArrowLeft, type LucideIcon } from "lucide-react";
 import { useI18n } from "../../components/useI18n";
 import type { ProjectInfo } from "../../../../shared/projects";
 
@@ -1381,6 +1381,23 @@ function Layout({
               onReinstall={onReinstall}
               onDismiss={onDismissVerifyWarning}
             />
+          )}
+          {/* @lat: [[sidebar-navigation#Sidebar recent sessions#Return from utility screens]] */}
+          {view !== "chat" && (
+            <nav
+              className="utility-chat-navigation"
+              aria-label={t("navigation.backToChat")}
+            >
+              <button
+                type="button"
+                className="utility-back-to-chat"
+                onClick={() => goTo("chat")}
+                aria-label={t("navigation.backToChat")}
+                title={t("navigation.backToChat")}
+              >
+                <ArrowLeft size={18} aria-hidden="true" />
+              </button>
+            </nav>
           )}
           <div style={paneStyle("chat")}>
             {runs.map((run) => (

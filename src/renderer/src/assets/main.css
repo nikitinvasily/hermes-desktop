@@ -4261,6 +4261,54 @@ body:has(.shell-vibrant),
   position: relative;
 }
 
+.utility-chat-navigation {
+  display: flex;
+  flex-shrink: 0;
+  height: 38px;
+  box-sizing: border-box;
+  padding: 6px 24px 0;
+}
+
+/* Utility panes already have their own top padding; keep only a compact gap
+   below the shared arrow without changing modal or embedded screen spacing. */
+.utility-chat-navigation
+  ~ div
+  > :is(
+    .discover-container,
+    .agents-container,
+    .settings-container,
+    .skills-container,
+    .tools-container,
+    .schedules-container,
+    .kanban-container
+  ) {
+  padding-top: 8px;
+}
+
+.utility-chat-navigation ~ div > .tools-screen > .tools-tabs {
+  padding-top: 8px;
+}
+
+.utility-back-to-chat {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.utility-back-to-chat:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
 /* Remote connection lost (backlog #75): every remote data screen is dimmed
    and input-blocked while the connection is down, so stale server data can
    not be interacted with. The sidebar banner carries the recovery action. */
@@ -4272,6 +4320,11 @@ body:has(.shell-vibrant),
   backdrop-filter: saturate(0.6);
   z-index: 60;
   pointer-events: auto;
+}
+
+/* Leave navigation outside the data shield, without raising it above modals. */
+.content.remote-degraded:has(> .utility-chat-navigation)::after {
+  top: 38px;
 }
 
 /* ========================================================================

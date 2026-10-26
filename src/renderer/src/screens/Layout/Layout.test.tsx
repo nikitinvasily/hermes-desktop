@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Layout from "./Layout";
@@ -15,12 +21,20 @@ vi.mock("../Chat/Chat", () => ({
     runId: string;
     initialSessionId: string | null;
     active: boolean;
+    connectionId: string;
+    profile: string;
     onTitleChange: (id: string, title: string) => void;
     onLoadingChange: (id: string, loading: boolean) => void;
     onOpenSession: (id: string) => void;
   }): React.JSX.Element => (
-    <div data-testid="mounted-chat" data-active={props.active}>
+    <div
+      data-testid="mounted-chat"
+      data-active={props.active}
+      data-connection={props.connectionId}
+      data-profile={props.profile}
+    >
       {props.initialSessionId || "scratch"}
+      <textarea aria-label="Draft" defaultValue="" />
       <button onClick={() => props.onOpenSession("delegate-child")}>
         Open subagent
       </button>
@@ -38,10 +52,14 @@ vi.mock("../Chat/Chat", () => ({
 vi.mock("./SidebarRecentSessions", () => ({
   default: (props: {
     currentSessionId: string | null;
+    loadingSessionIds: Set<string>;
     onSelect: (id: string) => void;
     pendingSessions: Array<{ id: string; title: string }>;
   }): React.JSX.Element => (
-    <div>
+    <div
+      data-testid="sidebar"
+      data-running={[...props.loadingSessionIds].join(",")}
+    >
       {props.pendingSessions.map((row) => (
         <span key={row.id} data-testid="pending-sidebar-row">
           {row.title}
@@ -159,6 +177,101 @@ function expectNoSessionStrip(container: HTMLElement): void {
   expect(screen.queryByRole("tablist")).toBeNull();
   expect(screen.queryByRole("tab")).toBeNull();
 }
+
+const utilityViews = [
+  "discover",
+  "agents",
+  "office",
+  "providers",
+  "skills",
+  "memory",
+  "tools",
+  "schedules",
+  "kanban",
+  "gateway",
+] as const;
+
+describe("utility screen return to chat", () => {
+  it.each(utilityViews)(
+    "returns from %s to the same empty chat",
+    async (view) => {
+      const { container } = shell();
+      await act(async () => {});
+      const chat = screen.getByTestId("mounted-chat");
+      expect(
+        screen.queryByRole("button", { name: "navigation.backToChat" }),
+      ).toBeNull();
+      fireEvent(window, new CustomEvent("navigation:goto", { detail: view }));
+      expect(chat).not.toBeVisible();
+      fireEvent.click(
+        screen.getByRole("button", { name: "navigation.backToChat" }),
+      );
+      expect(screen.getByTestId("mounted-chat")).toBe(chat);
+      expect(chat).toBeVisible();
+      expect(chat).toHaveTextContent("scratch");
+      expect(
+        screen.queryByRole("button", { name: "navigation.backToChat" }),
+      ).toBeNull();
+      expect(
+        container.querySelectorAll('[data-testid="mounted-chat"]'),
+      ).toHaveLength(1);
+      expect(abortChat).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["local", "remote"])(
+    "preserves the running chat, draft and scope on %s",
+    async (connectionId) => {
+      const api = (
+        window as unknown as {
+          hermesAPI: {
+            listProfiles: ReturnType<typeof vi.fn>;
+            getSessionMessages: ReturnType<typeof vi.fn>;
+          };
+        }
+      ).hermesAPI;
+      api.listProfiles.mockResolvedValue([{ id: "writer", isActive: true }]);
+      shell({ connectionId });
+      await act(async () => {});
+      fireEvent.click(screen.getByRole("button", { name: "session-a" }));
+      await waitFor(() =>
+        expect(screen.getByTestId("mounted-chat")).toHaveTextContent(
+          "session-a",
+        ),
+      );
+      const chat = screen.getByTestId("mounted-chat");
+      const draft = screen.getByRole("textbox", { name: "Draft" });
+      fireEvent.change(draft, {
+        target: { value: "Unsent follow-up\nwith Markdown **kept**" },
+      });
+      fireEvent.click(screen.getByText("Start turn"));
+      const historyReads = api.getSessionMessages.mock.calls.length;
+      for (const view of utilityViews) {
+        fireEvent(window, new CustomEvent("navigation:goto", { detail: view }));
+        expect(chat).not.toBeVisible();
+        expect(screen.getByTestId("sidebar")).toHaveAttribute(
+          "data-running",
+          "session-a",
+        );
+        fireEvent.click(
+          screen.getByRole("button", { name: "navigation.backToChat" }),
+        );
+        expect(screen.getByTestId("mounted-chat")).toBe(chat);
+        expect(chat).toBeVisible();
+        expect(chat).toHaveAttribute("data-connection", connectionId);
+        expect(chat).toHaveAttribute("data-profile", "writer");
+        expect(screen.getByRole("textbox", { name: "Draft" })).toBe(draft);
+        expect(draft).toHaveValue("Unsent follow-up\nwith Markdown **kept**");
+        expect(screen.getByTestId("sidebar")).toHaveAttribute(
+          "data-running",
+          "session-a",
+        );
+      }
+      expect(api.getSessionMessages).toHaveBeenCalledTimes(historyReads);
+      expect(abortChat).not.toHaveBeenCalled();
+    },
+  );
+});
 
 describe("Layout without top session tabs", () => {
   it("opens a child transcript without injecting its title into sidebar pending rows", async () => {
