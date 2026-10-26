@@ -1,8 +1,10 @@
-# Window title bar and conversation tabs
+# Window chrome and conversation navigation
 
-The top strip of the main window is a browser-style title bar: it is the window's drag region, and the open-conversation tabs live *on* it rather than in a separate bar below, so no vertical space is spent on a dedicated, always-empty drag strip.
+The main window keeps native macOS traffic lights and a sidebar drag handle, without a session-tab strip above the content pane.
 
-On macOS the window is frameless (`titleBarStyle: "hiddenInset"`, traffic lights inset at x/y 16 — see [[src/main/app/start.ts#startMainProcess]]), and [[src/renderer/src/App.tsx]] renders a fixed full-width `.drag-region` (`-webkit-app-region: drag`, z-index 1000) so the whole top band — including over the sidebar/traffic-light area — drags the window. This strip is mac-only; other platforms keep the OS title bar.
+On macOS the window is frameless (`titleBarStyle: "hiddenInset"`, traffic lights inset at x/y 16, see [[src/main/app/start.ts#startMainProcess]]). The sidebar owns the main screen's drag area so it cannot cover chat controls. Other platforms keep the OS title bar.
+
+The absolutely positioned `.sidebar-drag-region` uses the sidebar's existing top 12px of clearance, above the traffic lights. Its width follows sidebar resizing and collapse, with an 8px right inset for the resize handle. [[src/renderer/src/App.tsx]] keeps the full-width `.drag-region` only on onboarding screens. No drag overlay or top spacer occupies the main content pane; the Kanban drawer needs no tab-strip clearance.
 
 `.app` fills the window (`height: 100vh`) so the chrome reaches every edge. The sidebar rounds only its **top-left** corner (`border-radius: 16px 0 0 0`); the full-width status strip owns the window's bottom edge and rounds both bottom corners (`0 0 16px 16px`), so the sidebar's bottom-left is square against it. A hairline seam (`.content` `border-inline-start`) separates the content pane from the sidebar.
 
@@ -32,23 +34,13 @@ A native system strip pinned full-width beneath the sidebar+content row surfaces
 
 [[src/renderer/src/screens/Layout/StatusBar.tsx#StatusBar]] self-fetches from `listProfiles` (active profile's `model`, `skillCount`, `gatewayRunning`) and `getConnectionConfig` (`mode`), polling every 4s. Every field is real — an unknown value drops its chip rather than showing a placeholder, and the hints advertise only shortcuts that exist (`/` commands, `⌘,`/`Ctrl,` settings), never a fabricated `⌘K`. [[src/renderer/src/screens/Layout/Layout.tsx]] wraps its `.layout` row in a `.layout-shell` column and renders the strip as the row's sibling; the online/offline dot uses the theme-aware `--success` token.
 
-## Tabs layered above the drag region
+## Sidebar-only conversation navigation
 
-[[src/renderer/src/screens/Layout/ActiveSessionsBar.tsx#ActiveSessionsBar]] is the content column's title bar. It owns the top band browser-style: empty space drags, the chips stay clickable.
+Conversations have no top tab strip or reserved spacer. The sidebar creates and switches chats while background runs stay mounted.
 
-- The bar itself is `-webkit-app-region: drag` with `position: relative; z-index: 1001`, so it stacks above the global `.drag-region` (z 1000) and is the drag handle for the content column.
-- Each `.active-session-chip` opts back out with `-webkit-app-region: no-drag`, keeping select/close clickable above the drag layer — the same priority model browsers use for tabs over a draggable tab strip.
-- `min-height: 42px` — taller than the 34px global drag strip, so content rendered after the bar clears the fixed drag layer and the single tab gets extra presence (13px type, 20px avatar). The old `.is-mac .content { padding-top: 28px }` offset is no longer needed.
+[[src/renderer/src/screens/Layout/Layout.tsx]] renders the active chat directly in the content pane. Sidebar row selection restores an existing live run or opens a stored session; New Chat and project actions create conversations. Cmd/Ctrl+W, Cmd/Ctrl+1..9 and Cmd/Ctrl+Shift+[/] keep their existing run-management behavior without visible tabs.
 
-Visually the strip is a Safari-style tab bar: the strip uses the darker `--bg-secondary` toolbar shade; tabs are flat (no border/fill) and separated by thin vertical dividers drawn with an `::before` on each non-first chip. The active tab fills with `--bg-primary` — the same colour as the transparent content area below it — and rounds its top corners, so it docks into the page; the dividers flanking the active tab are hidden for a seamless join.
-
-## One tab: the active session only
-
-The bar always renders so it is always a drag area, but its chip stays hidden while the active conversation is still a blank scratch chat.
-
-Exactly one chip is rendered — the ACTIVE run's (issue #78: background tabs removed from the strip; the sidebar is the switcher). It shows when the active run has a session id, is loading, or has a title (`showChips` in [[src/renderer/src/screens/Layout/ActiveSessionsBar.tsx#ActiveSessionsBar]]). Background runs stay mounted and streaming; they are reachable via the sidebar row click (live-session run activation) and the tab-cycling shortcuts (Cmd/Ctrl+1..9, Cmd/Ctrl+Shift+[/]), they just have no chip. A loading chip renders a thinking-orbs [[loading-indicators|OrbLoader]] (`composing`, size 20) in place of its profile avatar — the orb's canvas is transparent and theme-aware, so `.active-session-chip-orb` drops the colour-filled avatar circle rather than painting the profile colour behind it. When the chip shows, a browser-style new-tab **"+"** button (`.active-session-new`, `no-drag`) trails it and calls `onNew` → `handleNewChat` in [[src/renderer/src/screens/Layout/Layout.tsx]] to open a fresh conversation.
-
-Because the bar doubles as the drag strip, [[src/renderer/src/screens/Layout/Layout.tsx]] renders it as the first child of `.content`; the verify-warning banner (when shown) sits just below it, clear of the drag layer.
+[[src/renderer/src/screens/Layout/Layout.test.tsx]] covers scratch/running/resumed and non-chat views, sidebar switching and new chats, mounted background runs, keyboard activation/closing and platform-specific drag targets. [[tests/session-strip-css.test.ts]] guards the absence of reserved top space and the sidebar drag bounds.
 
 ## Follow-us modal
 

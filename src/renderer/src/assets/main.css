@@ -595,7 +595,7 @@ body:has(.shell-vibrant),
   /* Transparent window → macOS no longer masks the opaque content to the
      window shape, so round the top-right corner ourselves (the sidebar owns
      top-left, the status bar owns the bottom). `.content` is overflow:hidden,
-     so the tab strip clips to it. */
+     so child surfaces clip to the same rounded edge. */
   border-radius: 0 16px 0 0;
 }
 .app.shell-vibrant .sidebar {
@@ -2462,6 +2462,18 @@ body:has(.shell-vibrant),
   transition: none;
 }
 
+/* Use only the existing header clearance above the native traffic lights
+   (y: 16px). Sidebar-relative bounds follow resizing/collapse; the right inset
+   leaves the resize handle clickable. No content-column overlay or spacer. */
+.is-mac .sidebar-drag-region {
+  -webkit-app-region: drag;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 8px;
+  height: 12px;
+}
+
 .sidebar-brand {
   display: flex;
   align-items: center;
@@ -3561,7 +3573,7 @@ body:has(.shell-vibrant),
   flex-direction: column;
 }
 
-/* ── Profile avatar (shared: nav, active bar, manage page) ── */
+/* ── Profile avatar (shared: nav, chat, manage page) ── */
 .profile-avatar {
   flex-shrink: 0;
   border-radius: 50%;
@@ -3580,180 +3592,6 @@ body:has(.shell-vibrant),
 }
 .profile-avatar-logo {
   background: var(--bg-elevated);
-}
-
-/* ── Active sessions bar (concurrent / multi-agent runs) ── */
-.active-sessions-bar {
-  display: flex;
-  /* Tabs stretch to the full strip height so the active tab's fill reaches the
-     bottom edge and merges seamlessly into the content below. */
-  align-items: stretch;
-  gap: 0;
-  /* This strip IS the window's title-bar drag region (browser-style): empty
-     space drags the window. It sits above the global .drag-region (z 1000) so
-     it owns the top band of the content column; the chips opt back out of
-     dragging (no-drag) so they stay clickable. Always present — with no extra
-     tabs it's simply an empty drag area, costing no dedicated bar height. */
-  position: relative;
-  z-index: 1001;
-  -webkit-app-region: drag;
-  /* Taller than the 34px global drag strip: with a single tab (issue #78) the
-     bar can afford more presence — bigger type and avatar — without crowding. */
-  min-height: 42px;
-  padding: 0 8px 0 14px;
-  overflow-x: auto;
-  /* Darker toolbar shade so the lighter active tab (--bg-primary) reads as
-     part of the page below it. */
-  background: var(--bg-secondary);
-  flex-shrink: 0;
-  /* Scrollable but with no visible scrollbar. */
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-
-.active-sessions-bar::-webkit-scrollbar {
-  display: none;
-}
-
-/* Flat tab: no border or fill, just text. Adjacent tabs are separated by a thin
-   vertical divider (::before); the active tab fills with the page colour and
-   rounds its top so it looks docked to the content beneath. */
-.active-session-chip {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  max-width: 240px;
-  flex-shrink: 0;
-  /* Opt out of the strip's drag region so the chip is clickable. */
-  -webkit-app-region: no-drag;
-  position: relative;
-  padding: 0 14px;
-  border: none;
-  border-radius: 8px 8px 0 0;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-family: var(--font-sans);
-  font-size: 13px;
-  white-space: nowrap;
-  transition:
-    background var(--transition),
-    color var(--transition);
-}
-
-/* Divider between two adjacent tabs (drawn on the right tab's left edge). */
-.active-session-chip + .active-session-chip::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 1px;
-  height: 16px;
-  background: var(--border-bright);
-}
-
-.active-session-chip:hover {
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.active-session-chip.active {
-  /* Same colour as the content area below → the tab merges into the page. */
-  background: var(--bg-primary);
-  color: var(--text-primary);
-}
-
-/* Drop the dividers flanking the active tab so it reads as one docked panel. */
-.active-session-chip.active::before,
-.active-session-chip.active + .active-session-chip::before {
-  opacity: 0;
-}
-
-/* Loading state reuses an avatar-sized circle filled with the profile colour
-   (set inline) so the spinner reads as "this agent is working". */
-.active-session-chip-avatar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  line-height: 1;
-}
-
-/* Loading chips render a transparent, theme-aware thinking orb in the
-   avatar slot instead of the colour-filled circle, so no background here. */
-.active-session-chip-orb {
-  background: none;
-}
-
-.active-session-chip-title {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  opacity: 0.7;
-}
-
-/* The focused tab's label reads at full strength. */
-.active-session-chip.active .active-session-chip-title,
-.active-session-chip:hover .active-session-chip-title {
-  opacity: 1;
-}
-
-.active-session-chip-close {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  padding: 0;
-  border: none;
-  border-radius: 4px;
-  background: none;
-  color: inherit;
-  cursor: pointer;
-  /* Revealed on hover / for the active tab to keep idle chips clean. */
-  opacity: 0;
-  transition: opacity var(--transition);
-}
-.active-session-chip:hover .active-session-chip-close,
-.active-session-chip.active .active-session-chip-close,
-.active-session-chip-close:focus-visible {
-  opacity: 0.7;
-}
-.active-session-chip-close:hover {
-  opacity: 1;
-  background: var(--bg-elevated);
-}
-
-/* Browser-style new-tab button at the end of the strip. Sits above the drag
-   region so it stays clickable. */
-.active-session-new {
-  -webkit-app-region: no-drag;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  margin-left: 4px;
-  margin-top: 4px;
-  padding: 0;
-  border: none;
-  border-radius: 6px;
-  background: none;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition:
-    background var(--transition),
-    color var(--transition);
-}
-.active-session-new:hover {
-  background: var(--bg-elevated);
-  color: var(--text-primary);
 }
 
 /* Sidebar footer with theme switcher */
@@ -18319,10 +18157,6 @@ body:has(.shell-vibrant),
 .kanban-detail-drawer {
   width: min(460px, 92vw);
   height: 100%;
-  /* Clear the window's title-bar/tabs strip (.active-sessions-bar, z 1001,
-     ~34px) which paints above this overlay — without this the drawer's
-     header title is hidden behind it. */
-  padding-top: 38px;
   background: var(--bg-secondary);
   border-left: 1px solid var(--border);
   box-shadow: -8px 0 24px -12px rgba(0, 0, 0, 0.4);

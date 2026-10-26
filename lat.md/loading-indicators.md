@@ -19,7 +19,6 @@ The library ships two tuned size *designs* (separate tunings, not a scale factor
 - Chat reasoning summary ("Thinking…"): `state="solving"`, size 20 — [[src/renderer/src/screens/Chat/HistoryRow.tsx]].
 - Chat tool-call summary and slash-command pending bubble: `state="working"`, size 20 — [[src/renderer/src/screens/Chat/HistoryRow.tsx]], [[src/renderer/src/screens/Chat/MessageRow.tsx]].
 - Screen/pane data fetches (Discover, Memory, Tools, Schedules, Agents, Sessions, Skills, Soul, Kanban, registry browser, profile modal panes): `state="searching"`, size 64 (size 20 for the inline Kanban detail loader).
-- Streaming conversation tab chip: `state="composing"`, size 20, in the avatar slot — [[src/renderer/src/screens/Layout/ActiveSessionsBar.tsx]] (see [[window-chrome]]).
 - Generating agent turn avatar: `state="solving"` (nearest preset → the 64 design), `invert`ed on a `--text-primary` disc, scaled to the ~30px avatar footprint via `style={{ width, height }}` — [[src/renderer/src/screens/Chat/MessageRow.tsx#HermesAvatar]].
 
 This replaced the former `loadingo.gif` avatar animation — the orb needs no loop-boundary stop dance (a canvas frame never freezes mid-loop the way the gif did), so `HermesAvatar` swaps straight to the agent's [[src/renderer/src/components/common/ProfileAvatar.tsx]] the instant `active` goes false, and falls back to the orb when no agent identity is known (the live typing indicator).
