@@ -38,7 +38,7 @@ A native system strip pinned full-width beneath the sidebar+content row surfaces
 
 Conversations have no top tab strip. A 24px inset inside each chat gives its content breathing room; other app screens keep their original top alignment.
 
-The floating Subagents/TODO panel aligns with the top of `.chat-messages-wrap`, after the chat inset, without an additional vertical offset. It stays pinned to the conversation during scrolling and follows its right edge when a side panel opens.
+The floating Subagents/TODO panel aligns with the top of `.chat-messages-wrap`, after the chat inset, without an additional vertical offset. Its right edge matches the transcript's padded, centered column: a minimum 24px inset grows with the margins beyond 1300px. Panel width is bounded by the conversation wrapper, so opening or resizing the files panel preserves the alignment. The panel stays pinned during scrolling. [[src/renderer/src/screens/Chat/ChatMessagesWrap.tsx#ChatMessagesWrap]] observes the scroller's content-box width and publishes its actual scrollbar gutter on that wrapper, so overlay and space-taking scrollbars align equally without modifying transcript block flow.
 
 [[src/renderer/src/screens/Layout/Layout.tsx]] renders the active chat directly in the content pane. Sidebar row selection restores an existing live run or opens a stored session; New Chat and project actions create conversations. Cmd/Ctrl+W, Cmd/Ctrl+1..9 and Cmd/Ctrl+Shift+[/] keep their existing run-management behavior without visible tabs.
 

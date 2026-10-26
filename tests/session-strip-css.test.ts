@@ -29,7 +29,13 @@ describe("session-strip-free shell CSS contract", () => {
     const panel = rule(".chat-context-panel");
     expect(panel).toMatch(/top:\s*0(?:px)?\s*;/);
     expect(panel).toMatch(/position:\s*absolute/);
-    expect(panel).toMatch(/right:\s*12px/);
+    expect(panel).toContain("calc(24px + var(--chat-scrollbar-gutter, 0px))");
+    expect(panel).toContain(
+      "calc((100% - 1300px + var(--chat-scrollbar-gutter, 0px)) / 2)",
+    );
+    expect(panel).toContain(
+      "max-width: min(300px, calc(100% - 48px - var(--chat-scrollbar-gutter, 0px)))",
+    );
   });
 
   it("confines main-window dragging above the traffic lights without covering controls", () => {
