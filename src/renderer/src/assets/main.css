@@ -4264,10 +4264,9 @@ body:has(.shell-vibrant),
 .utility-chat-navigation {
   display: flex;
   flex-shrink: 0;
+  height: 44px;
+  box-sizing: border-box;
   padding: 6px 24px;
-  position: relative;
-  /* Navigation remains available above the remote data-screen input shield. */
-  z-index: 61;
 }
 
 .utility-back-to-chat {
@@ -4301,6 +4300,11 @@ body:has(.shell-vibrant),
   backdrop-filter: saturate(0.6);
   z-index: 60;
   pointer-events: auto;
+}
+
+/* Leave navigation outside the data shield, without raising it above modals. */
+.content.remote-degraded:has(> .utility-chat-navigation)::after {
+  top: 44px;
 }
 
 /* ========================================================================
