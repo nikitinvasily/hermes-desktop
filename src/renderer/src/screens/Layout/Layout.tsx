@@ -315,6 +315,9 @@ function Layout({
       runs
         .filter(
           (r) =>
+            // Persisted histories already belong to the synced listing. Never
+            // reinsert a hidden delegate (or archived chat) through this bridge.
+            r.seed === undefined &&
             r.title &&
             r.connectionId === connectionId &&
             r.profile === activeProfile,

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -104,7 +105,7 @@ describe("ChatContextPanel (issue #122)", () => {
     expect(
       doneRow
         .closest("button")
-        ?.querySelector(".sidebar-recent-session-spinner"),
+        ?.querySelector(".sidebar-recent-session-waiting-subagents"),
     ).toBeNull();
     expect(
       doneRow.closest("button")?.querySelector(".sidebar-recent-session-dot"),
@@ -113,7 +114,7 @@ describe("ChatContextPanel (issue #122)", () => {
       screen
         .getByText("Review configs")
         .closest("button")
-        ?.querySelector(".sidebar-recent-session-spinner"),
+        ?.querySelector(".sidebar-recent-session-waiting-subagents"),
     ).not.toBeNull();
     expect(screen.getByRole("button", { name: /subagents/i })).toBeTruthy();
   });
@@ -162,6 +163,48 @@ describe("ChatContextPanel (issue #122)", () => {
     expect(
       document.querySelector(".sidebar-recent-collapse")?.className,
     ).not.toContain("expanded");
+  });
+
+  it("sorts unordered launches newest first before the five-row cap", async () => {
+    setApi(
+      [2, 7, 1, 5, 6, 3, 4].map(
+        (startedAt): Row => ({
+          id: `child-${startedAt}`,
+          startedAt,
+          endedAt: 10,
+          title: `Launch ${startedAt}`,
+          model: null,
+          messageCount: 1,
+        }),
+      ),
+    );
+    const { container } = render(<ChatContextPanel {...baseProps} />);
+    await screen.findByText("Launch 7");
+    expect(
+      Array.from(
+        container.querySelectorAll(".chat-context-panel-row-title"),
+        (el) => el.textContent,
+      ),
+    ).toEqual(["Launch 7", "Launch 6", "Launch 5", "Launch 4", "Launch 3"]);
+  });
+
+  it("uses the sidebar dotted ring for running children", async () => {
+    setApi([
+      {
+        id: "running",
+        startedAt: 1,
+        endedAt: null,
+        title: "Working child",
+        model: null,
+        messageCount: 1,
+      },
+    ]);
+    render(<ChatContextPanel {...baseProps} />);
+    const row = (await screen.findByText("Working child")).closest("button");
+    expect(
+      row?.querySelector(".sidebar-recent-session-waiting-subagents"),
+    ).not.toBeNull();
+    expect(row?.querySelector(".sidebar-recent-session-spinner")).toBeNull();
   });
 
   it("caps the newest-first list before revealing older children and opens the selected row", async () => {
@@ -227,6 +270,180 @@ describe("ChatContextPanel (issue #122)", () => {
       "Goal 5",
       "Goal 4",
     ]);
+  });
+
+  it.each([
+    { connectionId: "conn-2", profile: "default", sessionId: "parent-1" },
+    { connectionId: "conn-1", profile: "other", sessionId: "parent-1" },
+    { connectionId: "conn-1", profile: "default", sessionId: "parent-2" },
+  ])(
+    "hides the previous scope's rows immediately on switch to %j",
+    async (next) => {
+      setApi([
+        {
+          id: "old",
+          startedAt: 1,
+          endedAt: 2,
+          title: "Previous scope",
+          model: null,
+          messageCount: 1,
+        },
+      ]);
+      const { rerender } = render(<ChatContextPanel {...baseProps} />);
+      await screen.findByText("Previous scope");
+      const api = (window as unknown as PanelWindow).hermesAPI
+        .listSubagentSessions;
+      api.mockReturnValueOnce(new Promise<Row[]>(() => {}));
+      rerender(<ChatContextPanel {...baseProps} {...next} />);
+      expect(screen.queryByText("Previous scope")).toBeNull();
+    },
+  );
+
+  it("orders same-time launches by id without changing source rows", async () => {
+    const rows = ["z", "Z", "a"].map(
+      (id): Row => ({
+        id,
+        startedAt: 1,
+        endedAt: 2,
+        title: id,
+        model: null,
+        messageCount: 1,
+      }),
+    );
+    setApi(rows);
+    const { container } = render(<ChatContextPanel {...baseProps} />);
+    await screen.findByText("a");
+    expect(
+      Array.from(
+        container.querySelectorAll(".chat-context-panel-row-title"),
+        (el) => el.textContent,
+      ),
+    ).toEqual(["Z", "a", "z"]);
+    expect(rows.map((row) => row.id)).toEqual(["z", "Z", "a"]);
+  });
+
+  it("does not paint a delayed old parent's result after switching chats", async () => {
+    let resolveOld!: (rows: Row[]) => void;
+    const oldRows = new Promise<Row[]>((resolve) => {
+      resolveOld = resolve;
+    });
+    setApi([]);
+    const api = (window as unknown as PanelWindow).hermesAPI
+      .listSubagentSessions;
+    api.mockReturnValueOnce(oldRows).mockResolvedValue([]);
+    const { rerender } = render(<ChatContextPanel {...baseProps} />);
+    rerender(<ChatContextPanel {...baseProps} sessionId="parent-2" />);
+    await waitFor(() =>
+      expect(api).toHaveBeenCalledWith("parent-2", "conn-1", "default"),
+    );
+    await act(async () =>
+      resolveOld([
+        {
+          id: "old",
+          startedAt: 1,
+          endedAt: 2,
+          title: "Old parent child",
+          model: null,
+          messageCount: 1,
+        },
+      ]),
+    );
+    expect(screen.queryByText("Old parent child")).toBeNull();
+  });
+
+  it("refreshes children while the parent turn is still running without overlapping reads", async () => {
+    vi.useFakeTimers();
+    try {
+      setApi([]);
+      const api = (window as unknown as PanelWindow).hermesAPI
+        .listSubagentSessions;
+      let resolveFirst!: (rows: Row[]) => void;
+      api.mockReturnValueOnce(
+        new Promise<Row[]>((resolve) => {
+          resolveFirst = resolve;
+        }),
+      );
+      render(<ChatContextPanel {...baseProps} />);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(6000);
+      });
+      expect(api).toHaveBeenCalledTimes(1);
+      await act(async () => resolveFirst([]));
+      api.mockResolvedValue([
+        {
+          id: "new",
+          startedAt: 2,
+          endedAt: null,
+          title: "New live child",
+          model: null,
+          messageCount: 1,
+        },
+      ]);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+      expect(screen.queryByText("New live child")).not.toBeNull();
+      cleanup();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not restart polling when an unmounted read settles", async () => {
+    vi.useFakeTimers();
+    try {
+      setApi([]);
+      const api = (window as unknown as PanelWindow).hermesAPI
+        .listSubagentSessions;
+      let finish!: (rows: Row[]) => void;
+      api.mockReturnValueOnce(
+        new Promise<Row[]>((resolve) => {
+          finish = resolve;
+        }),
+      );
+      const { unmount } = render(<ChatContextPanel {...baseProps} />);
+      unmount();
+      await act(async () => {
+        finish([]);
+        await vi.advanceTimersByTimeAsync(6000);
+      });
+      expect(api).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retains current rows on a temporary read failure and retries", async () => {
+    vi.useFakeTimers();
+    try {
+      setApi([
+        {
+          id: "child",
+          startedAt: 1,
+          endedAt: null,
+          title: "Kept child",
+          model: null,
+          messageCount: 1,
+        },
+      ]);
+      const api = (window as unknown as PanelWindow).hermesAPI
+        .listSubagentSessions;
+      render(<ChatContextPanel {...baseProps} />);
+      await act(async () => {});
+      api.mockRejectedValueOnce(new Error("Network unavailable"));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+      expect(screen.queryByText("Kept child")).not.toBeNull();
+      api.mockResolvedValue([]);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+      expect(screen.queryByText("Kept child")).toBeNull();
+      cleanup();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("re-fetches when refreshKey changes (turn finished)", async () => {

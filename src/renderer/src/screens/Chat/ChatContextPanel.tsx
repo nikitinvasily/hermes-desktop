@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight } from "../../assets/icons";
 import { useI18n } from "../../components/useI18n";
 import { useShowMore, ShowMoreRow } from "../../components/useShowMore";
@@ -40,7 +40,11 @@ function SubagentRows({
   onOpenSession: (sessionId: string) => void;
 }): React.JSX.Element {
   const { t } = useI18n();
-  const list = useShowMore(rows, { resetKey: open });
+  const sortedRows = [...rows].sort(
+    (a, b) =>
+      b.startedAt - a.startedAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  );
+  const list = useShowMore(sortedRows, { resetKey: open });
   return (
     <>
       {list.visible.map((row) => {
@@ -58,7 +62,10 @@ function SubagentRows({
             }
           >
             {running ? (
-              <span className="sidebar-recent-session-spinner" aria-hidden />
+              <span
+                className="sidebar-recent-session-waiting-subagents"
+                aria-hidden
+              />
             ) : (
               <span className="sidebar-recent-session-dot" aria-hidden />
             )}
@@ -98,36 +105,41 @@ export function ChatContextPanel({
   todo?: TodoSnapshot | null;
 }): React.JSX.Element | null {
   const { t } = useI18n();
-  const [rows, setRows] = useState<SubagentRow[]>([]);
+  const scope = JSON.stringify([connectionId, profile, sessionId]);
+  const [snapshot, setSnapshot] = useState<{
+    scope: string;
+    rows: SubagentRow[];
+  }>({ scope, rows: [] });
+  const rows = snapshot.scope === scope ? snapshot.rows : [];
   const [subagentsOpen, setSubagentsOpen] = useState(false);
   const [todoOpen, setTodoOpen] = useState(true);
-  const aliveRef = useRef(true);
-
-  const load = useCallback(async (): Promise<void> => {
-    if (!sessionId) {
-      setRows([]);
-      return;
-    }
-    try {
-      const list = await window.hermesAPI.listSubagentSessions(
-        sessionId,
-        connectionId,
-        profile,
-      );
-      if (!aliveRef.current) return;
-      setRows(Array.isArray(list) ? list : []);
-    } catch {
-      // Leave the previous list; the panel is best-effort chrome.
-    }
-  }, [sessionId, connectionId, profile]);
 
   useEffect(() => {
-    aliveRef.current = true;
+    if (!sessionId) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = async (): Promise<void> => {
+      try {
+        const list = await window.hermesAPI.listSubagentSessions(
+          sessionId,
+          connectionId,
+          profile,
+        );
+        if (!cancelled)
+          setSnapshot({ scope, rows: Array.isArray(list) ? list : [] });
+      } catch {
+        // Keep this scope's last successful history while a read is unavailable.
+      } finally {
+        // Schedule after settlement: a slow server never accumulates overlapping polls.
+        if (!cancelled) timer = setTimeout(() => void load(), 2000);
+      }
+    };
     void load();
     return () => {
-      aliveRef.current = false;
+      cancelled = true;
+      clearTimeout(timer);
     };
-  }, [load, refreshKey]);
+  }, [sessionId, connectionId, profile, refreshKey, scope]);
 
   const hasTodo =
     !!todo &&
