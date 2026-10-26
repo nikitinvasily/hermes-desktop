@@ -1310,6 +1310,16 @@ describe("SidebarRecentSessions state bullets", () => {
     );
     expect(dot?.getAttribute("fill")).toBe("currentColor");
 
+    // A committed backend write is reflected by the subsequent authoritative
+    // sync; a permanently unread mock would represent new/uncommitted activity.
+    syncSessionCache.mockResolvedValue([
+      {
+        id: "session-unread",
+        title: "Unread chat",
+        contextFolder: null,
+        unread: false,
+      },
+    ]);
     fireEvent.click(row);
     expect(onSelect).toHaveBeenCalledWith("session-unread");
     // Optimistic clear: the dot loses its unread modifier without a re-sync.

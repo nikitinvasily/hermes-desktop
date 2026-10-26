@@ -1,4 +1,5 @@
 import http from "http";
+import { randomUUID } from "node:crypto";
 import https from "https";
 import type { ConnectionConfig } from "./config";
 import { requestRemoteOAuthJson } from "./remote-oauth";
@@ -447,22 +448,69 @@ export async function remoteSetSessionArchived(
   );
 }
 
-/**
- * Mark a session read on the agent: the dashboard's existing PATCH flag
- * (`unread: false` → `SessionDB.set_session_read`, issue #90).
- */
+/** Mark read through the backend's authoritative revision fence when available. */
+// @lat: [[sidebar-navigation#Sidebar recent sessions#Session state bullets]]
 export async function remoteMarkSessionRead(
   config: RemoteSessionConfig,
   sessionId: string,
-): Promise<void> {
-  await remoteRequestJson(
-    config,
-    `/api/sessions/${encodeURIComponent(sessionId)}`,
-    {
-      method: "PATCH",
-      body: { unread: false },
-    },
-  );
+): Promise<boolean> {
+  const path = `/api/sessions/${encodeURIComponent(sessionId)}`;
+  const profile = config.profile?.trim();
+  const body: RemoteRecord = {
+    unread: false,
+    ...(profile ? { profile } : {}),
+  };
+  let snapshot: RemoteRecord | undefined;
+  try {
+    snapshot = asRecord(
+      await remoteRequestJson(config, `${path}/mutation-snapshot`),
+    );
+  } catch (error) {
+    // Only a missing route identifies an older dashboard. Auth, conflicts and
+    // transport failures must never fall through to an unfenced mutation.
+    const status = asRecord(error).statusCode;
+    if (
+      status !== 404 &&
+      !(error instanceof Error && /^404:/.test(error.message))
+    ) {
+      throw error;
+    }
+    // Some revision-aware versions predate the snapshot route. Read their
+    // actual counters instead of guessing that a 404 means legacy writes.
+    const detail = asRecord(await remoteRequestJson(config, path));
+    if (detail.id !== sessionId) {
+      throw new Error("Session identity mismatch; read state was not saved.");
+    }
+    if ("runtime_revision" in detail || "runtime_generation" in detail) {
+      snapshot = { ...detail, session_id: detail.id, exists: true };
+    } else if (!("last_read_at" in detail)) {
+      throw new Error("Backend does not expose supported session read state.");
+    }
+  }
+  if (snapshot) {
+    const revision = snapshot.runtime_revision;
+    const generation = snapshot.runtime_generation;
+    if (
+      snapshot.session_id !== sessionId ||
+      snapshot.exists !== true ||
+      typeof revision !== "number" ||
+      !Number.isSafeInteger(revision) ||
+      revision < 0 ||
+      (generation != null &&
+        (typeof generation !== "number" ||
+          !Number.isSafeInteger(generation) ||
+          generation < 0))
+    ) {
+      throw new Error(
+        "Invalid session mutation snapshot; read state was not saved.",
+      );
+    }
+    body.request_id = randomUUID();
+    body.expected_revision = revision;
+    if (generation != null) body.expected_generation = generation;
+  }
+  await remoteRequestJson(config, path, { method: "PATCH", body });
+  return true;
 }
 
 /**

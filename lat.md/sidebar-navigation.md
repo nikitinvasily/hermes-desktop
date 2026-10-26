@@ -54,6 +54,18 @@ The project heading bullet aggregates the session state bullets over the group's
 
 When any child session awaits an approval, the heading's Folder icon is replaced by the filled `--warning` dot; when any child is generating (pending rows count while `pendingLoading` is true, loaded rows via the `loadingSessionIds` set), it is replaced by the 13px accent ring spinner; otherwise the Folder icon stays. Approval wins over running, mirroring the row priority; the transient `resumingSessionId` history fetch is deliberately NOT activity and does not light the project bullet. Only locally known runs participate — the same limitation as the session bullets themselves.
 
+## Session read lifecycle
+
+Opening or revealing a conversation marks its connection/profile-scoped session read; only a confirmed durable write clears the authoritative unread state.
+
+[[src/renderer/src/screens/Layout/sessionReadState.ts#markSessionViewed]] shares in-flight row/activation writes and emits scoped pending/settled events. Pointer, Enter and Space use one sidebar activation path. The pending-only optimistic presentation covers both recent-window and project-tree rows; rejected writes and `false` results restore the dot. A successful write clears both row stores, invalidates pre-write cache/sync/page/tree replies, then refreshes from the backend. No successful-ID mask survives the operation, so subsequent background activity can become unread normally. Optional tree-row `unread` values are preserved; old bridges without the field remain supported.
+
+[[src/renderer/src/screens/Layout/Layout.tsx#Layout]] marks mounted runs when they become visible through shortcuts, connection/profile restoration or utility-screen return. Completion marks only the selected Chat view on the matching connection/profile, not a chat hidden by a utility pane. Its list-change notification waits for the read write to settle. A completion arriving during an older activation write queues a fresh watermark, with visibility rechecked before that queued write starts. Hidden completions refresh the sidebar without marking read. Running, approval and waiting-subagent presentation priority is unchanged.
+
+[[src/main/remote-sessions.ts#remoteMarkSessionRead]] reads the owner's mutation snapshot and sends a unique receipt with the exact revision and available generation. GET query and PATCH body carry the same owning profile. Only a missing snapshot route permits detail lookup; real detail counters still require a guarded write. Legacy read-state rows without runtime counters keep the older PATCH contract. Auth failures, invalid snapshots and revision conflicts never downgrade to an unfenced write. Successful local, remote and SSH writes expose the same boolean confirmation to the renderer. [[src/main/ssh-session-read.ts#markSshSessionRead]] permits the direct SQLite writer only for explicit legacy SSH mode; auto/dashboard setup failures and mutation refusals propagate without an unfenced fallback.
+
+[[src/renderer/src/screens/Layout/SidebarRecentSessions.unread.test.tsx]] covers keyboard and project rows, failure rollback, stale replies, scope isolation, remounts and new unread activity. [[src/renderer/src/screens/Layout/Layout.test.tsx]] exercises real shell navigation and completion timing with deferred writes. Durable restart behavior also requires the main-process watermark writer and the remote native mutation contract; the renderer does not turn a rejected `409 client_upgrade_required` into a successful read.
+
 ## Waiting for subagents
 
 An idle parent with live delegated children shows a rotating dotted accent ring, distinct from the gapped running ring and the filled unread dot.

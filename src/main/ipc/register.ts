@@ -72,6 +72,7 @@ import {
   setSessionModelOverride,
 } from "../session-model-override-store";
 import { recordSessionLocation } from "../session-location-store";
+import { markSshSessionRead } from "../ssh-session-read";
 import {
   materializeDataUrlToTemp,
   readMediaAsDataUrl,
@@ -2849,11 +2850,14 @@ export function registerIpcHandlers(context: IpcContext): void {
           sessionId,
         );
       if (conn.mode === "ssh" && conn.ssh)
-        return withSshDashboardSessions(
-          conn,
-          (config) => remoteMarkSessionRead(config, sessionId),
+        return markSshSessionRead(
+          conn.sshChatTransport,
+          async (): Promise<boolean> =>
+            remoteMarkSessionRead(
+              await getSshDashboardSessionConfig(conn, scopedProfile),
+              sessionId,
+            ),
           () => sshMarkSessionRead(conn.ssh!, sessionId, scopedProfile),
-          scopedProfile,
         );
       return markSessionRead(sessionId, scopedProfile);
     },

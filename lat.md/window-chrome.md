@@ -40,7 +40,7 @@ Conversations have no top tab strip. A 24px inset inside each chat gives its con
 
 The floating Subagents/TODO panel is inset 12px down and left from the conversation's top-right content edge. The horizontal anchor accounts for the transcript's 24px padding and centered 1300px maximum width. Panel width also reserves the extra 12px inset when the files panel narrows the conversation. The panel stays pinned during scrolling. [[src/renderer/src/screens/Chat/ChatMessagesWrap.tsx#ChatMessagesWrap]] observes the scroller's content-box width and publishes its actual scrollbar gutter on that wrapper, so overlay and space-taking scrollbars align equally without modifying transcript block flow.
 
-[[src/renderer/src/screens/Layout/Layout.tsx]] renders the active chat directly in the content pane. Sidebar row selection restores an existing live run or opens a stored session; New Chat and project actions create conversations. Cmd/Ctrl+W, Cmd/Ctrl+1..9 and Cmd/Ctrl+Shift+[/] keep their existing run-management behavior without visible tabs.
+[[src/renderer/src/screens/Layout/Layout.tsx]] renders the active chat directly in the content pane. Sidebar row selection restores an existing live run or opens a stored session; New Chat and project actions create conversations. Cmd/Ctrl+W, Cmd/Ctrl+1..9 and `Cmd/Ctrl+Shift+[/]` keep their existing run-management behavior without visible tabs.
 
 [[src/renderer/src/screens/Layout/Layout.test.tsx]] covers scratch/running/resumed and non-chat views, sidebar switching and new chats, mounted background runs, keyboard activation/closing and platform-specific drag targets. [[tests/session-strip-css.test.ts]] guards the absence of reserved top space and the sidebar drag bounds.
 

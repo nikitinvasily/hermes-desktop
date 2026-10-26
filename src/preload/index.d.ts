@@ -753,6 +753,7 @@ interface HermesAPI {
         startedAt: number;
         /** By-modification ordering key (issue #74); startedAt fallback. */
         lastActivityAt: number;
+        unread?: boolean;
         source: string;
         messageCount: number;
         model: string;
