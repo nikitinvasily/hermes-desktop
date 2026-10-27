@@ -52,17 +52,58 @@ vi.mock("../Chat/Chat", () => ({
     </div>
   ),
 }));
+const deletionRace = vi.hoisted(() => ({
+  pending: null as (() => void) | null,
+  latest: null as
+    | ((id: string, connectionId: string, profile: string) => void)
+    | null,
+}));
 vi.mock("./SidebarRecentSessions", () => ({
   default: (props: {
     currentSessionId: string | null;
     loadingSessionIds: Set<string>;
     onSelect: (id: string) => void;
     pendingSessions: Array<{ id: string; title: string }>;
+    connectionId: string;
+    activeProfile: string;
+    resyncNonce: number;
+    onSessionDeleted: (
+      id: string,
+      connectionId: string,
+      profile: string,
+    ) => void;
   }): React.JSX.Element => (
     <div
       data-testid="sidebar"
+      ref={() => {
+        deletionRace.latest = props.onSessionDeleted;
+      }}
+      data-resync={props.resyncNonce}
       data-running={[...props.loadingSessionIds].join(",")}
     >
+      <button
+        onClick={() => {
+          deletionRace.pending = () =>
+            props.onSessionDeleted(
+              "session-a",
+              props.connectionId,
+              props.activeProfile,
+            );
+        }}
+      >
+        Begin late delete
+      </button>
+      <button
+        onClick={() =>
+          props.onSessionDeleted(
+            "session-a",
+            props.connectionId,
+            props.activeProfile,
+          )
+        }
+      >
+        Delete session-a
+      </button>
       {props.pendingSessions.map((row) => (
         <span key={row.id} data-testid="pending-sidebar-row">
           {row.title}
@@ -84,7 +125,18 @@ vi.mock("./StatusBar", () => ({
   StatusBar: () => <div data-testid="StatusBar" />,
 }));
 vi.mock("./ProfileSwitcher", () => ({
-  default: () => <div data-testid="ProfileSwitcher" />,
+  default: (props: {
+    activeProfile: string;
+    onSwitch: (profile: string) => void;
+  }) => (
+    <button
+      data-testid="ProfileSwitcher"
+      data-profile={props.activeProfile}
+      onClick={() => props.onSwitch("other")}
+    >
+      Switch profile
+    </button>
+  ),
 }));
 vi.mock("../../components/VerifyWarningBanner", () => ({
   default: () => <div data-testid="VerifyWarningBanner" />,
@@ -280,6 +332,114 @@ describe("utility screen return to chat", () => {
 });
 
 describe("Layout without top session tabs", () => {
+  it.each([
+    ["connection", "captured"],
+    ["profile", "captured"],
+    ["connection", "latest"],
+    ["profile", "latest"],
+  ] as const)(
+    "retires a late deleted owning run after %s switch with %s callback, retaining the new equal-id run",
+    async (scope, callback) => {
+      const { rerender } = shell();
+      fireEvent.click(screen.getByRole("button", { name: "session-a" }));
+      await waitFor(() =>
+        expect(screen.getByTestId("mounted-chat")).toHaveTextContent(
+          "session-a",
+        ),
+      );
+      const original = screen.getByTestId("mounted-chat");
+      fireEvent.click(screen.getByText("Begin late delete"));
+      if (scope === "connection") rerender(<Layout connectionId="remote" />);
+      else fireEvent.click(screen.getByText("Switch profile"));
+      fireEvent.click(screen.getByRole("button", { name: "session-a" }));
+      await waitFor(() =>
+        expect(
+          screen
+            .getAllByTestId("mounted-chat")
+            .filter((node) => node.textContent?.includes("session-a")),
+        ).toHaveLength(2),
+      );
+      const before = screen.getAllByTestId("mounted-chat");
+      const current = before.find(
+        (node) => node !== original && node.textContent?.includes("session-a"),
+      )!;
+      expect(current).toHaveAttribute("data-active", "true");
+      const nonce = screen.getByTestId("sidebar").getAttribute("data-resync");
+      const profile = screen
+        .getByTestId("ProfileSwitcher")
+        .getAttribute("data-profile");
+      const draft = screen.getByRole("textbox", { name: "Draft" });
+      fireEvent.change(draft, { target: { value: "Keep new scope draft" } });
+      await act(async () => {
+        if (callback === "captured") deletionRace.pending!();
+        else deletionRace.latest!("session-a", "local", "default");
+      });
+      expect(original).not.toBeInTheDocument();
+      expect(screen.getAllByTestId("mounted-chat")).toEqual(
+        before.filter((node) => node !== original),
+      );
+      expect(current).toBeVisible();
+      expect(current).toHaveAttribute("data-active", "true");
+      expect(current).toHaveAttribute(
+        "data-connection",
+        scope === "connection" ? "remote" : "local",
+      );
+      expect(current).toHaveAttribute(
+        "data-profile",
+        scope === "profile" ? "other" : "default",
+      );
+      expect(screen.getByTestId("ProfileSwitcher")).toHaveAttribute(
+        "data-profile",
+        profile,
+      );
+      expect(screen.getByTestId("sidebar")).toHaveAttribute(
+        "data-resync",
+        nonce,
+      );
+      expect(draft).toHaveValue("Keep new scope draft");
+      expect(abortChat).not.toHaveBeenCalled();
+    },
+  );
+
+  it("preserves an equal session id mounted on another connection", async () => {
+    const { rerender } = shell();
+    fireEvent.click(screen.getByRole("button", { name: "session-a" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("mounted-chat")).toHaveTextContent("session-a"),
+    );
+    rerender(<Layout connectionId="remote" />);
+    fireEvent.click(screen.getByRole("button", { name: "session-a" }));
+    await waitFor(() =>
+      expect(
+        screen
+          .getAllByTestId("mounted-chat")
+          .filter((node) => node.textContent?.includes("session-a")),
+      ).toHaveLength(2),
+    );
+    fireEvent.click(screen.getByText("Delete session-a"));
+    const retained = screen
+      .getAllByTestId("mounted-chat")
+      .filter((node) => node.textContent?.includes("session-a"));
+    expect(retained).toHaveLength(1);
+    expect(retained[0]).toHaveAttribute("data-connection", "local");
+  });
+
+  // @lat: [[connections#Connections#Test specifications#Deleted runs leave the layout]]
+  it("unmounts a deleted conversation instead of keeping a hidden resumable run", async () => {
+    shell();
+    fireEvent.click(screen.getByRole("button", { name: "session-a" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("mounted-chat")).toHaveTextContent("session-a"),
+    );
+    fireEvent.click(screen.getByText("Delete session-a"));
+    expect(
+      screen
+        .getAllByTestId("mounted-chat")
+        .every((node) => !node.textContent?.includes("session-a")),
+    ).toBe(true);
+    expect(screen.getAllByTestId("mounted-chat")).toHaveLength(1);
+  });
+
   it("opens a child transcript without injecting its title into sidebar pending rows", async () => {
     shell();
     fireEvent.click(screen.getByText("Open subagent"));

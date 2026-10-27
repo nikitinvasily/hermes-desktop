@@ -17,6 +17,8 @@ vi.mock("../../components/useI18n", () => ({
   }),
 }));
 
+vi.mock("react-hot-toast", () => ({ default: { error: vi.fn() } }));
+import toast from "react-hot-toast";
 import Sessions, { SESSIONS_REFRESH_MS } from "./Sessions";
 
 const baseProps = {
@@ -582,6 +584,268 @@ describe("Sessions tab live refresh (#322)", () => {
     expect(screen.queryByText("Late hello")).toBeNull();
     expect(screen.queryByText("sessions.empty")).toBeTruthy();
   });
+});
+
+describe("Sessions deletion safety", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.useFakeTimers();
+    vi.mocked(toast.error).mockClear();
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  const row = {
+    id: "delete-target",
+    title: "Keep until deleted",
+    startedAt: 200,
+    source: "desktop",
+    messageCount: 1,
+    model: "test",
+  };
+
+  async function beginDelete(bulk: boolean): Promise<void> {
+    if (bulk) {
+      fireEvent.click(
+        screen.getByRole("button", { name: "sessions.selectMode" }),
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: "sessions.selectVisible" }),
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: "sessions.deleteSelected" }),
+      );
+    } else {
+      fireEvent.click(screen.getByRole("button", { name: "sessions.delete" }));
+    }
+    fireEvent.click(
+      screen.getByRole("button", { name: "sessions.deleteConfirmAction" }),
+    );
+    await act(async () => {});
+  }
+
+  it.each([
+    [false, "profile", false],
+    [false, "profile", true],
+    [true, "profile", false],
+    [true, "profile", true],
+    [false, "connectionId", false],
+    [false, "connectionId", true],
+    [true, "connectionId", false],
+    [true, "connectionId", true],
+  ] as const)(
+    "reports scoped success but ignores stale UI completion (bulk=%s scope=%s failure=%s)",
+    async (bulk, scope, failure) => {
+      const api = installHermesAPI([row]);
+      let resolve!: () => void;
+      let reject!: (error: Error) => void;
+      (bulk ? api.deleteSessions : api.deleteSession).mockReturnValue(
+        new Promise<void>((done, fail) => {
+          resolve = done;
+          reject = fail;
+        }),
+      );
+      const onSessionDeleted = vi.fn();
+      const changed = vi.fn();
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+      window.addEventListener("hermes-sessions-maybe-changed", changed);
+      try {
+        const view = render(
+          <Sessions
+            {...baseProps}
+            onSessionDeleted={onSessionDeleted}
+            visible={true}
+          />,
+        );
+        await act(async () => {});
+        await beginDelete(bulk);
+        const newRow = { ...row, title: "New scope chat with same id" };
+        api.syncSessionCache.mockResolvedValue([newRow]);
+        await act(async () => {
+          view.rerender(
+            <Sessions
+              {...baseProps}
+              {...{ [scope]: "other" }}
+              onSessionDeleted={onSessionDeleted}
+              visible={true}
+            />,
+          );
+        });
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+        fireEvent.click(
+          screen.getByRole("button", { name: "sessions.delete" }),
+        );
+        await act(async () => {
+          if (failure) reject(new Error("Old scope error"));
+          else resolve();
+        });
+        expect(screen.getByText(newRow.title)).toBeInTheDocument();
+        expect(screen.getByRole("dialog")).toBeInTheDocument();
+        expect(onSessionDeleted.mock.calls).toEqual(
+          failure ? [] : [[row.id, baseProps.connectionId, baseProps.profile]],
+        );
+        expect(changed).not.toHaveBeenCalled();
+        expect(toast.error).not.toHaveBeenCalled();
+      } finally {
+        errors.mockRestore();
+        window.removeEventListener("hermes-sessions-maybe-changed", changed);
+      }
+    },
+  );
+
+  it.each([false, true])(
+    "reports late scoped success after the deleting modal unmounts (bulk=%s)",
+    async (bulk) => {
+      const api = installHermesAPI([row]);
+      let resolve!: () => void;
+      (bulk ? api.deleteSessions : api.deleteSession).mockReturnValueOnce(
+        new Promise<void>((done) => {
+          resolve = done;
+        }),
+      );
+      const onSessionDeleted = vi.fn();
+      const old = render(
+        <Sessions {...baseProps} visible onSessionDeleted={onSessionDeleted} />,
+      );
+      await act(async () => {});
+      await beginDelete(bulk);
+      old.unmount();
+      const newRow = { ...row, title: "New mounted scope chat" };
+      api.listCachedSessions.mockResolvedValue([newRow]);
+      api.syncSessionCache.mockResolvedValue([newRow]);
+      render(
+        <Sessions
+          {...baseProps}
+          connectionId="other"
+          visible
+          onSessionDeleted={onSessionDeleted}
+        />,
+      );
+      await act(async () => {});
+      const changed = vi.fn();
+      window.addEventListener("hermes-sessions-maybe-changed", changed);
+      try {
+        await act(async () => {
+          resolve();
+        });
+        expect(onSessionDeleted.mock.calls).toEqual([
+          [row.id, baseProps.connectionId, baseProps.profile],
+        ]);
+        expect(screen.getByText(newRow.title)).toBeInTheDocument();
+        expect(changed).not.toHaveBeenCalled();
+        expect(toast.error).not.toHaveBeenCalled();
+      } finally {
+        window.removeEventListener("hermes-sessions-maybe-changed", changed);
+      }
+    },
+  );
+
+  it.each([false, true])(
+    "notifies Layout only after backend success (bulk=%s)",
+    async (bulk) => {
+      const second = { ...row, id: "second-target", title: "Second target" };
+      const api = installHermesAPI(bulk ? [row, second] : [row]);
+      let resolve!: () => void;
+      (bulk ? api.deleteSessions : api.deleteSession).mockReturnValue(
+        new Promise<void>((done) => {
+          resolve = done;
+        }),
+      );
+      const onSessionDeleted = vi.fn();
+      const changed = vi.fn();
+      window.addEventListener("hermes-sessions-maybe-changed", changed);
+      try {
+        render(
+          <Sessions
+            {...baseProps}
+            onSessionDeleted={onSessionDeleted}
+            visible={true}
+          />,
+        );
+        await act(async () => {});
+        await beginDelete(bulk);
+        expect(onSessionDeleted).not.toHaveBeenCalled();
+        expect(changed).not.toHaveBeenCalled();
+        await act(async () => {
+          resolve();
+        });
+        expect(screen.queryByText(row.title)).not.toBeInTheDocument();
+        expect(onSessionDeleted.mock.calls).toEqual(
+          (bulk ? [row.id, second.id] : [row.id]).map((id) => [
+            id,
+            baseProps.connectionId,
+            baseProps.profile,
+          ]),
+        );
+        expect(changed).toHaveBeenCalledTimes(1);
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      } finally {
+        window.removeEventListener("hermes-sessions-maybe-changed", changed);
+      }
+    },
+  );
+
+  it.each([
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true],
+  ])(
+    "preserves rows while pending and after failure (bulk=%s search=%s)",
+    async (bulk, search) => {
+      const api = installHermesAPI([row]);
+      api.searchSessions.mockResolvedValue([
+        sessionSearchResult(row.title, "match", row.id),
+      ]);
+      let reject!: (error: Error) => void;
+      (bulk ? api.deleteSessions : api.deleteSession).mockReturnValue(
+        new Promise((_, fail) => {
+          reject = fail;
+        }),
+      );
+      const onSessionDeleted = vi.fn();
+      const changed = vi.fn();
+      window.addEventListener("hermes-sessions-maybe-changed", changed);
+      render(
+        <Sessions
+          {...baseProps}
+          onSessionDeleted={onSessionDeleted}
+          visible={true}
+        />,
+      );
+      await act(async () => {});
+      if (search) {
+        fireEvent.change(
+          screen.getByPlaceholderText("sessions.searchPlaceholder"),
+          { target: { value: "match" } },
+        );
+        await act(async () => {
+          vi.advanceTimersByTime(300);
+        });
+      }
+      await beginDelete(bulk);
+      expect(screen.getByText(row.title)).toBeInTheDocument();
+      const syncCount = api.syncSessionCache.mock.calls.length;
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        await act(async () => {
+          reject(new Error("Server refused deletion"));
+        });
+        expect(screen.getByText(row.title)).toBeInTheDocument();
+        expect(toast.error).toHaveBeenCalledWith("Server refused deletion");
+        expect(api.syncSessionCache).toHaveBeenCalledTimes(syncCount);
+        expect(onSessionDeleted).not.toHaveBeenCalled();
+        expect(changed).not.toHaveBeenCalled();
+        if (search)
+          expect(
+            screen.getByPlaceholderText("sessions.searchPlaceholder"),
+          ).toHaveValue("match");
+      } finally {
+        errors.mockRestore();
+        window.removeEventListener("hermes-sessions-maybe-changed", changed);
+      }
+    },
+  );
 });
 
 describe("Sessions tab — delete affordance (#408)", () => {

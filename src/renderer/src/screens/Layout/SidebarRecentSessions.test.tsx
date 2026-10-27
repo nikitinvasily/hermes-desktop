@@ -8,6 +8,9 @@ import {
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import SidebarRecentSessions from "./SidebarRecentSessions";
+import toast from "react-hot-toast";
+
+vi.mock("react-hot-toast", () => ({ default: { error: vi.fn() } }));
 
 declare const __dirname: string;
 
@@ -756,7 +759,8 @@ describe("SidebarRecentSessions delete vs the tree-derived groups (issue #80)", 
   function renderWithTreeGroups(
     windowRows: TreeRow[],
     treeGroups: Record<string, TreeRow[]>,
-  ): void {
+    onSessionDeleted = vi.fn(),
+  ): ReturnType<typeof render> {
     listCachedSessions.mockImplementation(async () => windowRows);
     syncSessionCache.mockImplementation(
       async (): Promise<Array<Record<string, unknown>>> =>
@@ -774,7 +778,7 @@ describe("SidebarRecentSessions delete vs the tree-derived groups (issue #80)", 
         ),
       },
     });
-    render(
+    return render(
       <SidebarRecentSessions
         open
         connectionId="connection-main"
@@ -787,7 +791,7 @@ describe("SidebarRecentSessions delete vs the tree-derived groups (issue #80)", 
         resumingSessionId={null}
         onSelect={vi.fn()}
         onNewChatInProject={vi.fn()}
-        onSessionDeleted={vi.fn()}
+        onSessionDeleted={onSessionDeleted}
         scrollRootRef={{ current: null }}
       />,
     );
@@ -807,6 +811,120 @@ describe("SidebarRecentSessions delete vs the tree-derived groups (issue #80)", 
     );
     fireEvent.click(confirm);
   }
+
+  it.each([
+    ["connectionId", false],
+    ["activeProfile", false],
+    ["connectionId", true],
+    ["activeProfile", true],
+  ] as const)(
+    "reports owning scope after a late delete without changing the new %s view (failure=%s)",
+    async (scope, failure) => {
+      const onSessionDeleted = vi.fn();
+      const view = renderWithTreeGroups(
+        [{ id: "same-id", title: "Original chat" }],
+        {},
+        onSessionDeleted,
+      );
+      let resolve!: () => void;
+      let reject!: (error: Error) => void;
+      vi.mocked(window.hermesAPI.deleteSession).mockReturnValueOnce(
+        new Promise<void>((done, fail) => {
+          resolve = done;
+          reject = fail;
+        }),
+      );
+      await deleteRowViaMenu("Original chat");
+      expect(onSessionDeleted).not.toHaveBeenCalled();
+      const rows = [{ id: "same-id", title: "New scope equal-id chat" }];
+      listCachedSessions.mockResolvedValue(rows);
+      syncSessionCache.mockResolvedValue(rows);
+      view.rerender(
+        <SidebarRecentSessions
+          open
+          connectionId={scope === "connectionId" ? "other" : "connection-main"}
+          activeProfile={scope === "activeProfile" ? "other" : "default"}
+          degraded={false}
+          resyncNonce={0}
+          currentSessionId={null}
+          loadingSessionIds={new Set()}
+          approvalSessionIds={new Set()}
+          resumingSessionId={null}
+          onSelect={vi.fn()}
+          onSessionDeleted={onSessionDeleted}
+          scrollRootRef={{ current: null }}
+        />,
+      );
+      await screen.findByText(rows[0].title);
+      const changed = vi.fn();
+      window.addEventListener("hermes-sessions-maybe-changed", changed);
+      const syncCount = syncSessionCache.mock.calls.length;
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        await act(async () => {
+          if (failure) reject(new Error("Old scope refusal"));
+          else resolve();
+        });
+        expect(onSessionDeleted.mock.calls).toEqual(
+          failure ? [] : [["same-id", "connection-main", "default"]],
+        );
+        expect(screen.getByText(rows[0].title)).toBeInTheDocument();
+        expect(changed).not.toHaveBeenCalled();
+        expect(syncSessionCache).toHaveBeenCalledTimes(syncCount);
+        expect(toast.error).not.toHaveBeenCalled();
+      } finally {
+        errors.mockRestore();
+        window.removeEventListener("hermes-sessions-maybe-changed", changed);
+      }
+    },
+  );
+
+  // @lat: [[connections#Connections#Test specifications#Deletion failure preserves sidebar rows]]
+  it("keeps a tree-only row when deletion is refused and shows the error", async () => {
+    renderWithTreeGroups([], {
+      "/tmp/proj": [
+        {
+          id: "session-tree",
+          title: "Tree-only chat",
+          contextFolder: "/tmp/proj",
+        },
+      ],
+    });
+    vi.mocked(window.hermesAPI.deleteSession).mockRejectedValueOnce(
+      new Error("409: revision_conflict"),
+    );
+    await deleteRowViaMenu("Tree-only chat");
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("409: revision_conflict"),
+    );
+    expect(screen.getByText("Tree-only chat")).toBeInTheDocument();
+  });
+
+  it("does not hide a row while the server has not confirmed deletion", async () => {
+    renderWithTreeGroups([], {
+      "/tmp/proj": [
+        {
+          id: "session-tree",
+          title: "Tree-only chat",
+          contextFolder: "/tmp/proj",
+        },
+      ],
+    });
+    let finish!: () => void;
+    vi.mocked(window.hermesAPI.deleteSession).mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    await deleteRowViaMenu("Tree-only chat");
+    expect(screen.getByText("Tree-only chat")).toBeInTheDocument();
+    await act(async () => {
+      finish();
+    });
+    await waitFor(() =>
+      expect(screen.queryByText("Tree-only chat")).toBeNull(),
+    );
+  });
 
   it("removes a tree-group chat from its project group on delete, not only from the window", async () => {
     // The chat exists ONLY in the tree-derived groups (issue #57 stage 2):

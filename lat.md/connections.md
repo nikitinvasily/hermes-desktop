@@ -63,6 +63,14 @@ Direct Remote requests build a profile-scoped session configuration. SSH dashboa
 
 Local [[src/main/session-cache.ts#syncSessionCache]], [[src/main/session-cache.ts#listCachedSessions]], [[src/main/sessions.ts#listSessions]], [[src/main/sessions.ts#searchSessions]], title mutation, deletion cleanup, and batched context-folder reads resolve `state.db` and `sessions.json` from the explicit profile. Omitted IDs retain the active connection/profile fallback for legacy callers.
 
+### Guarded session deletion
+
+Remote and SSH deletion prepares authoritative revision counters before writing; the sidebar and Sessions lists change only after server confirmation.
+
+[[src/main/remote-sessions.ts#remoteDeleteSession]] reads the profile-scoped mutation snapshot, validates session identity and counters, and sends a unique request id plus expected revision/generation as DELETE query parameters. Missing snapshot routes fall back to exact session detail, using legacy deletion only when that row has no runtime counters. Authentication, transport and revision refusals never trigger an unfenced retry. An authoritative absent snapshot is an idempotent success.
+
+[[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx]] and [[src/renderer/src/screens/Sessions/Sessions.tsx]] retain rows and search results on failure and show an error. Successful deletion removes stale project-tree entries and notifies [[src/renderer/src/screens/Layout/Layout.tsx]], which forgets matching open and hidden runs only on the owning connection/profile.
+
 ### Remote settings parity
 
 Direct Remote connections route the Settings-family IPC through the dashboard REST API instead of reading the local `~/.hermes` (issue #51).
@@ -184,6 +192,18 @@ Detail: an explicit binding overrides the derived folder, an empty sentinel unli
 Move to project also calls the gateway RPC `session.workspace.move` over the dashboard WebSocket, so the chat's working directory follows the move, not just the sidebar grouping.
 
 Detail: the RPC rewrites the session's `cwd`/`git_branch`/`git_repo_root` in the agent's own state.db (local agent included). An open chat tab listens for the folder-changed event and adopts the new folder for subsequent sends.
+
+### Guarded Remote delete receipts
+
+Deletion reads the exact session snapshot and passes its revision/generation in the DELETE query with a unique request id; invalid or refused preparation never deletes anything.
+
+### Deletion failure preserves sidebar rows
+
+A server refusal leaves tree-only sidebar rows visible and shows an error; a pending deletion never hides a row before acknowledgement.
+
+### Deleted runs leave the layout
+
+Deleting an open conversation unmounts its run instead of keeping a hidden resumable transcript.
 
 ### Non-destructive registry recovery
 

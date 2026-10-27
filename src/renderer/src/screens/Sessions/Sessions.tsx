@@ -3,6 +3,7 @@ import { Plus, Search, X, ChatBubble, Trash, Pencil } from "../../assets/icons";
 import { useI18n } from "../../components/useI18n";
 import { confirmSessionRename } from "./confirmSessionRename";
 import { OrbLoader } from "../../components/OrbLoader";
+import toast from "react-hot-toast";
 
 interface CachedSession {
   id: string;
@@ -85,6 +86,12 @@ function storedSessionSourceFilter(): Set<string> {
 
 interface SessionsProps {
   onResumeSession: (sessionId: string) => void;
+  /** Optional observer; id-only handlers remain compatible. Scope is captured at deletion. */
+  onSessionDeleted?: (
+    id: string,
+    connectionId: string,
+    profile: string,
+  ) => void;
   onNewChat: () => void;
   currentSessionId: string | null;
   visible: boolean;
@@ -356,6 +363,7 @@ export const SESSIONS_REFRESH_MS = 30_000;
 
 function Sessions({
   onResumeSession,
+  onSessionDeleted,
   onNewChat,
   currentSessionId,
   visible,
@@ -395,9 +403,21 @@ function Sessions({
   const renameInputRef = useRef<HTMLInputElement>(null);
   const [renameSaving, setRenameSaving] = useState(false);
   const renameContext = `${connectionId}\0${profile}`;
-  const renameContextRef = useRef(renameContext);
+  const renameContextRef = useRef<string | null>(renameContext);
   useEffect(() => {
     renameContextRef.current = renameContext;
+    return () => {
+      renameContextRef.current = null;
+    };
+  }, [renameContext]);
+
+  useEffect(() => {
+    setPendingDeleteSessionId(null);
+    setDeletingSessionId(null);
+    setPendingBulkDeleteIds(null);
+    setDeletingBulk(false);
+    setSelectedSessionIds(new Set());
+    setIsSelectionMode(false);
   }, [renameContext]);
 
   useEffect(() => {
@@ -571,25 +591,32 @@ function Sessions({
 
   const confirmDelete = useCallback(
     async (sessionId: string): Promise<void> => {
-      // Optimistic UI update: drop the row from both the main list and
-      // any active search results so the user sees instant feedback even
-      // if the SQLite write or cache rewrite has any latency.  The
-      // subsequent refresh re-syncs from state.db so we recover if the
-      // backend deletion failed.
       setDeletingSessionId(sessionId);
-      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
-      setSearchResults((prev) => prev.filter((r) => r.sessionId !== sessionId));
       try {
         await window.hermesAPI.deleteSession(sessionId, connectionId, profile);
+        onSessionDeleted?.(sessionId, connectionId, profile);
+        if (renameContextRef.current !== renameContext) return;
+        setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+        setSearchResults((prev) =>
+          prev.filter((r) => r.sessionId !== sessionId),
+        );
+        window.dispatchEvent(new Event("hermes-sessions-maybe-changed"));
       } catch (err) {
         console.error("Failed to delete session", sessionId, err);
+        if (renameContextRef.current !== renameContext) return;
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : "Failed to delete session",
+        );
       } finally {
-        await refreshSessions();
-        setDeletingSessionId(null);
-        setPendingDeleteSessionId(null);
+        if (renameContextRef.current === renameContext) {
+          setDeletingSessionId(null);
+          setPendingDeleteSessionId(null);
+        }
       }
     },
-    [connectionId, profile, refreshSessions],
+    [connectionId, profile, onSessionDeleted, renameContext],
   );
 
   const toggleSelectionMode = useCallback((): void => {
@@ -630,21 +657,31 @@ function Sessions({
 
       const idSet = new Set(ids);
       setDeletingBulk(true);
-      setSessions((prev) => prev.filter((s) => !idSet.has(s.id)));
-      setSearchResults((prev) => prev.filter((r) => !idSet.has(r.sessionId)));
       try {
         await window.hermesAPI.deleteSessions(ids, connectionId, profile);
-      } catch (err) {
-        console.error("Failed to delete selected sessions", ids, err);
-      } finally {
-        await refreshSessions();
-        setDeletingBulk(false);
-        setPendingBulkDeleteIds(null);
+        for (const id of ids) onSessionDeleted?.(id, connectionId, profile);
+        if (renameContextRef.current !== renameContext) return;
+        setSessions((prev) => prev.filter((s) => !idSet.has(s.id)));
+        setSearchResults((prev) => prev.filter((r) => !idSet.has(r.sessionId)));
+        window.dispatchEvent(new Event("hermes-sessions-maybe-changed"));
         setSelectedSessionIds(new Set());
         setIsSelectionMode(false);
+      } catch (err) {
+        console.error("Failed to delete selected sessions", ids, err);
+        if (renameContextRef.current !== renameContext) return;
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : "Failed to delete selected sessions",
+        );
+      } finally {
+        if (renameContextRef.current === renameContext) {
+          setDeletingBulk(false);
+          setPendingBulkDeleteIds(null);
+        }
       }
     },
-    [connectionId, profile, refreshSessions],
+    [connectionId, profile, onSessionDeleted, renameContext],
   );
 
   useEffect(() => {
