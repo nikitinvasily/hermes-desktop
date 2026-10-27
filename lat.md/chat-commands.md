@@ -74,6 +74,46 @@ Lossy-copy admission and run matching count Unicode code points consistently. Su
 
 [[src/renderer/src/screens/Chat/lossyText.test.ts]] rejects an 11-character partial and a 12-character partial covering less than 30%, while retaining acceptance at the exact 12-character/30% boundary. This protects distinct streamed completion and reasoning text from false deduplication.
 
+## Legacy completion tail recovery
+
+Legacy gateway completion appends only a confirmed missing suffix, accepting whitespace drift without replacing text already emitted to the renderer.
+
+[[src/main/tui-gateway-stream.ts#gatewayCompletionSuffix]] compares the complete streamed prefix to final text, allowing whitespace runs to differ while retaining original final offsets. Existing stream separators are reused; unrelated, non-prefix and already complete responses append nothing.
+
+### Whitespace drift retains the tail
+
+Exported-helper fixtures recover tails across spaces, newlines, tabs, interior whitespace changes and Unicode text without replacing streamed content.
+
+### Unrelated and completed text remain unchanged
+
+Completed whitespace variants, unrelated final responses and mid-word conflicts after a streamed separator do not append or repeat text.
+
+## Canonical database tail recovery
+
+A matched assistant database row can restore a confirmed longer readable continuation without replacing the streamed row's identity.
+
+[[src/renderer/src/screens/Chat/sessionHistory.ts#reconcileStreamedWithDb]] preserves the fork's existing row-matching and scope rules. Normalized readable database text must strictly extend the entire streamed prefix before content is adopted. This is not fuzzy recovery for unmatched short prefixes. Attachments and timestamps keep their existing merge rules; tool identity, approval/clarify anchors, user messages and local errors remain intact.
+
+[[tests/assistant-tail-recovery.test.ts]] verifies metadata preservation, non-mutating input handling and chronology through interactive cards and tool rows in addition to the continuation guards below. Existing search, scroll and transport tests protect their unchanged contracts.
+
+### Incomplete matched assistant row
+
+Reconciliation restores a substantive final sentence despite whitespace drift, preserving the live row ID and adopting a missing recorded timestamp.
+
+### Structural wrappers alone do not replace text
+
+File wrappers and image markers can lengthen raw database content without extending the readable response; these additions leave streamed text unchanged.
+
+### Divergent and shorter canonical rows do not overwrite
+
+A shared match-key prefix alone cannot authorize replacement. Divergent endings and older, shorter snapshots retain streamed text.
+
+A separator already emitted after the last readable word must remain a separator: `is ` cannot become `island`, even when whitespace normalization otherwise matches. Genuine continuations may change whitespace runs but not erase that boundary.
+
+### User submissions retain their original content
+
+A longer database record cannot rewrite an optimistic user submission or its attachment presentation.
+
 ## Streaming source-of-truth ref
 
 `handleGatewayEvent` in [[src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts#useDashboardChatTransport]] applies stream events against a synchronous `messagesRef`, not React state, because state lags a render behind and each successive delta must build on the previous one.
