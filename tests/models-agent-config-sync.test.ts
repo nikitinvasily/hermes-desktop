@@ -109,9 +109,18 @@ describe("agent-config model sync", () => {
     // once without and once with the canonical endpoint URL (issue #170).
     const models0 = await freshModels();
     models0.listModels(); // seed defaults so models.json exists
-    const raw = JSON.parse(readFileSync(join(testHome, "models.json"), "utf-8"));
+    const raw = JSON.parse(
+      readFileSync(join(testHome, "models.json"), "utf-8"),
+    );
     raw.push(
-      { id: "dup-a", name: "glm-5.3", provider: "zai", model: "glm-5.3", baseUrl: "", createdAt: 1 },
+      {
+        id: "dup-a",
+        name: "glm-5.3",
+        provider: "zai",
+        model: "glm-5.3",
+        baseUrl: "",
+        createdAt: 1,
+      },
       {
         id: "dup-b",
         name: "glm-5.3",
@@ -132,7 +141,10 @@ describe("agent-config model sync", () => {
     // And the collapse is persisted — a second process sees one row too.
     const persisted = JSON.parse(
       readFileSync(join(testHome, "models.json"), "utf-8"),
-    ).filter((r: { provider: string; model: string }) => r.provider === "zai" && r.model === "glm-5.3");
+    ).filter(
+      (r: { provider: string; model: string }) =>
+        r.provider === "zai" && r.model === "glm-5.3",
+    );
     expect(persisted).toHaveLength(1);
   });
 });

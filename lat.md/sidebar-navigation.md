@@ -156,6 +156,8 @@ Above Subagents, the panel shows the chat's live task list (issue #126), expande
 
 [[src/renderer/src/screens/Chat/todoState.ts]] derives the snapshot two ways, mirroring the backend's `_todo_state_from_history`: the seed is the newest `todo_list` (or legacy `todo`) tool result in the transcript, and live updates come from the `todo.updated` gateway event, wired through `onTodoState` in [[src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts]] and rendered by [[src/renderer/src/screens/Chat/TodoSection.tsx]] with per-item status markers and a done/total counter. The section hides while no item is pending or in progress, so finished lists never keep the panel alive. [[src/renderer/src/screens/Chat/todoState.test.ts]] and [[src/renderer/src/screens/Chat/ChatContextPanel.todo.test.tsx]] cover the derivation and section contracts.
 
+The socket dispatches events through the current render's handler without replacing its session-scoped subscription. Updating or removing the TODO callback must affect the existing socket immediately; rerenders must not repeat connect, resume or approval-bypass restoration. [[src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.test.tsx]] covers callback replacement/removal, foreign-session filtering and rerenders around a pending running-session resume.
+
 ## Whole-panel collapse
 
 The floating TODO/Subagents panel collapses into a 32px square at its existing anchor without affecting transcript layout or scroll.

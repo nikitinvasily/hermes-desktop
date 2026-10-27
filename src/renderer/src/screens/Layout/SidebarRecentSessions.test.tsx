@@ -6,7 +6,6 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import SidebarRecentSessions from "./SidebarRecentSessions";
 import toast from "react-hot-toast";
@@ -15,10 +14,17 @@ vi.mock("react-hot-toast", () => ({ default: { error: vi.fn() } }));
 
 declare const __dirname: string;
 
-// The fs mock below (backlog #92 bindings) nulls readFileSync, so read the
-// CSS through fs/promises which the mock does not cover.
-const mainCss = await import("node:fs/promises").then((fsp) =>
-  fsp.readFile(join(__dirname, "../../assets/main.css"), "utf8"),
+// Read CSS outside Vitest's CSS-module stubs and the binding-file fs mocks.
+// Keep Node-only imports out of the renderer's browser typecheck.
+const [{ join }, { readFile }] = await Promise.all([
+  vi.importActual<{ join(...parts: string[]): string }>("node:path"),
+  vi.importActual<{
+    readFile(path: string, encoding: "utf8"): Promise<string>;
+  }>("node:fs/promises"),
+]);
+const mainCss = await readFile(
+  join(__dirname, "../../assets/main.css"),
+  "utf8",
 );
 
 // The component owns its data fetching; stub the hermesAPI bridge so no
@@ -51,8 +57,8 @@ vi.mock("../../env", async (importOriginal) => ({
 
 // Backlog #92: tests that need chats WITHOUT desktop bindings (so they
 // group into the flat Chats section) rely on this nulling readFileSync —
-// the bindings file read returns null. The CSS-contract read at the top
-// uses fs/promises, which this mock does not cover.
+// the bindings file read returns null. The CSS contract uses the actual
+// fs/promises module independently of these runtime fs mocks.
 vi.mock("fs", () => ({
   readFileSync: (): null => null,
 }));
@@ -190,7 +196,7 @@ describe("SidebarRecentSessions quick actions", () => {
         ),
       );
       const restoredInput = screen.getByRole("textbox");
-      expect(restoredInput).toBeEnabled();
+      await waitFor(() => expect(restoredInput).toBeEnabled());
       expect(restoredInput).toHaveValue("Unsaved title");
       expect(screen.queryByText("Unsaved title")).not.toBeInTheDocument();
       expect(window.hermesAPI.updateSessionTitle).toHaveBeenCalledWith(

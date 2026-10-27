@@ -75,11 +75,7 @@ function seedProfile(
       model TEXT DEFAULT 'test-model', title TEXT,
       cwd TEXT, git_repo_root TEXT
       ${archivedColumn ? ", archived INTEGER NOT NULL DEFAULT 0" : ""}
-      ${
-        lineageColumns
-          ? ", parent_session_id TEXT, model_config TEXT"
-          : ""
-      }
+      ${lineageColumns ? ", parent_session_id TEXT, model_config TEXT" : ""}
     );
     CREATE TABLE messages (
       id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT,

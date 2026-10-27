@@ -52,8 +52,11 @@ describe("DocumentCard (issue #134)", () => {
     expect(btn.textContent).toContain("report.pdf");
     expect(btn.className).toContain("chat-media-document");
     expect(
-      (window as unknown as { hermesAPI: { mediaFileExists: ReturnType<typeof vi.fn> } })
-        .hermesAPI.mediaFileExists,
+      (
+        window as unknown as {
+          hermesAPI: { mediaFileExists: ReturnType<typeof vi.fn> };
+        }
+      ).hermesAPI.mediaFileExists,
     ).toHaveBeenCalledWith(docToken().src);
   });
 

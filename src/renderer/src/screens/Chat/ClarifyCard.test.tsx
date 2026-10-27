@@ -78,7 +78,9 @@ describe("ClarifyCard", () => {
     fireEvent.click(screen.getByText("chat.clarify.skip"));
 
     expect(respondClarify).toHaveBeenCalledWith("r1", "");
-    await vi.waitFor(() => expect(onResolved).toHaveBeenCalledWith("r1", "", undefined));
+    await vi.waitFor(() =>
+      expect(onResolved).toHaveBeenCalledWith("r1", "", undefined),
+    );
   });
 
   it("does not send for an empty open-ended answer (Send disabled)", () => {

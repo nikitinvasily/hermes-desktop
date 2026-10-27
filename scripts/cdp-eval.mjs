@@ -11,38 +11,30 @@ if (!expr) {
   process.exit(2);
 }
 
-const fetchTargets = () =>
-  new Promise((resolve, reject) => {
-    http
-      .get(`http://127.0.0.1:${port}/json/list`, (res) => {
-        let d = "";
-        res.on("data", (c) => (d += c));
-        res.on("end", () => {
-          try {
-            resolve(JSON.parse(d));
-          } catch (e) {
-            reject(e);
-          }
-        });
-      })
-      .on("error", reject);
-  });
-
-const targets = await fetchTargets();
+const targets = await new Promise((resolve, reject) => {
+  http
+    .get(`http://127.0.0.1:${port}/json/list`, (res) => {
+      let d = "";
+      res.on("data", (c) => (d += c));
+      res.on("end", () => {
+        try {
+          resolve(JSON.parse(d));
+        } catch (e) {
+          reject(e);
+        }
+      });
+    })
+    .on("error", reject);
+});
 const page = targets.find((t) => t.type === "page");
 if (!page) {
   console.error("no page target");
   process.exit(1);
 }
-const w = new WebSocket(page.webSocketDebuggerUrl, { perMessageDeflate: false });
-let id = 0;
+const w = new WebSocket(page.webSocketDebuggerUrl, {
+  perMessageDeflate: false,
+});
 const pending = new Map();
-const send = (method, params = {}) =>
-  new Promise((resolve) => {
-    const i = ++id;
-    pending.set(i, resolve);
-    w.send(JSON.stringify({ id: i, method, params }));
-  });
 w.on("message", (m) => {
   const j = JSON.parse(m.toString());
   if (j.id && pending.has(j.id)) {
@@ -51,10 +43,15 @@ w.on("message", (m) => {
   }
 });
 await new Promise((r) => w.on("open", r));
-const r = await send("Runtime.evaluate", {
-  expression: expr,
-  returnByValue: true,
-  awaitPromise: true,
+const r = await new Promise((resolve) => {
+  pending.set(1, resolve);
+  w.send(
+    JSON.stringify({
+      id: 1,
+      method: "Runtime.evaluate",
+      params: { expression: expr, returnByValue: true, awaitPromise: true },
+    }),
+  );
 });
 if (r.result?.exceptionDetails) {
   console.error(JSON.stringify(r.result.exceptionDetails, null, 2));

@@ -17,7 +17,11 @@ describe("model attachment dedup", () => {
     expect(
       isSameModelAttachment(
         { provider: "zai", model: "glm-5.3", baseUrl: "" },
-        { provider: "zai", model: "glm-5.3", baseUrl: "https://api.z.ai/api/paas/v4" },
+        {
+          provider: "zai",
+          model: "glm-5.3",
+          baseUrl: "https://api.z.ai/api/paas/v4",
+        },
       ),
     ).toBe(true);
   });
@@ -25,8 +29,16 @@ describe("model attachment dedup", () => {
   it("keeps two distinct explicit endpoints separate", () => {
     expect(
       isSameModelAttachment(
-        { provider: "custom", model: "faab-large", baseUrl: "https://faab.ai/v1" },
-        { provider: "custom", model: "faab-large", baseUrl: "https://mirror.faab.ai/v1" },
+        {
+          provider: "custom",
+          model: "faab-large",
+          baseUrl: "https://faab.ai/v1",
+        },
+        {
+          provider: "custom",
+          model: "faab-large",
+          baseUrl: "https://mirror.faab.ai/v1",
+        },
       ),
     ).toBe(false);
   });
@@ -35,7 +47,11 @@ describe("model attachment dedup", () => {
     expect(
       isSameModelAttachment(
         { provider: "ZAI", model: "GLM-5.3" },
-        { provider: "zai", model: "glm-5.3", baseUrl: "https://api.z.ai/api/paas/v4" },
+        {
+          provider: "zai",
+          model: "glm-5.3",
+          baseUrl: "https://api.z.ai/api/paas/v4",
+        },
       ),
     ).toBe(true);
   });
@@ -43,8 +59,16 @@ describe("model attachment dedup", () => {
   it("collapses duplicate rows and inherits the non-empty baseUrl", () => {
     const rows = [
       { provider: "zai", model: "glm-5.3", baseUrl: "" },
-      { provider: "zai", model: "glm-5.3", baseUrl: "https://api.z.ai/api/paas/v4" },
-      { provider: "openrouter", model: "openai/gpt-6-luna", baseUrl: "https://openrouter.ai/api/v1" },
+      {
+        provider: "zai",
+        model: "glm-5.3",
+        baseUrl: "https://api.z.ai/api/paas/v4",
+      },
+      {
+        provider: "openrouter",
+        model: "openai/gpt-6-luna",
+        baseUrl: "https://openrouter.ai/api/v1",
+      },
       { provider: "openrouter", model: "openai/gpt-6-luna", baseUrl: "" },
       { provider: "anthropic", model: "claude-sonnet-4-20250514", baseUrl: "" },
     ];
@@ -64,8 +88,16 @@ describe("model attachment dedup", () => {
 
   it("keeps two explicit custom endpoints for the same model id", () => {
     const rows = [
-      { provider: "custom", model: "faab-large", baseUrl: "https://faab.ai/v1" },
-      { provider: "custom", model: "faab-large", baseUrl: "https://mirror.faab.ai/v1" },
+      {
+        provider: "custom",
+        model: "faab-large",
+        baseUrl: "https://faab.ai/v1",
+      },
+      {
+        provider: "custom",
+        model: "faab-large",
+        baseUrl: "https://mirror.faab.ai/v1",
+      },
     ];
     expect(dedupeAttachmentRows(rows)).toHaveLength(2);
   });

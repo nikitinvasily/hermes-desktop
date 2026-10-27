@@ -5,7 +5,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // remotes call and how they normalize responses — the IPC contract the
 // register.ts remote branches rely on (issue #51).
 
-const { remoteDashboardRequestJson, remoteGetHermesHome, MockRemoteDashboardApiError } = vi.hoisted(() => {
+const {
+  remoteDashboardRequestJson,
+  remoteGetHermesHome,
+  MockRemoteDashboardApiError,
+} = vi.hoisted(() => {
   class MockRemoteDashboardApiError extends Error {
     readonly unsupported: boolean;
     constructor(
@@ -328,7 +332,11 @@ describe("remote config/env", () => {
 
   it("PUTs a single nested key to /api/config (deep-merge write)", async () => {
     remoteDashboardRequestJson.mockImplementation(
-      async (_c: unknown, path: string, options: { method?: string; body?: unknown }) => {
+      async (
+        _c: unknown,
+        path: string,
+        options: { method?: string; body?: unknown },
+      ) => {
         if (path === "/api/config" && options.method === "PUT") {
           expect(options.body).toEqual({
             config: { agent: { reasoning_effort: "high" } },
