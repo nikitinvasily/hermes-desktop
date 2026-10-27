@@ -239,7 +239,7 @@ sudo dnf install ./hermes-desktop-<version>.rpm
 - **Scheduled tasks** — cron job builder (minutes, hourly, daily, weekly, custom cron) with 15 delivery targets
 - **16 messaging gateways** — Telegram, Discord, Slack, WhatsApp, Signal, Matrix, Mattermost, Email (IMAP/SMTP), SMS (Twilio/Vonage), iMessage (BlueBubbles), DingTalk, Feishu/Lark, WeCom, WeChat (iLink Bot), Webhooks, Home Assistant
 - **Hermes Office (Claw3d)** — visual 3D interface with dev server and adapter management
-- **Backup, import & debug dump** — full data backup/restore and system diagnostics from Settings
+- **Backup, import & debug dump**: full data backup/restore and system diagnostics from Settings. Restoring a backup requires a Local connection and asks before overwriting data, with the destination profile fixed at confirmation time. Remote and SSH connections cannot silently restore local files.
 - **Log viewer** — view gateway and agent logs directly from the Settings screen
 - **Auto-updater** — check for and install updates via electron-updater
 - **i18n ready** — internationalization framework with English locale covering all screens, ready for community translations
