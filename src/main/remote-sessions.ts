@@ -833,17 +833,67 @@ export async function remoteUpdateSessionTitle(
   );
 }
 
+// @lat: [[connections#Connections#Session locations#Guarded session deletion]]
 export async function remoteDeleteSession(
   config: RemoteSessionConfig,
   sessionId: string,
 ): Promise<void> {
-  await remoteRequestJson(
-    config,
-    `/api/sessions/${encodeURIComponent(sessionId)}`,
-    {
-      method: "DELETE",
-    },
-  );
+  const path = `/api/sessions/${encodeURIComponent(sessionId)}`;
+  let snapshot: RemoteRecord;
+  try {
+    snapshot = asRecord(
+      await remoteRequestJson(config, `${path}/mutation-snapshot`),
+    );
+  } catch (error) {
+    const status = asRecord(error).statusCode;
+    if (
+      status !== 404 &&
+      !(error instanceof Error && /^404:/.test(error.message))
+    ) {
+      throw error;
+    }
+    // A missing route alone is not proof of an unfenced backend. Older
+    // revision-aware dashboards expose the counters on session detail.
+    const detail = asRecord(await remoteRequestJson(config, path));
+    if (detail.id !== sessionId) {
+      throw new Error("Session identity mismatch; session was not deleted.");
+    }
+    if (!("runtime_revision" in detail) && !("runtime_generation" in detail)) {
+      await remoteRequestJson(config, path, { method: "DELETE" });
+      return;
+    }
+    snapshot = { ...detail, session_id: detail.id, exists: true };
+  }
+  if (snapshot.session_id !== sessionId) {
+    throw new Error("Session identity mismatch; session was not deleted.");
+  }
+  // Another client may already have removed it. Never guess counters or
+  // replay the user's confirmation against a different session identity.
+  if (snapshot.exists === false) return;
+  const revision = snapshot.runtime_revision;
+  const generation = snapshot.runtime_generation;
+  if (
+    snapshot.exists !== true ||
+    typeof revision !== "number" ||
+    !Number.isSafeInteger(revision) ||
+    revision < 0 ||
+    (generation != null &&
+      (typeof generation !== "number" ||
+        !Number.isSafeInteger(generation) ||
+        generation < 0))
+  ) {
+    throw new Error(
+      "Invalid session mutation snapshot; session was not deleted.",
+    );
+  }
+  // DELETE's fence is in the query, unlike PATCH's JSON body. Preserve the
+  // profile through dashboardApiUrl and never retry a conflict unfenced.
+  const query = new URLSearchParams({
+    request_id: randomUUID(),
+    expected_revision: String(revision),
+  });
+  if (generation != null) query.set("expected_generation", String(generation));
+  await remoteRequestJson(config, `${path}?${query}`, { method: "DELETE" });
 }
 
 export interface RemoteDeleteSessionsResult {

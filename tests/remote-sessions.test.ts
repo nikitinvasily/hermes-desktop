@@ -269,6 +269,11 @@ describe("remote session REST bridge", () => {
           return;
         }
 
+        if (req.method === "GET" && req.url === "/api/sessions/sess-delete") {
+          res.end(JSON.stringify({ id: "sess-delete" }));
+          return;
+        }
+
         if (
           req.method === "DELETE" &&
           req.url === "/api/sessions/sess-delete"
@@ -718,7 +723,7 @@ describe("remote session REST bridge", () => {
       token: "test-token",
       body: JSON.stringify({ title: "New title" }),
     });
-    expect(requests[1]).toMatchObject({
+    expect(requests[3]).toMatchObject({
       method: "DELETE",
       url: "/api/sessions/sess-delete",
       token: "test-token",

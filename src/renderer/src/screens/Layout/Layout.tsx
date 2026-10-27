@@ -1005,6 +1005,45 @@ function Layout({
     [runs, activeRunId, connectionId, activeProfile],
   );
 
+  // Forget deleted runs in this exact owning scope, including hidden tabs.
+  // Keeping a mounted run would let a later tab switch resume deleted history.
+  const handleSessionDeleted = useCallback(
+    (id: string, owningConnectionId: string, owningProfile: string): void => {
+      const scope = visibleScopeRef.current;
+      const removed = runsRef.current.filter(
+        (run) =>
+          run.sessionId === id &&
+          run.connectionId === owningConnectionId &&
+          run.profile === owningProfile,
+      );
+      const removedIds = new Set(removed.map((run) => run.runId));
+      let remaining = runsRef.current.filter(
+        (run) => !removedIds.has(run.runId),
+      );
+      for (const [conn, remembered] of lastActiveRunByConnection.current) {
+        if (removedIds.has(remembered))
+          lastActiveRunByConnection.current.delete(conn);
+      }
+      if (removedIds.has(activeRunIdRef.current)) {
+        const fresh = mintRun(scope.connectionId, scope.activeProfile);
+        remaining = [...remaining, fresh];
+        activeRunIdRef.current = fresh.runId;
+        setActiveRunId(fresh.runId);
+      }
+      runsRef.current = remaining;
+      setRuns(remaining);
+      // Only refresh the currently visible owning scope, never the new scope
+      // after a late completion from an old connection/profile.
+      if (
+        scope.connectionId === owningConnectionId &&
+        scope.activeProfile === owningProfile
+      ) {
+        setRemoteResyncNonce((nonce) => nonce + 1);
+      }
+    },
+    [],
+  );
+
   // Chrome/iTerm-style tab shortcuts for the conversation tabs: Ctrl+Tab /
   // Ctrl+Shift+Tab, Cmd/Ctrl+Shift+[ / ], Cmd/Ctrl+Option+←/→ and
   // Cmd/Ctrl+Shift+←/→ cycle; Cmd/Ctrl+1..8 jump to the Nth tab and 9 to the
@@ -1261,11 +1300,7 @@ function Layout({
                   resumingSessionId={resumingSessionId}
                   onSelect={handleResumeSession}
                   onNewChatInProject={handleNewChatInProject}
-                  onSessionDeleted={(id) => {
-                    // If the open chat was the one deleted, drop to a fresh chat
-                    // so the user isn't left viewing a now-gone conversation.
-                    if (id === currentSessionId) handleNewChat();
-                  }}
+                  onSessionDeleted={handleSessionDeleted}
                   pendingSessions={pendingSidebarRows}
                   onActivatePending={handleActivateRun}
                   activePendingRunId={activeRunId}
@@ -1495,6 +1530,7 @@ function Layout({
                     handleNewChat();
                   }}
                   currentSessionId={currentSessionId}
+                  onSessionDeleted={handleSessionDeleted}
                   visible={sessionsModalOpen}
                 />
               </div>

@@ -8,6 +8,7 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
+import toast from "react-hot-toast";
 import { useI18n } from "../../components/useI18n";
 import {
   useShowMore,
@@ -337,8 +338,13 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   /** Start a new chat bound to a project folder (project `+`) or unbound
    *  (Chats header `+`, folder = null). */
   onNewChatInProject?: (folder: string | null) => void;
-  /** Notifies Layout when a row is deleted so it can leave a stale active chat. */
-  onSessionDeleted?: (sessionId: string) => void;
+  /** Optional observer; id-only handlers remain compatible. Reports the owning scope
+   * even if the visible connection/profile changes before success. */
+  onSessionDeleted?: (
+    sessionId: string,
+    connectionId: string,
+    profile: string,
+  ) => void;
   /** Optimistic first-turn rows (issue #97 stage 2): runs that sent their
    *  first message but have no session id yet. Prepended above the synced
    *  rows; clicking activates the run. */
@@ -439,6 +445,13 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   // Pending delete confirmation (small inline dialog in a portal-free overlay).
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const deleteContextRef = useRef<string | null>(renameContext);
+  useEffect(() => {
+    deleteContextRef.current = renameContext;
+    return () => {
+      deleteContextRef.current = null;
+    };
+  }, [renameContext]);
   const [pendingReads, setPendingReads] = useState<Set<string>>(new Set());
   const [readRefresh, setReadRefresh] = useState(0);
   // Fence list replies taken before a read write settled (including failures).
@@ -1347,40 +1360,57 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   const confirmDelete = useCallback(
     async (id: string): Promise<void> => {
       setDeleting(true);
-      setSessions((prev) => prev.filter((s) => s.id !== id));
-      setPinnedIds((prev) => {
-        if (!prev.has(id)) return prev;
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-      // The tree-derived group map (issue #57 stage 2) is not refetched after
-      // a delete; drop the row there too or the deleted chat resurrects in
-      // its project group from the stale tree until the next connection/
-      // profile change or restart (issue #80). Mirrors handleArchive.
-      setProjectGroupSessions((prev) => {
-        if (Object.keys(prev).length === 0) return prev;
-        const next: Record<string, RecentSession[]> = {};
-        let changed = false;
-        for (const [folder, list] of Object.entries(prev)) {
-          const filtered = list.filter((s) => s.id !== id);
-          if (filtered.length !== list.length) changed = true;
-          next[folder] = filtered;
-        }
-        return changed ? next : prev;
-      });
       try {
         await window.hermesAPI.deleteSession(id, connectionId, activeProfile);
-        onSessionDeleted?.(id);
+        onSessionDeleted?.(id, connectionId, activeProfile);
+        if (deleteContextRef.current !== renameContext) return;
+        setSessions((prev) => prev.filter((s) => s.id !== id));
+        setPinnedIds((prev) => {
+          if (!prev.has(id)) return prev;
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+        // The tree-derived group map (issue #57 stage 2) is not refetched after
+        // a delete; drop the row there too or the deleted chat resurrects in
+        // its project group from the stale tree until the next connection/
+        // profile change or restart (issue #80). Mirrors handleArchive.
+        setProjectGroupSessions((prev) => {
+          if (Object.keys(prev).length === 0) return prev;
+          const next: Record<string, RecentSession[]> = {};
+          let changed = false;
+          for (const [folder, list] of Object.entries(prev)) {
+            const filtered = list.filter((s) => s.id !== id);
+            if (filtered.length !== list.length) changed = true;
+            next[folder] = filtered;
+          }
+          return changed ? next : prev;
+        });
+
+        if (pendingDeleteIsArchived) setArchiveDialogNonce((n) => n + 1);
+        window.dispatchEvent(new Event("hermes-sessions-maybe-changed"));
       } catch (err) {
         console.error("Failed to delete session", id, err);
+        if (deleteContextRef.current === renameContext) {
+          toast.error(
+            err instanceof Error ? err.message : "Failed to delete session.",
+          );
+        }
       } finally {
-        setDeleting(false);
-        setPendingDeleteId(null);
-        void refresh(true);
+        if (deleteContextRef.current === renameContext) {
+          setDeleting(false);
+          setPendingDeleteId(null);
+          setPendingDeleteIsArchived(false);
+        }
       }
     },
-    [activeProfile, connectionId, onSessionDeleted, refresh],
+    [
+      activeProfile,
+      connectionId,
+      onSessionDeleted,
+      pendingDeleteIsArchived,
+      renameContext,
+    ],
   );
 
   // Archive (issue #34). Optimistic: the row disappears from the list
@@ -2078,38 +2108,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
                   type="button"
                   className="btn btn-danger"
                   onClick={() => {
-                    // The shared confirm dialog serves both surfaces; the flag
-                    // says it was opened FROM the archive modal (whose list is
-                    // refreshed by the modal itself, not by the main refresh).
-                    if (pendingDeleteIsArchived) {
-                      void (async () => {
-                        setDeleting(true);
-                        try {
-                          await window.hermesAPI.deleteSession(
-                            pendingDeleteId,
-                            connectionId,
-                            activeProfile,
-                          );
-                          // The archive modal keeps its own list state; the
-                          // shared confirm dialog lives in the parent, so the
-                          // modal never learns the row is gone. Bump its key
-                          // to remount it with a fresh list (issue #64).
-                          setArchiveDialogNonce((n) => n + 1);
-                        } catch (err) {
-                          console.error(
-                            "Failed to delete archived session",
-                            pendingDeleteId,
-                            err,
-                          );
-                        } finally {
-                          setDeleting(false);
-                          setPendingDeleteId(null);
-                          setPendingDeleteIsArchived(false);
-                        }
-                      })();
-                    } else {
-                      void confirmDelete(pendingDeleteId);
-                    }
+                    void confirmDelete(pendingDeleteId);
                   }}
                   disabled={deleting}
                 >
