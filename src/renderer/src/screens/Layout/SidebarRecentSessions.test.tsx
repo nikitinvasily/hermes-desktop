@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -163,6 +164,336 @@ function renderSidebar(
     />,
   );
 }
+
+describe("SidebarRecentSessions quick actions", () => {
+  function setup(pending = false): ReturnType<typeof render> & {
+    props: React.ComponentProps<typeof SidebarRecentSessions>;
+    onPointerDown: ReturnType<typeof vi.fn>;
+    onKeyUp: ReturnType<typeof vi.fn>;
+  } {
+    const props = {
+      pendingSessions: pending
+        ? [
+            {
+              id: "pending-chat",
+              title: "Pending chat",
+              pendingRunId: "run-chat",
+            },
+            {
+              id: "pending-project",
+              title: "Pending project",
+              pendingRunId: "run-project",
+              contextFolder: "/tmp/proj",
+            },
+          ]
+        : [],
+      open: true,
+      connectionId: "connection-quick",
+      activeProfile: "research",
+      degraded: false,
+      resyncNonce: 0,
+      currentSessionId: "session-loose",
+      loadingSessionIds: new Set<string>(),
+      approvalSessionIds: new Set<string>(),
+      resumingSessionId: null,
+      onSelect: vi.fn(),
+      onSessionDeleted: vi.fn(),
+      scrollRootRef: { current: null },
+    };
+    window.hermesAPI.setSessionArchived = vi.fn(async () => true);
+    const onPointerDown = vi.fn();
+    const onKeyUp = vi.fn();
+    const view = render(
+      <div onPointerDown={onPointerDown} onKeyUp={onKeyUp}>
+        <SidebarRecentSessions {...props} />
+      </div>,
+    );
+    return { ...view, props, onPointerDown, onKeyUp };
+  }
+
+  async function row(title = "Loose chat"): Promise<HTMLElement> {
+    return (await screen.findByText(title)).closest<HTMLElement>(
+      ".sidebar-recent-session",
+    )!;
+  }
+
+  it.each(["archive", "delete", "options"])(
+    "isolates pointer and keyboard events for %s",
+    async (action) => {
+      const { props, onPointerDown, onKeyUp } = setup();
+      const button = within(await row()).getByRole("button", {
+        name: `navigation.sessionMenu.${action}`,
+      });
+      fireEvent.pointerDown(button);
+      for (const key of ["Enter", " "]) {
+        // Keep native button activation enabled; the row must not handle it.
+        expect(fireEvent.keyDown(button, { key })).toBe(true);
+        fireEvent.keyUp(button, { key });
+      }
+      expect(props.onSelect).not.toHaveBeenCalled();
+      expect(onPointerDown).not.toHaveBeenCalled();
+      expect(onKeyUp).not.toHaveBeenCalled();
+      fireEvent.click(button);
+      expect(props.onSelect).not.toHaveBeenCalled();
+      if (action === "archive")
+        expect(window.hermesAPI.setSessionArchived).toHaveBeenCalledTimes(1);
+      if (action === "delete")
+        expect(screen.getByRole("dialog")).toBeInTheDocument();
+      if (action === "options")
+        expect(screen.getByRole("menu")).toBeInTheDocument();
+    },
+  );
+
+  it.each(["Chats", "Pinned", "Project"])(
+    "shares localized ordered actions and scoped mutations in %s",
+    async (section) => {
+      if (section === "Pinned")
+        localStorage.setItem(
+          "hermes.sidebar.pinnedSessions",
+          JSON.stringify(["session-loose"]),
+        );
+      const { props } = setup();
+      const title = section === "Project" ? "Project chat" : "Loose chat";
+      const id = section === "Project" ? "session-proj" : "session-loose";
+      const chat = await row(title);
+      const buttons = within(chat).getAllByRole("button");
+      expect(
+        buttons.map((button) => button.getAttribute("aria-label")),
+      ).toEqual([
+        "navigation.sessionMenu.archive",
+        "navigation.sessionMenu.delete",
+        "navigation.sessionMenu.options",
+      ]);
+      for (const button of buttons) {
+        expect(button.getAttribute("title")).toBe(
+          button.getAttribute("aria-label"),
+        );
+        expect(button.tabIndex).toBe(0);
+      }
+      fireEvent.click(buttons[0]);
+      expect(
+        window.hermesAPI.setSessionArchived,
+      ).toHaveBeenCalledExactlyOnceWith(
+        id,
+        true,
+        "connection-quick",
+        "research",
+      );
+      expect(screen.queryByText(title)).toBeNull();
+      expect(props.onSelect).not.toHaveBeenCalled();
+      if (section === "Pinned")
+        expect(
+          JSON.parse(localStorage.getItem("hermes.sidebar.pinnedSessions")!),
+        ).toEqual([]);
+    },
+  );
+
+  it("omits all controls on pending chat and project rows", async () => {
+    setup(true);
+    for (const title of ["Pending chat", "Pending project"]) {
+      const pending = await row(title);
+      expect(
+        pending.querySelector(".sidebar-recent-session-actions"),
+      ).toBeNull();
+      expect(within(pending).queryAllByRole("button")).toHaveLength(0);
+    }
+  });
+
+  it.each(["Chats", "Pinned", "Project", "Projects", "Sidebar"])(
+    "removes hidden quick actions from tab order when %s collapses",
+    async (section) => {
+      if (section === "Pinned")
+        localStorage.setItem(
+          "hermes.sidebar.pinnedSessions",
+          JSON.stringify(["session-loose"]),
+        );
+      const { rerender, props } = setup();
+      await row(
+        section === "Project" || section === "Projects"
+          ? "Project chat"
+          : "Loose chat",
+      );
+      if (section === "Sidebar")
+        rerender(
+          <div>
+            <SidebarRecentSessions {...props} open={false} />
+          </div>,
+        );
+      else
+        fireEvent.click(
+          screen.getByRole("button", {
+            name:
+              section === "Project"
+                ? "Project"
+                : `navigation.${section.toLowerCase()}`,
+          }),
+        );
+      const buttons = (
+        await row(
+          section === "Project" || section === "Projects"
+            ? "Project chat"
+            : "Loose chat",
+        )
+      ).querySelectorAll<HTMLButtonElement>("button");
+      expect(buttons).toHaveLength(3);
+      for (const button of buttons) expect(button.tabIndex).toBe(-1);
+    },
+  );
+
+  it("restores a chat through the existing forced refresh after archive failure", async () => {
+    const { props } = setup();
+    const chat = await row();
+    const before = syncSessionCache.mock.calls.length;
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      vi.mocked(window.hermesAPI.setSessionArchived).mockRejectedValueOnce(
+        new Error("Archive refused"),
+      );
+      fireEvent.click(
+        within(chat).getByRole("button", {
+          name: "navigation.sessionMenu.archive",
+        }),
+      );
+      expect(screen.queryByText("Loose chat")).toBeNull();
+      await screen.findByText("Loose chat");
+      expect(syncSessionCache.mock.calls.length).toBeGreaterThan(before);
+      expect(syncSessionCache).toHaveBeenLastCalledWith(
+        "connection-quick",
+        "research",
+        51,
+      );
+      expect(props.onSelect).not.toHaveBeenCalled();
+    } finally {
+      errors.mockRestore();
+    }
+  });
+
+  it("retains the quick-delete target and reports server refusal", async () => {
+    const { props } = setup();
+    const chat = await row();
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      vi.mocked(window.hermesAPI.deleteSession).mockRejectedValueOnce(
+        new Error("Delete refused"),
+      );
+      fireEvent.click(
+        within(chat).getByRole("button", {
+          name: "navigation.sessionMenu.delete",
+        }),
+      );
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "navigation.sessionMenu.deleteConfirmAction",
+        }),
+      );
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith("Delete refused"),
+      );
+      expect(screen.getByText("Loose chat")).toBeInTheDocument();
+      expect(props.onSessionDeleted).not.toHaveBeenCalled();
+      expect(props.onSelect).not.toHaveBeenCalled();
+    } finally {
+      errors.mockRestore();
+      vi.mocked(toast.error).mockClear();
+    }
+  });
+
+  it("lays out an ordered non-overlapping action group revealed by hover, focus, or menu", async () => {
+    setup();
+    const chat = await row();
+    const actions = chat.querySelector(".sidebar-recent-session-actions");
+    expect(actions).not.toBeNull();
+    expect(
+      Array.from(actions!.querySelectorAll("button")).map((button) =>
+        button.getAttribute("aria-label"),
+      ),
+    ).toEqual([
+      "navigation.sessionMenu.archive",
+      "navigation.sessionMenu.delete",
+      "navigation.sessionMenu.options",
+    ]);
+    const groupCss = mainCss.match(
+      /\.sidebar-recent-session-actions\s*\{([^}]+)\}/,
+    )?.[1];
+    expect(groupCss).toMatch(/display:\s*flex/);
+    expect(groupCss).toMatch(/flex:\s*0 0 auto/);
+    expect(groupCss).toMatch(/opacity:\s*0/);
+    expect(mainCss).toMatch(
+      /\.sidebar-recent-session-actions > \.sidebar-recent-session-options\s*\{[^}]*position:\s*static/s,
+    );
+    expect(mainCss).toMatch(
+      /\.sidebar-recent-session:hover > \.sidebar-recent-session-actions,/,
+    );
+    expect(mainCss).toMatch(
+      /\.sidebar-recent-session:focus-within > \.sidebar-recent-session-actions,/,
+    );
+    expect(mainCss).toMatch(
+      /\.sidebar-recent-session.menu-open > \.sidebar-recent-session-actions\s*\{[^}]*opacity:\s*1/s,
+    );
+    expect(mainCss).toMatch(
+      /\.sidebar-recent-session-title\s*\{[^}]*min-width:\s*0;[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis/s,
+    );
+  });
+
+  it("requires explicit confirmation for quick delete and leaves cancel mutation-free", async () => {
+    const { props } = setup();
+    const chat = await row();
+    const remove = within(chat).getByRole("button", {
+      name: "navigation.sessionMenu.delete",
+    });
+    fireEvent.click(remove);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(window.hermesAPI.deleteSession).not.toHaveBeenCalled();
+    fireEvent.click(
+      screen.getAllByRole("button", {
+        name: "navigation.sessionMenu.deleteCancel",
+      })[1],
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByText("Loose chat")).toBeInTheDocument();
+    expect(window.hermesAPI.deleteSession).not.toHaveBeenCalled();
+    fireEvent.click(remove);
+    syncSessionCache.mockResolvedValue([
+      { id: "session-proj", title: "Project chat", contextFolder: "/tmp/proj" },
+    ]);
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "navigation.sessionMenu.deleteConfirmAction",
+      }),
+    );
+    await waitFor(() => expect(screen.queryByText("Loose chat")).toBeNull());
+    expect(window.hermesAPI.deleteSession).toHaveBeenCalledExactlyOnceWith(
+      "session-loose",
+      "connection-quick",
+      "research",
+    );
+    expect(props.onSessionDeleted).toHaveBeenCalledExactlyOnceWith(
+      "session-loose",
+      "connection-quick",
+      "research",
+    );
+    expect(props.onSelect).not.toHaveBeenCalled();
+  });
+
+  it("archives the targeted chat without selecting or deleting the active chat", async () => {
+    const { props } = setup();
+    const chat = await row();
+    fireEvent.click(
+      within(chat).getByRole("button", {
+        name: "navigation.sessionMenu.archive",
+      }),
+    );
+    expect(window.hermesAPI.setSessionArchived).toHaveBeenCalledWith(
+      "session-loose",
+      true,
+      "connection-quick",
+      "research",
+    );
+    expect(screen.queryByText("Loose chat")).toBeNull();
+    expect(props.onSelect).not.toHaveBeenCalled();
+    expect(props.onSessionDeleted).not.toHaveBeenCalled();
+  });
+});
 
 describe("SidebarRecentSessions new-chat buttons", () => {
   it("renders a + on each project heading and reports the project path", async () => {

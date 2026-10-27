@@ -1644,21 +1644,55 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         )}
         <span className="sidebar-recent-session-title">{title}</span>
         {!isPending && (
-          <button
-            type="button"
-            className="sidebar-recent-session-options"
-            tabIndex={visible ? 0 : -1}
-            aria-label={t("navigation.sessionMenu.options")}
-            title={t("navigation.sessionMenu.options")}
-            onClick={(e) => {
-              e.stopPropagation();
-              const rect = e.currentTarget.getBoundingClientRect();
-              openMenuForSession(s, rect.right, rect.bottom + 4);
-            }}
-            onKeyDown={(e) => e.stopPropagation()}
+          <div
+            className="sidebar-recent-session-actions"
+            onPointerDown={(e) => e.stopPropagation()}
+            onKeyUp={(e) => e.stopPropagation()}
           >
-            <MoreHorizontal size={15} />
-          </button>
+            <button
+              type="button"
+              className="sidebar-recent-session-options"
+              tabIndex={visible ? 0 : -1}
+              aria-label={t("navigation.sessionMenu.archive")}
+              title={t("navigation.sessionMenu.archive")}
+              onClick={(e) => {
+                e.stopPropagation();
+                void handleArchive(s.id);
+              }}
+              onKeyDown={(e) => e.stopPropagation()}
+            >
+              <ArchiveBox size={15} />
+            </button>
+            <button
+              type="button"
+              className="sidebar-recent-session-options"
+              tabIndex={visible ? 0 : -1}
+              aria-label={t("navigation.sessionMenu.delete")}
+              title={t("navigation.sessionMenu.delete")}
+              onClick={(e) => {
+                e.stopPropagation();
+                setPendingDeleteId(s.id);
+              }}
+              onKeyDown={(e) => e.stopPropagation()}
+            >
+              <Trash size={15} />
+            </button>
+            <button
+              type="button"
+              className="sidebar-recent-session-options"
+              tabIndex={visible ? 0 : -1}
+              aria-label={t("navigation.sessionMenu.options")}
+              title={t("navigation.sessionMenu.options")}
+              onClick={(e) => {
+                e.stopPropagation();
+                const rect = e.currentTarget.getBoundingClientRect();
+                openMenuForSession(s, rect.right, rect.bottom + 4);
+              }}
+              onKeyDown={(e) => e.stopPropagation()}
+            >
+              <MoreHorizontal size={15} />
+            </button>
+          </div>
         )}
       </div>
     );

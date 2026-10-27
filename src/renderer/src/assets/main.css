@@ -3124,6 +3124,38 @@ body:has(.shell-vibrant),
   padding-right: 24px;
 }
 
+/* Quick actions stay in the flex flow, reserving their width even while
+   hidden so long titles truncate without overlapping or shifting on hover.
+   Keep the standalone options rules above for ArchiveDialog's controls. */
+.sidebar-recent-session-actions {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition);
+}
+
+.sidebar-recent-session-actions > .sidebar-recent-session-options {
+  position: static;
+  transform: none;
+  flex: 0 0 24px;
+  opacity: 1;
+}
+
+.sidebar-recent-session:hover > .sidebar-recent-session-actions,
+.sidebar-recent-session:focus-within > .sidebar-recent-session-actions,
+.sidebar-recent-session.menu-open > .sidebar-recent-session-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.sidebar-recent-session:has(> .sidebar-recent-session-actions)
+  > .sidebar-recent-session-title {
+  padding-right: 0;
+}
+
 .sidebar-recent-session.menu-open {
   background: var(--bg-tertiary);
 }

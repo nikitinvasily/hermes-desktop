@@ -210,6 +210,14 @@ The agent core owns the data (`~/.hermes/projects.db` via the tui_gateway `proje
 
 Deleting a project asks for confirmation and only removes the project record — its chats are not deleted and stay in the plain chat list. Zero-session projects still render as (empty) groups: [[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx]] merges the agent project folders into the session-derived groups so a just-created project is visible before its first chat.
 
+## Quick session actions
+
+Each saved sidebar session offers Archive, Delete and Options in that order on hover or keyboard focus, across Chats, Pinned and project groups. Pending rows have no actions.
+
+[[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx]] reuses the existing archive handler and delete-confirmation dialog, preserving connection/profile routing. Action clicks and keyboard events must not activate the chat. Cancelling deletion leaves the session unchanged. `src/renderer/src/assets/main.css` keeps the controls in one bounded group and truncates the title without overlapping controls at the minimum sidebar width.
+
+[[src/renderer/src/screens/Layout/SidebarRecentSessions.test.tsx]] covers direct actions, target identity, delete confirmation/cancellation, keyboard isolation and pending rows. Live checks additionally cover hover/focus reveal, minimum-width geometry and archive/restore/delete on disposable local and remote sessions.
+
 ## Row context menu
 
 Each sidebar session row exposes a ChatGPT-style options menu — Pin, Rename, Copy session ID, Move to project, and Delete — opened from a hover-revealed `…` button or by right-clicking the row.
