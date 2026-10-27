@@ -166,12 +166,18 @@ function normalizeWhitespace(s: string): string {
 }
 
 const LEGACY_TEXT_FILE_WRAPPER_RE =
-  /(?:\s*<file\b[^>]*>[\s\S]*?<\/file>\s*)+$/i;
+  /(\s*)(?:<file\b[^>]*>[\s\S]*?<\/file>\s*)+$/i;
 
-function normalizeBubbleContentForMatch(s: string): string {
-  return normalizeWhitespace(
-    s.replace(LEGACY_TEXT_FILE_WRAPPER_RE, ""),
-  ).replace(/(?:\s+\[(?:screenshot|image)\])+$/i, "");
+function normalizeBubbleContentForMatch(
+  s: string,
+  preserveTrailingWhitespace = false,
+): string {
+  const text = s
+    .replace(LEGACY_TEXT_FILE_WRAPPER_RE, "$1")
+    .replace(/\s+/g, " ")
+    .trimStart()
+    .replace(/(?:\s+\[(?:screenshot|image)\])+\s*$/i, " ");
+  return preserveTrailingWhitespace ? text : text.trimEnd();
 }
 
 function nonWhitespaceLength(s: string): number {
@@ -296,8 +302,8 @@ function consumeCanonicalToolMatch(
 }
 
 /**
- * Merge DB-only metadata (e.g. attachments) into a streamed message
- * while preserving the streamed message's React identity (id).
+ * Merge DB metadata and a confirmed missing assistant tail into a streamed
+ * message while preserving the streamed message's React identity (id).
  * This prevents React from remounting the DOM node, which would
  * disrupt scroll position and cause visual reordering.
  */
@@ -313,17 +319,34 @@ function mergeDbMetadataIntoStreamed(
   // never had — adopt it so the hover time matches history after refresh.
   const timestamp =
     s.timestamp ?? (typeof d.timestamp === "number" ? d.timestamp : undefined);
+  // @lat: [[chat-commands#Canonical database tail recovery]]
+  // Matching has already identified this logical row. Recover content only
+  // when the complete readable assistant prefix has a longer continuation.
+  // Preserve a streamed separator after stripping wrappers: "is " cannot
+  // confirm a canonical continuation beginning with "island".
+  const streamedText = normalizeBubbleContentForMatch(s.content, true);
+  const canonicalText = normalizeBubbleContentForMatch(d.content);
+  const needsContent =
+    s.role === "agent" &&
+    d.role === "agent" &&
+    !s.error &&
+    !s.localOnly &&
+    !!streamedText &&
+    canonicalText.length > streamedText.length &&
+    canonicalText.startsWith(streamedText);
   // Attachments from the DB that the stream didn't deliver.
   const needsAttachments =
     !!d.attachments &&
     d.attachments.length > 0 &&
     (!s.attachments || s.attachments.length === 0);
   if (
+    needsContent ||
     needsAttachments ||
     (timestamp !== undefined && timestamp !== s.timestamp)
   ) {
     return {
       ...s,
+      ...(needsContent ? { content: d.content } : {}),
       ...(needsAttachments ? { attachments: d.attachments } : {}),
       ...(timestamp !== undefined ? { timestamp } : {}),
     };

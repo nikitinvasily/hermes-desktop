@@ -83,6 +83,55 @@ describe("tui gateway stream mapping", () => {
     expect(gatewayCompletionSuffix("hello world", "hello world")).toBe("");
   });
 
+  // @lat: [[chat-commands#Legacy completion tail recovery#Whitespace drift retains the tail]]
+  it.each([
+    ["hello  ", "hello world", "world"],
+    ["hello\n", "hello world", "world"],
+    ["hello\nthere\t", "hello there world", "world"],
+    ["hello  there", "hello there world", " world"],
+    ["\nhello\r\nthere", "hello there world", " world"],
+    ["你好\t世界 ", "你好 世界 完整", "完整"],
+  ])(
+    "recovers the suffix across whitespace drift: %j",
+    (streamed, final, suffix) => {
+      expect(gatewayCompletionSuffix(streamed, final)).toBe(suffix);
+      expect((streamed + suffix).replace(/\s+/g, " ").trim()).toBe(final);
+    },
+  );
+
+  // @lat: [[chat-commands#Legacy completion tail recovery#Unrelated and completed text remain unchanged]]
+  it.each([
+    ["hello\nthere ", "hello there"],
+    ["hello ", "helloThere"],
+    ["hello there", "prefix hello there extra"],
+    ["partial answer", "different answer"],
+    ["hello there!", "hello there? extra"],
+  ])(
+    "does not append a non-prefix completion or duplicate whitespace: %j",
+    (streamed, final) => {
+      expect(gatewayCompletionSuffix(streamed, final)).toBe("");
+    },
+  );
+
+  it.each([
+    ["", "", ""],
+    ["hello", "", ""],
+    ["", "final answer", "final answer"],
+    ["\t\n ", "final answer", "final answer"],
+    ["hello", "hello\n  world\t", "\n  world\t"],
+    ["hello ", "hello there", "there"],
+    ["hello", "helloThere", "There"],
+    ["hello", "hello  ", "  "],
+    ["hello", "  hello  ", ""],
+    ["hello\nthere", "hello there!\n  next\t", "!\n  next\t"],
+    ["hello\nthere\t", "hello there\n  next\t", "next\t"],
+  ])(
+    "preserves empty, exact-prefix and suffix-formatting behavior: %j",
+    (streamed, final, suffix) => {
+      expect(gatewayCompletionSuffix(streamed, final)).toBe(suffix);
+    },
+  );
+
   it("does not duplicate unrelated completion text after visible stream text", () => {
     expect(gatewayCompletionSuffix("partial answer", "different answer")).toBe(
       "",
