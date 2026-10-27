@@ -156,6 +156,53 @@ describe("Sessions tab live refresh (#322)", () => {
     });
   });
 
+  it("shows update guidance after a rejected rename and keeps the editor usable", async () => {
+    vi.useRealTimers();
+    vi.mocked(toast.error).mockClear();
+    const api = installHermesAPI([
+      {
+        id: "upgrade-session",
+        title: "Original",
+        startedAt: Date.now() / 1000,
+        source: "desktop",
+        messageCount: 1,
+        model: "test",
+      },
+    ]);
+    api.updateSessionTitle.mockRejectedValueOnce(
+      new Error(
+        'Error invoking remote method \'update-session-title\': RemoteOAuthError: Remote OAuth request failed (409): {"detail":"client_upgrade_required"}',
+      ),
+    );
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      render(<Sessions {...baseProps} visible />);
+      await screen.findByText("Original");
+      fireEvent.click(screen.getByRole("button", { name: "sessions.rename" }));
+      const input = screen.getAllByRole("textbox")[1];
+      fireEvent.change(input, { target: { value: "Unsaved title" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledExactlyOnceWith(
+          "sessions.renameUpgradeRequired",
+        ),
+      );
+      expect(input).toBeEnabled();
+      expect(input).toHaveValue("Unsaved title");
+      expect(screen.queryByText("Unsaved title")).not.toBeInTheDocument();
+      fireEvent.keyDown(input, { key: "Escape" });
+      expect(screen.getByText("Original")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "sessions.rename" }));
+      const retry = screen.getAllByRole("textbox")[1];
+      fireEvent.change(retry, { target: { value: "Saved title" } });
+      fireEvent.keyDown(retry, { key: "Enter" });
+      await screen.findByText("Saved title");
+      expect(api.updateSessionTitle).toHaveBeenCalledTimes(2);
+    } finally {
+      errors.mockRestore();
+    }
+  });
+
   it("disables the rename input during persistence and ignores a duplicate submit", async () => {
     vi.useRealTimers();
     const api = installHermesAPI([

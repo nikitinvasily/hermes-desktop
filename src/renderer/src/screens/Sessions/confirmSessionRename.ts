@@ -15,6 +15,7 @@ export interface ConfirmSessionRenameOptions {
   clearEditing: () => void;
   inputRef: RefObject<HTMLInputElement | null>;
   fallbackErrorMessage: string;
+  upgradeRequiredErrorMessage: string;
   persist: (sessionId: string, title: string) => Promise<void>;
 }
 
@@ -56,7 +57,11 @@ export async function confirmSessionRename(
       err instanceof Error && err.message
         ? err.message
         : opts.fallbackErrorMessage;
-    toast.error(message);
+    toast.error(
+      /\bclient_upgrade_required\b/.test(message)
+        ? opts.upgradeRequiredErrorMessage
+        : message,
+    );
     if (opts.isStillEditing()) {
       setTimeout(() => {
         if (opts.isCurrentContext() && opts.isStillEditing()) {

@@ -28,6 +28,8 @@ export default {
   delete: "Delete conversation",
   rename: "Rename conversation",
   renameFailed: "Couldn't rename conversation",
+  renameUpgradeRequired:
+    "Couldn't rename conversation because Hermes Desktop and the backend are out of sync. Update Hermes Desktop, then try again.",
   renameInvalid: "Enter a valid name (max 100 characters)",
   renameTooLong: "Title too long (max {{max}} characters)",
   renameUnavailable: "Session database unavailable",
