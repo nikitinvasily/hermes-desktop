@@ -329,7 +329,9 @@ export async function fetchRegistryDetail(
   return detail;
 }
 
-export async function fetchManifest(path: string): Promise<EntryManifest | null> {
+export async function fetchManifest(
+  path: string,
+): Promise<EntryManifest | null> {
   try {
     const res = await fetch(`${REGISTRY_RAW_BASE}/${path}/manifest.json`);
     if (!res.ok) return null;

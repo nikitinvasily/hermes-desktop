@@ -391,7 +391,12 @@ describe("expandRowsToHistory", () => {
         timestamp: 4,
       }),
     ]);
-    expect(kinds(items)).toEqual(["user", "system_event", "system_event", "assistant"]);
+    expect(kinds(items)).toEqual([
+      "user",
+      "system_event",
+      "system_event",
+      "assistant",
+    ]);
     const evt = items[1] as Extract<HistoryItem, { kind: "system_event" }>;
     expect(evt.event).toBe("model_switch");
     expect(evt.timestamp).toBe(2);

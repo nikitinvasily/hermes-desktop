@@ -271,6 +271,72 @@ describe("useDashboardChatTransport recovery", () => {
     expect(onTodoState).toHaveBeenCalledWith(payload);
   });
 
+  it("uses the latest todo callback after rerender without reattaching the session", async () => {
+    dashboardMock.request.mockImplementation(async (method: string) => {
+      if (method === "session.resume")
+        return {
+          session_id: "runtime-parent",
+          stored_session_id: "stored-parent",
+          running: true,
+        };
+      return { subagents: [] };
+    });
+    const api: HarnessApi = {};
+    const previous = vi.fn();
+    const latest = vi.fn();
+    const view = render(
+      <Harness
+        api={api}
+        hermesSessionId="stored-parent"
+        onTodoState={previous}
+      />,
+    );
+    await waitFor(() =>
+      expect(dashboardMock.request).toHaveBeenCalledWith("subagent.list", {
+        session_id: "runtime-parent",
+      }),
+    );
+    const onEvent = dashboardMock.onEvent;
+    view.rerender(
+      <Harness
+        api={api}
+        hermesSessionId="stored-parent"
+        onTodoState={latest}
+      />,
+    );
+    const payload = { todos: [], revision: 5 };
+    act(() => {
+      onEvent?.({ type: "todo.updated", session_id: "other", payload });
+      onEvent?.({
+        type: "todo.updated",
+        session_id: "runtime-parent",
+        payload,
+      });
+    });
+    expect(latest).toHaveBeenCalledExactlyOnceWith(payload);
+    expect(previous).not.toHaveBeenCalled();
+    view.rerender(<Harness api={api} hermesSessionId="stored-parent" />);
+    act(() =>
+      onEvent?.({
+        type: "todo.updated",
+        session_id: "runtime-parent",
+        payload,
+      }),
+    );
+    expect(latest).toHaveBeenCalledTimes(1);
+    expect(dashboardMock.onEvent).toBe(onEvent);
+    expect(dashboardMock.instances).toHaveLength(1);
+    expect(dashboardMock.connect).toHaveBeenCalledTimes(1);
+    expect(dashboardMock.close).not.toHaveBeenCalled();
+    expect(
+      dashboardMock.request.mock.calls.filter(
+        ([method]) => method === "session.resume",
+      ),
+    ).toHaveLength(1);
+    expect(api.isLoading).toBe(true);
+    view.unmount();
+  });
+
   beforeEach(() => {
     dashboardMock.close.mockClear();
     dashboardMock.connect.mockClear();
@@ -1536,6 +1602,7 @@ describe("useDashboardChatTransport recovery", () => {
     await act(async () => {
       expect(await api.respondClarify?.("srq-live1", "am", "q0")).toBe(true);
     });
+    expect(resolved).toEqual({ answers: { q0: "am" } });
     expect(
       dashboardMock.request.mock.calls.some(
         ([method, params]) =>
@@ -3245,6 +3312,77 @@ describe("useDashboardChatTransport session approval toggle", () => {
       ([method]) => method === "config.set",
     );
     expect(sets).toHaveLength(0);
+  });
+
+  it("keeps eager restore and resume single-shot across callback rerenders", async () => {
+    window.localStorage.setItem(
+      "hermes.sessionYolo.v1:local:default:stored",
+      "1",
+    );
+    let resume!: (value: unknown) => void;
+    const pending = new Promise((resolve) => {
+      resume = resolve;
+    });
+    dashboardMock.request.mockImplementation(async (method: string) => {
+      if (method === "session.resume") return pending;
+      if (method === "config.set") return { value: "1" };
+      return { subagents: [] };
+    });
+    const api: HarnessApi = {};
+    const view = render(
+      <Harness api={api} hermesSessionId="stored" onTodoState={vi.fn()} />,
+    );
+    await waitFor(() =>
+      expect(dashboardMock.request).toHaveBeenCalledWith(
+        "session.resume",
+        expect.objectContaining({ session_id: "stored" }),
+      ),
+    );
+    view.rerender(
+      <Harness api={api} hermesSessionId="stored" onTodoState={vi.fn()} />,
+    );
+    await act(async () => {
+      resume({
+        session_id: "live-restore",
+        stored_session_id: "stored",
+        running: true,
+      });
+      await pending;
+    });
+    await waitFor(() => expect(api.sessionYolo).toBe(true));
+    const onEvent = dashboardMock.onEvent;
+    const activeTurn = api.activeTurnRef?.current;
+    view.rerender(
+      <Harness api={api} hermesSessionId="stored" onTodoState={vi.fn()} />,
+    );
+    await act(async () => {});
+    expect(dashboardMock.instances).toHaveLength(1);
+    expect(dashboardMock.connect).toHaveBeenCalledTimes(1);
+    expect(dashboardMock.close).not.toHaveBeenCalled();
+    expect(dashboardMock.onEvent).toBe(onEvent);
+    expect(
+      dashboardMock.request.mock.calls.filter(
+        ([method]) => method === "session.resume",
+      ),
+    ).toHaveLength(1);
+    expect(
+      dashboardMock.request.mock.calls.filter(
+        ([method]) => method === "config.set",
+      ),
+    ).toEqual([
+      [
+        "config.set",
+        {
+          key: "yolo",
+          value: "1",
+          scope: "session",
+          session_id: "live-restore",
+        },
+      ],
+    ]);
+    expect(api.activeTurnRef?.current).toBe(activeTurn);
+    expect(api.isLoading).toBe(true);
+    view.unmount();
   });
 
   it("does not restore when no flag was persisted", async () => {

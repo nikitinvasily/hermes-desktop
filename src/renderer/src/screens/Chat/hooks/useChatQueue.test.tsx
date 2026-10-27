@@ -149,7 +149,6 @@ describe("chat queue stop barrier", () => {
   it("drains FIFO only after an authoritative idle probe", async () => {
     const idle = deferred();
     const waitForIdle = vi.fn(() => idle.promise);
-    let markLoading!: () => void;
     const send = vi.fn(async (): Promise<SubmissionOutcome> => {
       markLoading();
       return "accepted";
@@ -164,7 +163,7 @@ describe("chat queue stop barrier", () => {
         }),
       { initialProps: { loading: true } },
     );
-    markLoading = (): void => rerender({ loading: true });
+    const markLoading = (): void => rerender({ loading: true });
     act(() => {
       result.current.enqueue("B");
       result.current.enqueue("D");
@@ -242,7 +241,6 @@ describe("chat queue stop barrier", () => {
   );
   it("resumes FIFO when the selected turn completes before its submit ACK", async () => {
     const ack = deferred();
-    let markLoading!: () => void;
     const stop = vi.fn(async () => undefined);
     const waitForIdle = vi.fn(async () => undefined);
     const send = vi.fn(async (text: string): Promise<SubmissionOutcome> => {
@@ -255,7 +253,7 @@ describe("chat queue stop barrier", () => {
         useChatQueue({ isLoading: loading, stop, waitForIdle, send }),
       { initialProps: { loading: true } },
     );
-    markLoading = (): void => rerender({ loading: true });
+    const markLoading = (): void => rerender({ loading: true });
     act(() => {
       result.current.enqueue("B");
       result.current.enqueue("C");

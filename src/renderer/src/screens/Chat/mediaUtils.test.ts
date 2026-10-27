@@ -682,6 +682,10 @@ describe("parseMediaTokens incoming documents", () => {
   });
 
   it("hasUserMediaHints detects the document wrapper", () => {
-    expect(hasUserMediaHints("[The user sent a document: 'x.pdf'. It is saved at: /tmp/x.pdf]")).toBe(true);
+    expect(
+      hasUserMediaHints(
+        "[The user sent a document: 'x.pdf'. It is saved at: /tmp/x.pdf]",
+      ),
+    ).toBe(true);
   });
 });

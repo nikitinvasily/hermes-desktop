@@ -201,9 +201,7 @@ describe("ApprovalCard", () => {
     );
     expect(screen.queryByText(/Security scan/)).toBeNull();
     expect(screen.queryByText(/Nested executable/)).toBeNull();
-    expect(
-      document.querySelector(".chat-clarify-question"),
-    ).toBeNull();
+    expect(document.querySelector(".chat-clarify-question")).toBeNull();
     unmount();
 
     render(

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { join } from "path";
+import { homedir } from "os";
 import { mkdirSync, rmSync, existsSync, writeFileSync } from "fs";
 
 // vi.hoisted runs before module imports, so we can't reference imported
@@ -861,13 +862,12 @@ describe("syncSessionCache", () => {
   // @lat: [[connections#Test specifications#Connection-explicit session browsing#Agent-home cwd stays in flat Chats]]
   it("nulls the derived folder when it is the agent home or HERMES_HOME — no pseudo-project (issue #47)", () => {
     const now = Math.floor(Date.now() / 1000);
-    const os = require("os") as typeof import("os");
     seedDb([
       {
         id: "s-agent-home",
         started_at: now,
         firstUserMessage: "telegram session started in the agent user's home",
-        cwd: os.homedir(),
+        cwd: homedir(),
       },
       {
         id: "s-hermes-home",

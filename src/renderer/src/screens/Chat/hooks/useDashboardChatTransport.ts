@@ -1716,12 +1716,19 @@ export function useDashboardChatTransport({
       setPendingApprovals,
       messagesRef,
       scheduleDeltaFlush,
+      onTodoState,
       profile,
       setIsLoading,
       setToolProgress,
       setUsage,
     ],
   );
+
+  // The socket owns a session-scoped subscription, not a render-scoped one.
+  // Dispatch through the latest handler so callback changes (including TODO
+  // snapshots) take effect without reconnecting or resuming the live turn.
+  const handleGatewayEventRef = useRef(handleGatewayEvent);
+  handleGatewayEventRef.current = handleGatewayEvent;
 
   // Latest-ref to the server-request handler: declared before its consumers
   // (ensureClient, ensureRuntimeSession) and re-bound every render below.
@@ -1795,7 +1802,7 @@ export function useDashboardChatTransport({
                 clientRef.current === client &&
                 clientGenerationRef.current === generation
               )
-                handleGatewayEvent(event);
+                handleGatewayEventRef.current(event);
             },
             onServerRequest: (method, params, frameId) =>
               handleServerRequestRef.current(method, params, frameId),
@@ -1875,13 +1882,11 @@ export function useDashboardChatTransport({
         }
       }
     }, [
-      handleGatewayEvent,
       profile,
       connectionId,
       connectionMode,
       fallbackOnUnavailable,
       onDashboardUnavailable,
-      onTodoState,
     ]);
 
   const resolveRuntimeSession = useCallback(
@@ -2166,7 +2171,14 @@ export function useDashboardChatTransport({
         // Leave the marker: a manual prompt retries the resume (and its own
         // restore) — do not re-run the eager path on every render.
       });
-  }, [hermesSessionId, enabled, connectionId, profile]);
+  }, [
+    hermesSessionId,
+    enabled,
+    connectionId,
+    profile,
+    ensureClient,
+    ensureRuntimeSession,
+  ]);
 
   const ensureSelectedModel = useCallback(
     async (

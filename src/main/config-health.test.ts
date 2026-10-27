@@ -268,7 +268,7 @@ describe("config-health audit - vault awareness", () => {
     it("does NOT fire EMPTY_API_SERVER_KEY when the active connection is remote", async () => {
       mocks.getConnectionConfig.mockReturnValueOnce({
         mode: "remote",
-      } as unknown as Parameters<typeof mocks.getConnectionConfig>[0]);
+      });
       mockedReadEnv.mockReturnValue({});
       const report = runConfigHealthCheck("default");
       expect(report.issues.map((i) => i.code)).not.toContain(
