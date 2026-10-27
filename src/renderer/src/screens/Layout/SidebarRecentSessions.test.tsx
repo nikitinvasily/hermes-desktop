@@ -1091,6 +1091,7 @@ describe("SidebarRecentSessions delete vs the tree-derived groups (issue #80)", 
     windowRows: TreeRow[],
     treeGroups: Record<string, TreeRow[]>,
     onSessionDeleted = vi.fn(),
+    treeRead?: () => Promise<Record<string, TreeRow[]>>,
   ): ReturnType<typeof render> {
     listCachedSessions.mockImplementation(async () => windowRows);
     syncSessionCache.mockImplementation(
@@ -1104,8 +1105,9 @@ describe("SidebarRecentSessions delete vs the tree-derived groups (issue #80)", 
         ...(window.hermesAPI as unknown as Record<string, unknown>),
         deleteSession: vi.fn(async () => undefined),
         listProjectGroupSessions: vi.fn(
-          async (): Promise<Record<string, unknown>> =>
-            treeGroups as unknown as Record<string, unknown>,
+          treeRead ??
+            (async (): Promise<Record<string, unknown>> =>
+              treeGroups as unknown as Record<string, unknown>),
         ),
       },
     });
@@ -1209,6 +1211,75 @@ describe("SidebarRecentSessions delete vs the tree-derived groups (issue #80)", 
       }
     },
   );
+
+  it.each(["Chats", "Pinned", "Project"])(
+    "does not resurrect a confirmed deletion from a refresh started before DELETE in %s",
+    async (section) => {
+      const rows = [
+        {
+          id: "deleted-race",
+          title: "Delayed deletion chat",
+          contextFolder: section === "Project" ? "/tmp/proj" : null,
+        },
+      ];
+      if (section === "Pinned")
+        localStorage.setItem(
+          "hermes.sidebar.pinnedSessions",
+          JSON.stringify([rows[0].id]),
+        );
+      renderWithTreeGroups(rows, {});
+      await screen.findByText(rows[0].title);
+      await act(async () => {});
+      let finish!: (rows: Array<Record<string, unknown>>) => void;
+      syncSessionCache.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      act(() =>
+        window.dispatchEvent(new Event("hermes-sessions-maybe-changed")),
+      );
+      expect(finish).toBeTypeOf("function");
+      // Subsequent refreshes see the authoritative post-delete state.
+      syncSessionCache.mockResolvedValue([]);
+      await deleteRowViaMenu(rows[0].title);
+      await waitFor(() => expect(screen.queryByText(rows[0].title)).toBeNull());
+      await act(async () => {
+        finish(rows);
+      });
+      expect(screen.queryByText(rows[0].title)).toBeNull();
+    },
+  );
+
+  it("rejects a project-tree snapshot captured before confirmed deletion", async () => {
+    const rows = [
+      {
+        id: "late-tree-delete",
+        title: "Late tree deletion",
+        contextFolder: "/tmp/proj",
+      },
+    ];
+    let finish!: (groups: Record<string, TreeRow[]>) => void;
+    renderWithTreeGroups(
+      rows,
+      {},
+      vi.fn(),
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await screen.findByText(rows[0].title);
+    await act(async () => {});
+    syncSessionCache.mockResolvedValue([]);
+    await deleteRowViaMenu(rows[0].title);
+    await waitFor(() => expect(screen.queryByText(rows[0].title)).toBeNull());
+    await act(async () => {
+      finish({ "/tmp/proj": rows });
+    });
+    expect(screen.queryByText(rows[0].title)).toBeNull();
+  });
 
   // @lat: [[connections#Connections#Test specifications#Deletion failure preserves sidebar rows]]
   it("keeps a tree-only row when deletion is refused and shows the error", async () => {

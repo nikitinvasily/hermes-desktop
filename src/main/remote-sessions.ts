@@ -904,10 +904,12 @@ export interface RemoteDeleteSessionsResult {
 export async function remoteDeleteSessions(
   config: RemoteSessionConfig,
   sessionIds: string[],
+  onDeleted?: (sessionId: string) => void,
 ): Promise<RemoteDeleteSessionsResult> {
   let deleted = 0;
   for (const id of sessionIds) {
     await remoteDeleteSession(config, id);
+    onDeleted?.(id);
     deleted += 1;
   }
   return { requested: sessionIds.length, deleted };
