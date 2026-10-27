@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight } from "../../assets/icons";
+import {
+  ChevronDown,
+  ChevronRight,
+  CompressionIcon,
+  Maximize2,
+} from "../../assets/icons";
 import { useI18n } from "../../components/useI18n";
 import { useShowMore, ShowMoreRow } from "../../components/useShowMore";
 import { TodoSection } from "./TodoSection";
@@ -113,6 +118,7 @@ export function ChatContextPanel({
   const rows = snapshot.scope === scope ? snapshot.rows : [];
   const [subagentsOpen, setSubagentsOpen] = useState(false);
   const [todoOpen, setTodoOpen] = useState(true);
+  const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -149,16 +155,42 @@ export function ChatContextPanel({
   if (rows.length === 0 && !hasTodo) return null;
 
   return (
-    <div className="chat-context-panel">
+    // @lat: [[sidebar-navigation#Sidebar recent sessions#Whole-panel collapse]]
+    <div
+      className={`chat-context-panel${collapsed ? " chat-context-panel--collapsed" : ""}`}
+    >
+      <button
+        type="button"
+        className="chat-context-panel-collapse"
+        aria-label={t(
+          collapsed
+            ? "navigation.expandContextPanel"
+            : "navigation.collapseContextPanel",
+        )}
+        title={t(
+          collapsed
+            ? "navigation.expandContextPanel"
+            : "navigation.collapseContextPanel",
+        )}
+        aria-expanded={!collapsed}
+        onClick={() => setCollapsed((value) => !value)}
+      >
+        {collapsed ? (
+          <Maximize2 size={16} aria-hidden />
+        ) : (
+          <CompressionIcon size={14} aria-hidden />
+        )}
+      </button>
       {hasTodo && (
         <TodoSection
+          hidden={collapsed}
           snapshot={todo ?? null}
           open={todoOpen}
           onToggle={() => setTodoOpen((v) => !v)}
         />
       )}
       {rows.length > 0 && (
-        <div className="sidebar-recent-section">
+        <div className="sidebar-recent-section" hidden={collapsed}>
           <button
             type="button"
             className="sidebar-recent-section-toggle chat-context-panel-toggle"

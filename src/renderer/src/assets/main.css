@@ -18618,6 +18618,9 @@ body:has(.shell-vibrant),
    shrinks when the files panel opens, so the dock follows the conversation
    edge; absolute (not sticky-in-scroller) keeps it pinned during scroll. */
 .chat-context-panel {
+  --context-panel-top-padding: 4px;
+  --context-panel-header-gap: 2px;
+  --context-panel-header-height: 24px;
   position: absolute;
   top: 12px;
   margin-right: 12px;
@@ -18629,15 +18632,65 @@ body:has(.shell-vibrant),
   z-index: 30;
   width: 300px;
   max-width: min(300px, calc(100% - 60px - var(--chat-scrollbar-gutter, 0px)));
-  padding: 4px 2px 8px;
+  padding: var(--context-panel-top-padding) 2px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg, 10px);
   background: var(--bg-tertiary);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
 }
 
+/* Keep hidden sections mounted without retaining layout or keyboard targets. */
+.chat-context-panel > .sidebar-recent-section[hidden] {
+  display: none;
+}
+
+.chat-context-panel
+  > .sidebar-recent-section:first-of-type
+  > .chat-context-panel-toggle {
+  padding-right: 32px;
+}
+
+.chat-context-panel-collapse {
+  position: absolute;
+  top: calc(var(--context-panel-top-padding) + var(--context-panel-header-gap));
+  right: 4px;
+  width: var(--context-panel-header-height);
+  height: var(--context-panel-header-height);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.chat-context-panel-collapse:hover {
+  background: var(--sidebar-hover-bg);
+  color: var(--text-primary);
+}
+
+.chat-context-panel--collapsed {
+  box-sizing: border-box;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+}
+
+.chat-context-panel--collapsed .chat-context-panel-collapse {
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+}
+
 .chat-context-panel .chat-context-panel-toggle {
-  margin: 2px 0 3px;
+  min-height: var(--context-panel-header-height);
+  margin: var(--context-panel-header-gap) 0;
+  padding-top: 0;
+  padding-bottom: 0;
 }
 
 .chat-context-panel-row {

@@ -22,6 +22,7 @@ export {
   Layers,
   Loader,
   Monitor,
+  Maximize2,
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
