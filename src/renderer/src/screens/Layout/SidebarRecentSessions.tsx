@@ -1364,6 +1364,8 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         await window.hermesAPI.deleteSession(id, connectionId, activeProfile);
         onSessionDeleted?.(id, connectionId, activeProfile);
         if (deleteContextRef.current !== renameContext) return;
+        // Fence list/cache/tree replies captured before the confirmed DELETE.
+        readRevision.current += 1;
         setSessions((prev) => prev.filter((s) => s.id !== id));
         setPinnedIds((prev) => {
           if (!prev.has(id)) return prev;

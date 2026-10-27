@@ -980,7 +980,12 @@ interface HermesAPI {
     sessionIds: string[],
     connectionId?: string,
     profile?: string,
-  ) => Promise<{ requested: number; deleted: number }>;
+  ) => Promise<{
+    requested: number;
+    deleted: number;
+    deletedIds?: string[];
+    error?: string;
+  }>;
   setSessionArchived: (
     sessionId: string,
     archived: boolean,

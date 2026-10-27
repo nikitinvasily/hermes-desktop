@@ -218,6 +218,18 @@ Each saved sidebar session offers Archive, Delete and Options in that order on h
 
 [[src/renderer/src/screens/Layout/SidebarRecentSessions.test.tsx]] covers direct actions, target identity, delete confirmation/cancellation, keyboard isolation and pending rows. Live checks additionally cover hover/focus reveal, minimum-width geometry and archive/restore/delete on disposable local and remote sessions.
 
+## Confirmed deletion visibility
+
+Confirmed deletions stay absent from sidebar and Sessions snapshots, including replies that finish late and reads after a renderer remount.
+
+[[src/main/session-deletion-visibility.ts#SessionDeletionVisibility]] keeps process-lifetime receipts keyed by connection and profile. The list, cache, sync, project-group and search handlers in [[src/main/ipc/register.ts]] filter after awaiting transport results. Only successful deletes create receipts; partial bulk deletion records each successful ID. Receipts reset on app restart so a restored backend is not permanently hidden.
+
+[[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx]] invalidates its list/tree revision after a confirmed delete. [[src/renderer/src/screens/Sessions/Sessions.tsx]] invalidates list and search request IDs after single or bulk deletion, then reruns the current query. This also rejects snapshots already delivered across IPC before the delete settled.
+
+If a bulk delete partly succeeds, IPC returns confirmed `deletedIds` and the remaining error as serializable data. Sessions removes and closes only confirmed IDs, preserves failed rows and selection, and shows the error. A failure before any confirmation still rejects without hiding rows.
+
+[[tests/session-deletion-visibility.test.ts]] executes real IPC handler expressions with delayed Remote and SSH reads, fresh stale snapshots, scope isolation, refused deletion and partial bulk success. Renderer tests cover delayed sidebar refresh and Sessions list/search replies.
+
 ## Row context menu
 
 Each sidebar session row exposes a ChatGPT-style options menu — Pin, Rename, Copy session ID, Move to project, and Delete — opened from a hover-revealed `…` button or by right-clicking the row.

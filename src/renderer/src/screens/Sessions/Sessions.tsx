@@ -374,6 +374,7 @@ function Sessions({
   const [sessions, setSessions] = useState<CachedSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchRefresh, setSearchRefresh] = useState(0);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [sessionTypeFilter, setSessionTypeFilter] = useState<SessionTypeFilter>(
@@ -596,6 +597,13 @@ function Sessions({
         await window.hermesAPI.deleteSession(sessionId, connectionId, profile);
         onSessionDeleted?.(sessionId, connectionId, profile);
         if (renameContextRef.current !== renameContext) return;
+        // Invalidate snapshots/searches captured before the confirmed DELETE.
+        loadRequestId.current += 1;
+        searchRequestId.current += 1;
+        // Retry the current query, including edits made while DELETE was pending.
+        setSearchRefresh((revision) => revision + 1);
+        setLoading(false);
+        setIsSearching(false);
         setSessions((prev) => prev.filter((s) => s.id !== sessionId));
         setSearchResults((prev) =>
           prev.filter((r) => r.sessionId !== sessionId),
@@ -655,17 +663,33 @@ function Sessions({
         return;
       }
 
-      const idSet = new Set(ids);
       setDeletingBulk(true);
       try {
-        await window.hermesAPI.deleteSessions(ids, connectionId, profile);
-        for (const id of ids) onSessionDeleted?.(id, connectionId, profile);
+        const result = await window.hermesAPI.deleteSessions(
+          ids,
+          connectionId,
+          profile,
+        );
+        const deletedIds = result?.deletedIds ?? ids;
+        for (const id of deletedIds)
+          onSessionDeleted?.(id, connectionId, profile);
         if (renameContextRef.current !== renameContext) return;
+        if (result?.error) toast.error(result.error);
+        if (deletedIds.length === 0) return;
+        const idSet = new Set(deletedIds);
+        loadRequestId.current += 1;
+        searchRequestId.current += 1;
+        // Retry the current query, including edits made while DELETE was pending.
+        setSearchRefresh((revision) => revision + 1);
+        setLoading(false);
+        setIsSearching(false);
         setSessions((prev) => prev.filter((s) => !idSet.has(s.id)));
         setSearchResults((prev) => prev.filter((r) => !idSet.has(r.sessionId)));
         window.dispatchEvent(new Event("hermes-sessions-maybe-changed"));
-        setSelectedSessionIds(new Set());
-        setIsSelectionMode(false);
+        setSelectedSessionIds(
+          (prev) => new Set([...prev].filter((id) => !idSet.has(id))),
+        );
+        if (!result?.error) setIsSelectionMode(false);
       } catch (err) {
         console.error("Failed to delete selected sessions", ids, err);
         if (renameContextRef.current !== renameContext) return;
@@ -784,7 +808,7 @@ function Sessions({
     return () => {
       if (searchTimer.current) clearTimeout(searchTimer.current);
     };
-  }, [connectionId, profile, searchQuery]);
+  }, [connectionId, profile, searchQuery, searchRefresh]);
 
   const isShowingSearch = searchQuery.trim().length > 0;
   const sourceOptions = useMemo(

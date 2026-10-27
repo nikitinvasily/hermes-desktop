@@ -1354,7 +1354,12 @@ const hermesAPI = {
     sessionIds: string[],
     connectionId?: string,
     profile?: string,
-  ): Promise<{ requested: number; deleted: number }> =>
+  ): Promise<{
+    requested: number;
+    deleted: number;
+    deletedIds?: string[];
+    error?: string;
+  }> =>
     ipcRenderer.invoke("delete-sessions", sessionIds, connectionId, profile),
   setSessionArchived: (
     sessionId: string,

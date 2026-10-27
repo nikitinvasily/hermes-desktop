@@ -152,6 +152,18 @@ describe("guarded remote session deletion", () => {
     expect(requests.map((r) => r.method)).toEqual(["GET", "DELETE"]);
   });
 
+  it("reports each confirmed bulk deletion before a later preparation failure", async () => {
+    const confirmed = vi.fn();
+    await expect(
+      remoteDeleteSessions(
+        { remoteUrl, apiKey: "test" },
+        ["delete/id", "untouched"],
+        confirmed,
+      ),
+    ).rejects.toThrow("identity mismatch");
+    expect(confirmed).toHaveBeenCalledExactlyOnceWith("delete/id");
+  });
+
   it("stops bulk deletion at a refused session instead of reporting success", async () => {
     refusal = 403;
     await expect(

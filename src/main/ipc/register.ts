@@ -14,6 +14,7 @@ import { homedir } from "os";
 import { randomUUID } from "crypto";
 import { readdir, readFile, stat } from "fs/promises";
 import { getActiveProfileNameSync } from "../utils";
+import { SessionDeletionVisibility } from "../session-deletion-visibility";
 import type { Attachment } from "../../shared/attachments";
 import type { SessionModelOverride } from "../../shared/model-override";
 import type { SessionLocation } from "../../shared/session-location";
@@ -253,6 +254,8 @@ import {
   searchSessions,
   deleteSession,
   deleteSessions,
+  type SessionSummary,
+  type SearchResult,
 } from "../sessions";
 import {
   syncSessionCache,
@@ -568,6 +571,8 @@ async function getSshDashboardSessionConfig(
 // named-profile user). Fall back to the locally persisted active profile so
 // `dashboardApiUrl` appends `?profile=` ("default" needs no param and is
 // skipped there; explicit params like `profile=all` are never overridden).
+const sessionDeletionVisibility = new SessionDeletionVisibility();
+
 function activeSshProfile(profile?: string): string {
   return profile?.trim() || getActiveProfileNameSync();
 }
@@ -2514,20 +2519,27 @@ export function registerIpcHandlers(context: IpcContext): void {
     ) => {
       const conn = sessionConnection(connectionId);
       const scopedProfile = activeSshProfile(profile);
-      if (conn.mode === "remote")
-        return remoteListSessions(
-          scopedRemoteSessionConfig(conn, scopedProfile),
-          limit,
-          offset,
-        );
-      if (conn.mode === "ssh" && conn.ssh)
-        return withSshDashboardSessions(
-          conn,
-          (config) => remoteListSessions(config, limit, offset),
-          () => sshListSessions(conn.ssh!, limit, offset, scopedProfile),
-          scopedProfile,
-        );
-      return listSessions(limit, offset, scopedProfile);
+      const visibility = sessionDeletionVisibility.forScope(
+        connectionId ?? getActiveConnection().connectionId,
+        scopedProfile,
+      );
+      const load = async (): Promise<SessionSummary[]> => {
+        if (conn.mode === "remote")
+          return remoteListSessions(
+            scopedRemoteSessionConfig(conn, scopedProfile),
+            limit,
+            offset,
+          );
+        if (conn.mode === "ssh" && conn.ssh)
+          return withSshDashboardSessions(
+            conn,
+            (config) => remoteListSessions(config, limit, offset),
+            () => sshListSessions(conn.ssh!, limit, offset, scopedProfile),
+            scopedProfile,
+          );
+        return listSessions(limit, offset, scopedProfile);
+      };
+      return load().then((rows) => visibility.filter(rows));
     },
   );
 
@@ -2761,41 +2773,82 @@ export function registerIpcHandlers(context: IpcContext): void {
     (_event, sessionId: string, connectionId?: string, profile?: string) => {
       const conn = sessionConnection(connectionId);
       const scopedProfile = activeSshProfile(profile);
-      if (conn.mode === "remote")
-        return remoteDeleteSession(
-          scopedRemoteSessionConfig(conn, scopedProfile),
-          sessionId,
-        );
-      if (conn.mode === "ssh" && conn.ssh)
-        return withSshDashboardSessions(
-          conn,
-          (config) => remoteDeleteSession(config, sessionId),
-          undefined,
-          scopedProfile,
-        );
-      return deleteSession(sessionId, scopedProfile);
+      const visibility = sessionDeletionVisibility.forScope(
+        connectionId ?? getActiveConnection().connectionId,
+        scopedProfile,
+      );
+      const remove = async (): Promise<void> => {
+        if (conn.mode === "remote")
+          return remoteDeleteSession(
+            scopedRemoteSessionConfig(conn, scopedProfile),
+            sessionId,
+          );
+        if (conn.mode === "ssh" && conn.ssh)
+          return withSshDashboardSessions(
+            conn,
+            (config) => remoteDeleteSession(config, sessionId),
+            undefined,
+            scopedProfile,
+          );
+        return deleteSession(sessionId, scopedProfile);
+      };
+      return remove().then((result) => {
+        visibility.confirm(sessionId);
+        return result;
+      });
     },
   );
 
   ipcMain.handle(
     "delete-sessions",
-    (_event, sessionIds: string[], connectionId?: string, profile?: string) => {
+    async (
+      _event,
+      sessionIds: string[],
+      connectionId?: string,
+      profile?: string,
+    ) => {
       const ids = Array.isArray(sessionIds) ? sessionIds : [];
       const conn = sessionConnection(connectionId);
       const scopedProfile = activeSshProfile(profile);
-      if (conn.mode === "remote")
-        return remoteDeleteSessions(
-          scopedRemoteSessionConfig(conn, scopedProfile),
-          ids,
-        );
-      if (conn.mode === "ssh" && conn.ssh)
-        return withSshDashboardSessions(
-          conn,
-          (config) => remoteDeleteSessions(config, ids),
-          undefined,
-          scopedProfile,
-        );
-      return deleteSessions(ids, scopedProfile);
+      const visibility = sessionDeletionVisibility.forScope(
+        connectionId ?? getActiveConnection().connectionId,
+        scopedProfile,
+      );
+      const deletedIds: string[] = [];
+      const onDeleted = (id: string): void => {
+        visibility.confirm(id);
+        deletedIds.push(id);
+      };
+      try {
+        if (conn.mode === "remote") {
+          const result = await remoteDeleteSessions(
+            scopedRemoteSessionConfig(conn, scopedProfile),
+            ids,
+            onDeleted,
+          );
+          return { ...result, deletedIds };
+        }
+        if (conn.mode === "ssh" && conn.ssh) {
+          const result = await withSshDashboardSessions(
+            conn,
+            (config) => remoteDeleteSessions(config, ids, onDeleted),
+            undefined,
+            scopedProfile,
+          );
+          return { ...result, deletedIds };
+        }
+        return deleteSessions(ids, scopedProfile);
+      } catch (error) {
+        if (deletedIds.length === 0) throw error;
+        // Electron only serializes Error.message on rejected IPC calls. Return
+        // partial receipts as data so the renderer can reconcile confirmed IDs.
+        return {
+          requested: ids.length,
+          deleted: deletedIds.length,
+          deletedIds,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
     },
   );
 
@@ -3265,31 +3318,45 @@ export function registerIpcHandlers(context: IpcContext): void {
     ): Promise<Record<string, CachedSession[]>> => {
       const conn = sessionConnection(connectionId);
       const scopedProfile = activeSshProfile(profile);
-      // Re-home tree rows per the desktop Move-to-project bindings (issue
-      // #66) — see regroupTreeSessionsByBindings in project-group-sessions.ts.
-      const flatten = (
-        groups: Map<string, CachedSession[]>,
-      ): Record<string, CachedSession[]> =>
-        regroupTreeSessionsByBindings(
-          groups,
-          getAllSessionContextFolders(undefined),
-          getAllSessionKeyContextFolders(undefined),
-        );
-      if (conn.mode === "remote")
-        return remoteProjectGroupSessions(
-          scopedRemoteSessionConfig(conn, scopedProfile),
-        ).then((result) => flatten(result.groups));
-      if (conn.mode === "ssh" && conn.ssh)
-        return withSshDashboardSessions(
-          conn,
-          (config) =>
-            remoteProjectGroupSessions(config).then((result) =>
-              flatten(result.groups),
-            ),
-          undefined,
-          scopedProfile,
-        ).catch(() => ({}));
-      return Promise.resolve({});
+      const visibility = sessionDeletionVisibility.forScope(
+        connectionId ?? getActiveConnection().connectionId,
+        scopedProfile,
+      );
+      const load = async (): Promise<Record<string, CachedSession[]>> => {
+        // Re-home tree rows per the desktop Move-to-project bindings (issue
+        // #66) — see regroupTreeSessionsByBindings in project-group-sessions.ts.
+        const flatten = (
+          groups: Map<string, CachedSession[]>,
+        ): Record<string, CachedSession[]> =>
+          regroupTreeSessionsByBindings(
+            groups,
+            getAllSessionContextFolders(undefined),
+            getAllSessionKeyContextFolders(undefined),
+          );
+        if (conn.mode === "remote")
+          return remoteProjectGroupSessions(
+            scopedRemoteSessionConfig(conn, scopedProfile),
+          ).then((result) => flatten(result.groups));
+        if (conn.mode === "ssh" && conn.ssh)
+          return withSshDashboardSessions(
+            conn,
+            (config) =>
+              remoteProjectGroupSessions(config).then((result) =>
+                flatten(result.groups),
+              ),
+            undefined,
+            scopedProfile,
+          ).catch(() => ({}));
+        return Promise.resolve({});
+      };
+      return load().then((rows) =>
+        Object.fromEntries(
+          Object.entries(rows).map(([folder, list]) => [
+            folder,
+            visibility.filter(list),
+          ]),
+        ),
+      );
     },
   );
 
@@ -3305,26 +3372,36 @@ export function registerIpcHandlers(context: IpcContext): void {
     ) => {
       const conn = sessionConnection(connectionId);
       const scopedProfile = activeSshProfile(profile);
-      if (conn.mode === "remote")
-        return remoteListCachedSessions(
-          scopedRemoteSessionConfig(conn, scopedProfile),
-          limit,
-          offset,
-        ).then((list) => mergeRemoteBindings(list));
-      if (conn.mode === "ssh" && conn.ssh)
-        return withSshDashboardSessions(
-          conn,
-          (config) =>
-            remoteListCachedSessions(config, limit, offset).then((list) =>
-              mergeRemoteBindings(list),
-            ),
-          () =>
-            sshListCachedSessions(conn.ssh!, limit, offset, scopedProfile).then(
-              (list) => mergeRemoteBindings(list),
-            ),
-          scopedProfile,
-        );
-      return listCachedSessions(limit, offset, scopedProfile);
+      const visibility = sessionDeletionVisibility.forScope(
+        connectionId ?? getActiveConnection().connectionId,
+        scopedProfile,
+      );
+      const load = async (): Promise<CachedSession[]> => {
+        if (conn.mode === "remote")
+          return remoteListCachedSessions(
+            scopedRemoteSessionConfig(conn, scopedProfile),
+            limit,
+            offset,
+          ).then((list) => mergeRemoteBindings(list));
+        if (conn.mode === "ssh" && conn.ssh)
+          return withSshDashboardSessions(
+            conn,
+            (config) =>
+              remoteListCachedSessions(config, limit, offset).then((list) =>
+                mergeRemoteBindings(list),
+              ),
+            () =>
+              sshListCachedSessions(
+                conn.ssh!,
+                limit,
+                offset,
+                scopedProfile,
+              ).then((list) => mergeRemoteBindings(list)),
+            scopedProfile,
+          );
+        return listCachedSessions(limit, offset, scopedProfile);
+      };
+      return load().then((rows) => visibility.filter(rows));
     },
   );
   ipcMain.handle(
@@ -3332,41 +3409,48 @@ export function registerIpcHandlers(context: IpcContext): void {
     (_event, connectionId?: string, profile?: string, windowRows?: number) => {
       const conn = sessionConnection(connectionId);
       const scopedProfile = activeSshProfile(profile);
-      // Backlog #92: the sidebar's window follows its loaded list size so a
-      // refresh cannot shrink a grown list; default 50 preserves the old
-      // behavior for other callers (Sessions screen, tests). The dashboard
-      // caps `limit` at 100 — clamp here so a grown window never 422s.
-      const boundedWindow = Math.max(
-        1,
-        Math.min(Number.isFinite(windowRows) ? Number(windowRows) : 50, 100),
+      const visibility = sessionDeletionVisibility.forScope(
+        connectionId ?? getActiveConnection().connectionId,
+        scopedProfile,
       );
-      if (conn.mode === "remote")
-        return remoteListCachedSessions(
-          scopedRemoteSessionConfig(conn, scopedProfile),
-          boundedWindow,
-        ).then((list) => mergeRemoteBindings(list));
-      if (conn.mode === "ssh" && conn.ssh)
-        return withSshDashboardSessions(
-          conn,
-          (config) =>
-            remoteListCachedSessions(config, boundedWindow).then((list) =>
-              mergeRemoteBindings(list),
-            ),
-          () =>
-            sshListCachedSessions(
-              conn.ssh!,
-              boundedWindow,
-              0,
-              scopedProfile,
-            ).then((list) => mergeRemoteBindings(list)),
-          scopedProfile,
+      const load = async (): Promise<CachedSession[]> => {
+        // Backlog #92: the sidebar's window follows its loaded list size so a
+        // refresh cannot shrink a grown list; default 50 preserves the old
+        // behavior for other callers (Sessions screen, tests). The dashboard
+        // caps `limit` at 100 — clamp here so a grown window never 422s.
+        const boundedWindow = Math.max(
+          1,
+          Math.min(Number.isFinite(windowRows) ? Number(windowRows) : 50, 100),
         );
-      try {
-        return syncSessionCache(scopedProfile);
-      } catch (error) {
-        console.error("sync-session-cache failed; using local cache", error);
-        return listCachedSessions(50, 0, scopedProfile);
-      }
+        if (conn.mode === "remote")
+          return remoteListCachedSessions(
+            scopedRemoteSessionConfig(conn, scopedProfile),
+            boundedWindow,
+          ).then((list) => mergeRemoteBindings(list));
+        if (conn.mode === "ssh" && conn.ssh)
+          return withSshDashboardSessions(
+            conn,
+            (config) =>
+              remoteListCachedSessions(config, boundedWindow).then((list) =>
+                mergeRemoteBindings(list),
+              ),
+            () =>
+              sshListCachedSessions(
+                conn.ssh!,
+                boundedWindow,
+                0,
+                scopedProfile,
+              ).then((list) => mergeRemoteBindings(list)),
+            scopedProfile,
+          );
+        try {
+          return syncSessionCache(scopedProfile);
+        } catch (error) {
+          console.error("sync-session-cache failed; using local cache", error);
+          return listCachedSessions(50, 0, scopedProfile);
+        }
+      };
+      return load().then((rows) => visibility.filter(rows));
     },
   );
   ipcMain.handle(
@@ -3409,20 +3493,27 @@ export function registerIpcHandlers(context: IpcContext): void {
     ) => {
       const conn = sessionConnection(connectionId);
       const scopedProfile = activeSshProfile(profile);
-      if (conn.mode === "remote")
-        return remoteSearchSessions(
-          scopedRemoteSessionConfig(conn, scopedProfile),
-          query,
-          limit,
-        );
-      if (conn.mode === "ssh" && conn.ssh)
-        return withSshDashboardSessions(
-          conn,
-          (config) => remoteSearchSessions(config, query, limit),
-          () => sshSearchSessions(conn.ssh!, query, limit, scopedProfile),
-          scopedProfile,
-        );
-      return searchSessions(query, limit, scopedProfile);
+      const visibility = sessionDeletionVisibility.forScope(
+        connectionId ?? getActiveConnection().connectionId,
+        scopedProfile,
+      );
+      const load = async (): Promise<SearchResult[]> => {
+        if (conn.mode === "remote")
+          return remoteSearchSessions(
+            scopedRemoteSessionConfig(conn, scopedProfile),
+            query,
+            limit,
+          );
+        if (conn.mode === "ssh" && conn.ssh)
+          return withSshDashboardSessions(
+            conn,
+            (config) => remoteSearchSessions(config, query, limit),
+            () => sshSearchSessions(conn.ssh!, query, limit, scopedProfile),
+            scopedProfile,
+          );
+        return searchSessions(query, limit, scopedProfile);
+      };
+      return load().then((rows) => visibility.filterSearch(rows));
     },
   );
 

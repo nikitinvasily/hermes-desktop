@@ -624,6 +624,243 @@ describe("Sessions deletion safety", () => {
     await act(async () => {});
   }
 
+  it.each([false, true])(
+    "reconciles only confirmed bulk IDs and fences delayed snapshots (search=%s)",
+    async (search) => {
+      const failed = { ...row, id: "failed-target", title: "Failed target" };
+      const rows = [row, failed];
+      const results = rows.map((item) =>
+        sessionSearchResult(item.title, "match", item.id),
+      );
+      const api = installHermesAPI(rows);
+      api.searchSessions.mockResolvedValue(results);
+      let finishDelete!: (value: unknown) => void;
+      api.deleteSessions.mockReturnValueOnce(
+        new Promise((resolve) => {
+          finishDelete = resolve;
+        }),
+      );
+      const onSessionDeleted = vi.fn();
+      const changed = vi.fn();
+      window.addEventListener("hermes-sessions-maybe-changed", changed);
+      try {
+        render(
+          <Sessions
+            {...baseProps}
+            visible
+            onSessionDeleted={onSessionDeleted}
+            currentSessionId={row.id}
+          />,
+        );
+        await act(async () => {});
+        if (search) {
+          fireEvent.change(
+            screen.getByPlaceholderText("sessions.searchPlaceholder"),
+            { target: { value: "match" } },
+          );
+          await act(async () => {
+            vi.advanceTimersByTime(300);
+          });
+        }
+        await beginDelete(true);
+        let finishList!: (value: typeof rows) => void;
+        api.syncSessionCache.mockReturnValueOnce(
+          new Promise((resolve) => {
+            finishList = resolve;
+          }),
+        );
+        act(() => window.dispatchEvent(new Event("focus")));
+        let finishSearch!: (value: typeof results) => void;
+        if (search) {
+          api.searchSessions.mockReturnValueOnce(
+            new Promise((resolve) => {
+              finishSearch = resolve;
+            }),
+          );
+          fireEvent.change(
+            screen.getByPlaceholderText("sessions.searchPlaceholder"),
+            { target: { value: "match again" } },
+          );
+          await act(async () => {
+            vi.advanceTimersByTime(300);
+          });
+        }
+        await act(async () => {
+          finishDelete({
+            requested: 2,
+            deleted: 1,
+            deletedIds: [row.id],
+            error: "409 conflict",
+          });
+        });
+        expect(onSessionDeleted.mock.calls).toEqual([
+          [row.id, baseProps.connectionId, baseProps.profile],
+        ]);
+        expect(toast.error).toHaveBeenCalledWith("409 conflict");
+        expect(changed).toHaveBeenCalledTimes(1);
+        await act(async () => {
+          finishList(rows);
+          if (search) finishSearch(results);
+        });
+        // A fresh search should see the backend's surviving row only.
+        api.searchSessions.mockResolvedValue([results[1]]);
+        await act(async () => {
+          vi.advanceTimersByTime(300);
+        });
+        expect(screen.queryByText(row.title)).not.toBeInTheDocument();
+        expect(screen.getByText(failed.title)).toBeInTheDocument();
+        expect(
+          screen.getByRole("checkbox", { name: "sessions.selectSession" }),
+        ).toBeChecked();
+      } finally {
+        window.removeEventListener("hermes-sessions-maybe-changed", changed);
+      }
+    },
+  );
+
+  it.each([
+    [false, "debounce"],
+    [true, "debounce"],
+    [false, "sync"],
+    [true, "sync"],
+    [false, "search"],
+    [true, "search"],
+  ] as const)(
+    "reissues the current query after confirmed deletion (bulk=%s stage=%s)",
+    async (bulk, stage) => {
+      const api = installHermesAPI([row]);
+      let finishDelete!: (value: unknown) => void;
+      (bulk ? api.deleteSessions : api.deleteSession).mockReturnValueOnce(
+        new Promise((resolve) => {
+          finishDelete = resolve;
+        }),
+      );
+      render(<Sessions {...baseProps} visible />);
+      await act(async () => {});
+      await beginDelete(bulk);
+      let finishSync!: (value: unknown[]) => void;
+      let finishSearch!: (
+        value: ReturnType<typeof sessionSearchResult>[],
+      ) => void;
+      if (stage === "sync")
+        api.syncSessionCache.mockReturnValueOnce(
+          new Promise((resolve) => {
+            finishSync = resolve;
+          }),
+        );
+      if (stage === "search")
+        api.searchSessions.mockReturnValueOnce(
+          new Promise((resolve) => {
+            finishSearch = resolve;
+          }),
+        );
+      fireEvent.change(
+        screen.getByPlaceholderText("sessions.searchPlaceholder"),
+        { target: { value: "new query" } },
+      );
+      if (stage !== "debounce")
+        await act(async () => {
+          vi.advanceTimersByTime(300);
+        });
+      await act(async () => {
+        finishDelete({ requested: 1, deleted: 1, deletedIds: [row.id] });
+      });
+      const result = sessionSearchResult(
+        "Current query result",
+        "new query",
+        "survivor",
+      );
+      api.searchSessions.mockResolvedValue([result]);
+      await act(async () => {
+        if (stage === "sync") finishSync([row]);
+        if (stage === "search")
+          finishSearch([sessionSearchResult(row.title, "stale", row.id)]);
+        vi.advanceTimersByTime(300);
+      });
+      expect(api.searchSessions).toHaveBeenLastCalledWith(
+        "new query",
+        undefined,
+        baseProps.connectionId,
+        baseProps.profile,
+      );
+      expect(screen.getByText(result.title!)).toBeInTheDocument();
+      expect(screen.queryByText(row.title)).not.toBeInTheDocument();
+    },
+  );
+
+  it.each([false, true])(
+    "fences late list and search snapshots after deletion (bulk=%s)",
+    async (bulk) => {
+      const api = installHermesAPI([row]);
+      render(<Sessions {...baseProps} visible />);
+      await act(async () => {});
+      let finishList!: (value: (typeof row)[]) => void;
+      api.syncSessionCache.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishList = resolve;
+          }),
+      );
+      act(() => window.dispatchEvent(new Event("focus")));
+      api.searchSessions.mockResolvedValue([
+        sessionSearchResult(row.title, "match", row.id),
+      ]);
+      fireEvent.change(
+        screen.getByPlaceholderText("sessions.searchPlaceholder"),
+        {
+          target: { value: "match" },
+        },
+      );
+      await act(async () => {
+        vi.advanceTimersByTime(300);
+      });
+      if (bulk) {
+        fireEvent.click(
+          screen.getByRole("button", { name: "sessions.selectMode" }),
+        );
+        fireEvent.click(
+          screen.getByRole("button", { name: "sessions.selectVisible" }),
+        );
+        fireEvent.click(
+          screen.getByRole("button", { name: "sessions.deleteSelected" }),
+        );
+      } else {
+        fireEvent.click(
+          screen.getByRole("button", { name: "sessions.delete" }),
+        );
+      }
+      let finishSearch!: (
+        value: ReturnType<typeof sessionSearchResult>[],
+      ) => void;
+      api.searchSessions.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishSearch = resolve;
+          }),
+      );
+      fireEvent.change(
+        screen.getByPlaceholderText("sessions.searchPlaceholder"),
+        {
+          target: { value: "match again" },
+        },
+      );
+      await act(async () => {
+        vi.advanceTimersByTime(300);
+      });
+      await act(async () => {
+        fireEvent.click(
+          screen.getByRole("button", { name: "sessions.deleteConfirmAction" }),
+        );
+      });
+      expect(screen.queryByText(row.title)).toBeNull();
+      await act(async () => {
+        finishList([row]);
+        finishSearch([sessionSearchResult(row.title, "match", row.id)]);
+      });
+      expect(screen.queryByText(row.title)).toBeNull();
+    },
+  );
+
   it.each([
     [false, "profile", false],
     [false, "profile", true],
@@ -851,6 +1088,42 @@ describe("Sessions deletion safety", () => {
 describe("Sessions tab — delete affordance (#408)", () => {
   beforeEach(() => {
     vi.useRealTimers();
+  });
+
+  it("does not resurrect a confirmed deletion from a delayed focus refresh", async () => {
+    const rows = [
+      {
+        id: "sessions-delete-race",
+        title: "Deleted during refresh",
+        startedAt: Date.now() / 1000,
+        source: "desktop",
+        messageCount: 1,
+        model: "test",
+      },
+    ];
+    const api = installHermesAPI(rows);
+    render(<Sessions {...baseProps} visible />);
+    await act(async () => {});
+    let finish!: (value: typeof rows) => void;
+    api.syncSessionCache.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    act(() => window.dispatchEvent(new Event("focus")));
+    expect(finish).toBeTypeOf("function");
+    fireEvent.click(screen.getByRole("button", { name: "sessions.delete" }));
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: "sessions.deleteConfirmAction" }),
+      );
+    });
+    expect(screen.queryByText(rows[0].title)).toBeNull();
+    await act(async () => {
+      finish(rows);
+    });
+    expect(screen.queryByText(rows[0].title)).toBeNull();
   });
 
   it("calls deleteSession when the trash button is clicked + confirmed", async () => {
