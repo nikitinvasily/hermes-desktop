@@ -29,6 +29,13 @@ describe("floating context panel header layout", () => {
     expect(button).toContain("align-items: center");
   });
 
+  it("centers collapsed section headers inside the panel with symmetric outer spacing", () => {
+    const panel = rule(".chat-context-panel");
+    const header = rule(".chat-context-panel .chat-context-panel-toggle");
+    expect(panel).toContain("padding: var(--context-panel-top-padding) 2px;");
+    expect(header).toContain("margin: var(--context-panel-header-gap) 0;");
+  });
+
   it("keeps the whole-panel collapsed control square", () => {
     const panel = rule(".chat-context-panel--collapsed");
     const button = rule(

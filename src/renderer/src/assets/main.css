@@ -18632,7 +18632,7 @@ body:has(.shell-vibrant),
   z-index: 30;
   width: 300px;
   max-width: min(300px, calc(100% - 60px - var(--chat-scrollbar-gutter, 0px)));
-  padding: var(--context-panel-top-padding) 2px 8px;
+  padding: var(--context-panel-top-padding) 2px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg, 10px);
   background: var(--bg-tertiary);
@@ -18688,7 +18688,7 @@ body:has(.shell-vibrant),
 
 .chat-context-panel .chat-context-panel-toggle {
   min-height: var(--context-panel-header-height);
-  margin: var(--context-panel-header-gap) 0 3px;
+  margin: var(--context-panel-header-gap) 0;
   padding-top: 0;
   padding-bottom: 0;
 }
