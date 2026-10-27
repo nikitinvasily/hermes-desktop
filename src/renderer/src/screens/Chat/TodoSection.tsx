@@ -19,10 +19,12 @@ const TODO_MARKERS: Record<string, string> = {
  */
 export function TodoSection({
   snapshot,
+  hidden = false,
   open,
   onToggle,
 }: {
   snapshot: TodoSnapshot | null;
+  hidden?: boolean;
   open: boolean;
   onToggle: () => void;
 }): React.JSX.Element | null {
@@ -36,7 +38,7 @@ export function TodoSection({
   const done = snapshot.items.length - openCount;
 
   return (
-    <div className="sidebar-recent-section">
+    <div className="sidebar-recent-section" hidden={hidden}>
       <button
         type="button"
         className="sidebar-recent-section-toggle chat-context-panel-toggle"

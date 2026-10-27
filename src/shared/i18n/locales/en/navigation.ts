@@ -20,6 +20,8 @@ export default {
   subagentDied: "died with a gateway restart",
   waitingSubagents: "Waiting for subagents",
   todoTasklist: "TODO",
+  collapseContextPanel: "Collapse TODO/Subagents panel",
+  expandContextPanel: "Expand TODO/Subagents panel",
   pinned: "Pinned",
   archiveSection: "Archive",
   archiveEmpty: "No archived chats",
