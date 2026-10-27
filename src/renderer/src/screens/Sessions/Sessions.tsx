@@ -570,6 +570,7 @@ function Sessions({
         clearEditing: cancelRename,
         inputRef: renameInputRef,
         fallbackErrorMessage: t("sessions.renameFailed"),
+        upgradeRequiredErrorMessage: t("sessions.renameUpgradeRequired"),
         persist: (id, title) =>
           window.hermesAPI.updateSessionTitle(id, title, connectionId, profile),
       });

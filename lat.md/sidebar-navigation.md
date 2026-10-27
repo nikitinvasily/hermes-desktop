@@ -252,6 +252,10 @@ Session renames must survive `syncSessionCache`, so the durable `state.db` write
 
 Title policy lives in [[src/shared/session-title.ts]] (`normalizeSessionTitle`, `MAX_SESSION_TITLE_LENGTH`) so the renderer optimistic path and [[src/main/session-cache.ts#updateSessionTitle]] cannot diverge. Main writes the selected profile’s `state.db` first, recording `title_source = user` when supported, then mirrors into `sessions.json`. Database errors throw; a failed cache mirror remains recoverable from the committed title on the next full sync. Both the sidebar and Sessions modal call [[src/renderer/src/screens/Sessions/confirmSessionRename.ts#confirmSessionRename]] for optimistic update, toast/rollback, and keep-editor-on-failure. Each editor allows one save at a time; late responses from a previous connection or profile cannot roll back the current list. Normalization strips Agent-disallowed controls and counts Unicode characters for the 100-character limit.
 
+#### Remote compatibility refusal
+
+Both rename editors replace `client_upgrade_required` IPC/OAuth wrappers with localized guidance to update Desktop. The helper rolls back the optimistic title and keeps the attempted name editable; cancelling reveals the original title.
+
 #### User title provenance
 
 Modern Agent schemas record explicit renames as user-authored so late automatic title generation cannot overwrite them; older schemas remain writable without migrations.

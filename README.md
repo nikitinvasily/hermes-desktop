@@ -38,6 +38,8 @@ Changes in this fork that are **not** in upstream.
 
 ### Fixes
 
+- **Remote chats can be renamed on current backends**: title changes use the server's guarded session protocol instead of failing with a version-mismatch error. Actual incompatibility shows update guidance and leaves the original title intact.
+
 - **Remote chats delete reliably**: deletion uses the backend's guarded session protocol. Rows stay visible until the server confirms success, failures show an error, and deleting an open chat closes its saved run instead of leaving a hidden conversation behind. Confirmed deletions cannot reappear from late list or project-tree replies, including after reopening Sessions or switching connections and back.
 
 - **Viewed chats stop looking unread**: opening a chat with the mouse or keyboard clears its unread dot in project groups as well as the recent list. The app saves read state before refreshing the sidebar and uses the current backend's guarded read-state protocol over remote connections.

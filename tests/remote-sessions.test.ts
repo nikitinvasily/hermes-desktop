@@ -264,6 +264,11 @@ describe("remote session REST bridge", () => {
           return;
         }
 
+        if (req.method === "GET" && req.url === "/api/sessions/sess-title") {
+          res.end(JSON.stringify({ id: "sess-title" }));
+          return;
+        }
+
         if (req.method === "PATCH" && req.url === "/api/sessions/sess-title") {
           res.end(JSON.stringify({ ok: true }));
           return;
@@ -717,13 +722,13 @@ describe("remote session REST bridge", () => {
     await remoteUpdateSessionTitle(config(), "sess-title", "New title");
     await remoteDeleteSession(config(), "sess-delete");
 
-    expect(requests[0]).toMatchObject({
+    expect(requests[2]).toMatchObject({
       method: "PATCH",
       url: "/api/sessions/sess-title",
       token: "test-token",
       body: JSON.stringify({ title: "New title" }),
     });
-    expect(requests[3]).toMatchObject({
+    expect(requests[5]).toMatchObject({
       method: "DELETE",
       url: "/api/sessions/sess-delete",
       token: "test-token",

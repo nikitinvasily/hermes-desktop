@@ -1280,6 +1280,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         clearEditing: cancelRename,
         inputRef: renameInputRef,
         fallbackErrorMessage: t("sessions.renameFailed"),
+        upgradeRequiredErrorMessage: t("sessions.renameUpgradeRequired"),
         persist: (sessionId, title) =>
           window.hermesAPI.updateSessionTitle(
             sessionId,

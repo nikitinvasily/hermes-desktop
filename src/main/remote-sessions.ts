@@ -818,19 +818,59 @@ export async function remoteReadMediaAsDataUrl(
   }
 }
 
+// @lat: [[connections#Connections#Session locations#Guarded session rename]]
 export async function remoteUpdateSessionTitle(
   config: RemoteSessionConfig,
   sessionId: string,
   title: string,
 ): Promise<void> {
-  await remoteRequestJson(
-    config,
-    `/api/sessions/${encodeURIComponent(sessionId)}`,
-    {
-      method: "PATCH",
-      body: { title },
-    },
-  );
+  const path = `/api/sessions/${encodeURIComponent(sessionId)}`;
+  const profile = config.profile?.trim();
+  const body: RemoteRecord = { title, ...(profile ? { profile } : {}) };
+  let snapshot: RemoteRecord;
+  try {
+    snapshot = asRecord(
+      await remoteRequestJson(config, `${path}/mutation-snapshot`),
+    );
+  } catch (error) {
+    const status = asRecord(error).statusCode;
+    if (
+      status !== 404 &&
+      !(error instanceof Error && /^404:/.test(error.message))
+    ) {
+      throw error;
+    }
+    // A missing route can also belong to a revision-aware dashboard. Inspect
+    // its exact session before deciding that an unfenced legacy write is safe.
+    const detail = asRecord(await remoteRequestJson(config, path));
+    if (detail.id !== sessionId) {
+      throw new Error("Session identity mismatch; title was not saved.");
+    }
+    if (!("runtime_revision" in detail) && !("runtime_generation" in detail)) {
+      await remoteRequestJson(config, path, { method: "PATCH", body });
+      return;
+    }
+    snapshot = { ...detail, session_id: detail.id, exists: true };
+  }
+  const revision = snapshot.runtime_revision;
+  const generation = snapshot.runtime_generation;
+  if (
+    snapshot.session_id !== sessionId ||
+    snapshot.exists !== true ||
+    typeof revision !== "number" ||
+    !Number.isSafeInteger(revision) ||
+    revision < 0 ||
+    (generation != null &&
+      (typeof generation !== "number" ||
+        !Number.isSafeInteger(generation) ||
+        generation < 0))
+  ) {
+    throw new Error("Invalid session mutation snapshot; title was not saved.");
+  }
+  body.request_id = randomUUID();
+  body.expected_revision = revision;
+  if (generation != null) body.expected_generation = generation;
+  await remoteRequestJson(config, path, { method: "PATCH", body });
 }
 
 // @lat: [[connections#Connections#Session locations#Guarded session deletion]]

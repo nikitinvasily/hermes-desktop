@@ -166,6 +166,48 @@ function renderSidebar(
 }
 
 describe("SidebarRecentSessions quick actions", () => {
+  it("shows localized update guidance and rolls back a failed rename without losing the editor", async () => {
+    vi.mocked(toast.error).mockClear();
+    vi.mocked(window.hermesAPI.updateSessionTitle).mockRejectedValueOnce(
+      new Error(
+        'Error invoking remote method \'update-session-title\': RemoteOAuthError: Remote OAuth request failed (409): {"detail":"client_upgrade_required"}',
+      ),
+    );
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      renderSidebar(vi.fn());
+      const row = await screen.findByText("Loose chat");
+      fireEvent.contextMenu(
+        row.closest(".sidebar-recent-session") as HTMLElement,
+      );
+      fireEvent.click(await screen.findByText("navigation.sessionMenu.rename"));
+      const input = screen.getByRole("textbox");
+      fireEvent.change(input, { target: { value: "Unsaved title" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledExactlyOnceWith(
+          "sessions.renameUpgradeRequired",
+        ),
+      );
+      const restoredInput = screen.getByRole("textbox");
+      expect(restoredInput).toBeEnabled();
+      expect(restoredInput).toHaveValue("Unsaved title");
+      expect(screen.queryByText("Unsaved title")).not.toBeInTheDocument();
+      expect(window.hermesAPI.updateSessionTitle).toHaveBeenCalledWith(
+        "session-loose",
+        "Unsaved title",
+        "connection-main",
+        "default",
+      );
+      fireEvent.change(restoredInput, { target: { value: "Saved title" } });
+      fireEvent.keyDown(restoredInput, { key: "Enter" });
+      await screen.findByText("Saved title");
+      expect(window.hermesAPI.updateSessionTitle).toHaveBeenCalledTimes(2);
+    } finally {
+      errors.mockRestore();
+    }
+  });
+
   function setup(pending = false): ReturnType<typeof render> & {
     props: React.ComponentProps<typeof SidebarRecentSessions>;
     onPointerDown: ReturnType<typeof vi.fn>;

@@ -71,6 +71,12 @@ Remote and SSH deletion prepares authoritative revision counters before writing;
 
 [[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx]] and [[src/renderer/src/screens/Sessions/Sessions.tsx]] retain rows and search results on failure and show an error. Successful deletion removes stale project-tree entries and notifies [[src/renderer/src/screens/Layout/Layout.tsx]], which forgets matching open and hidden runs only on the owning connection/profile.
 
+### Guarded session rename
+
+Remote and SSH title updates use the backend's authoritative revision fence, keeping preparation and mutation on the captured connection and profile.
+
+[[src/main/remote-sessions.ts#remoteUpdateSessionTitle]] validates the mutation snapshot identity, existence and integer counters before sending a unique request id and expected revision/generation in PATCH JSON. A missing snapshot route permits detail inspection, not an automatic unfenced retry; only an exact legacy row without runtime counters allows a legacy write. Authentication, transport and conflict refusals remain failures.
+
 ### Remote settings parity
 
 Direct Remote connections route the Settings-family IPC through the dashboard REST API instead of reading the local `~/.hermes` (issue #51).
@@ -110,6 +116,10 @@ Live-run lookup requires connection, profile, and session ID to match, so a coll
 ## Test specifications
 
 Focused checks cover independent status classification and the credential boundary for the new registry snapshot.
+
+### Guarded Remote rename receipts
+
+Remote rename tests require authoritative counters in PATCH JSON, unique request ids and profile-scoped preparation. Failed snapshots and mutation refusals never permit an unfenced retry; legacy writes require exact detail identity.
 
 ### Isolated status probes
 
