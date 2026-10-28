@@ -15,6 +15,9 @@ const SESSION_COOKIE_SUFFIXES = [
   "hermes_session_rt",
 ] as const;
 
+// HTTPS gateways use secure name prefixes; loopback HTTP keeps bare names.
+const COOKIE_NAME_PREFIXES = ["__Host-", "__Secure-"] as const;
+
 export type RemoteOAuthErrorCode =
   | "oauth_cancelled"
   | "oauth_connection_changed"
@@ -87,11 +90,16 @@ function getRemoteOAuthSession(): Session {
 export function cookiesHaveRemoteOAuthSession(
   cookies: Array<Pick<Cookie, "name">>,
 ): boolean {
-  return cookies.some((cookie) =>
-    SESSION_COOKIE_SUFFIXES.some(
-      (suffix) => cookie.name === suffix || cookie.name.endsWith(`_${suffix}`),
-    ),
-  );
+  return cookies.some((cookie) => {
+    const bare = COOKIE_NAME_PREFIXES.reduce(
+      (value, prefix) =>
+        value.startsWith(prefix) ? value.slice(prefix.length) : value,
+      cookie.name,
+    );
+    return SESSION_COOKIE_SUFFIXES.some(
+      (suffix) => bare === suffix || bare.endsWith(`_${suffix}`),
+    );
+  });
 }
 
 export async function remoteOAuthSessionState(
