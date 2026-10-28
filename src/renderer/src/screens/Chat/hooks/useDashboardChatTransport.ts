@@ -935,6 +935,12 @@ export function completionFailed(payload: unknown): boolean {
   );
 }
 
+// @lat: [[chat-commands#Busy refusal preserves conversation]]
+function isDashboardSessionBusyError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /^\s*session\s+(?:is\s+)?busy\s*$/i.test(message);
+}
+
 function completionErrorMessage(payload: unknown): string {
   const row = asRecord(payload);
   const raw = String(row.error || row.text || row.rendered || "").trim();
@@ -1586,7 +1592,9 @@ export function useDashboardChatTransport({
         expirePendingApprovalsRef.current();
         if (failed) {
           appliedModelRef.current = null;
-          recreateRuntimeSessionRef.current = true;
+          recreateRuntimeSessionRef.current = !isDashboardSessionBusyError(
+            completionErrorMessage(event.payload),
+          );
           const storedSessionId = storedSessionIdRef.current;
           const userContent = userContentById(
             messagesRef.current,
@@ -2605,11 +2613,14 @@ export function useDashboardChatTransport({
         if (activeTurn) activeTurn.status = "failed";
         if (pendingApprovalsRef.current.length) {
           expirePendingApprovalsRef.current();
-          void clientRef.current
-            ?.request("session.interrupt", {
-              session_id: runtimeSessionIdRef.current,
-            })
-            .catch(() => undefined);
+          // Busy refused this submission; the runtime still belongs to upstream work.
+          if (!isDashboardSessionBusyError(message)) {
+            void clientRef.current
+              ?.request("session.interrupt", {
+                session_id: runtimeSessionIdRef.current,
+              })
+              .catch(() => undefined);
+          }
         }
         setMessages((prev) => markActiveTurnFailed(prev, message, activeTurn));
         const storedSessionId = storedSessionIdRef.current;

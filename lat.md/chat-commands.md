@@ -40,6 +40,22 @@ Slash commands run on the gateway's **persistent slash-worker subprocess**, conc
 
 Because no global loading state is set, the slash branch shows its own feedback: it inserts an in-place `⏳ Running …` agent bubble, buffers the pipeline output, and replaces that bubble with the result (or `error: …`) when the command resolves — otherwise a slow or unreachable gateway would leave the user staring at nothing. Handled UI actions without output silently remove the pending bubble without leaving conversation artifacts.
 
+## Busy refusal preserves conversation
+
+A `session busy` or `session is busy` refusal retains the saved conversation and runtime; an explicit retry must not create another conversation or automatically stop upstream work.
+
+[[src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts#useDashboardChatTransport]] keeps the existing RPC rejection/uncertain-outcome contract. Failed `message.complete` events with a busy error also retain the runtime while clearing the model cache, so retry still validates the selected model. Other failed completions retain provider-failure runtime recreation and local error recording. Busy does not auto-replay a submission or change Stop, Send now, callback recovery, or generation/binding fences.
+
+Only whole-message `session busy` and `session is busy` refusals match, ignoring case and whitespace. Completion parsing retains its existing `Error:` prefix removal; RPC messages are not given extra prefix or suffix allowances. Provider errors containing the phrase are not admission refusals.
+
+The real-hook fake-gateway tests in [[src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.test.tsx]] cover both busy spellings, case/whitespace, saved/runtime IDs, zero `session.create`/`session.close` calls across retry, and model validation. Provider-failure controls, including embedded busy wording in `error`, `text`, and `rendered`, require clean runtime recreation and unchanged local error recording.
+
+## Busy refusal approval cleanup
+
+Busy refusals expire pending approval cards without sending `session.interrupt`, because the refused submission does not own the work already running upstream.
+
+RPC rejection and failed completion coverage verify expired cards cannot respond, retry uses the same saved/runtime IDs, and neither busy spelling interrupts the owner. A non-busy RPC failure still interrupts when approvals are pending; normal completion, approval-response failures, and explicit Stop keep their existing cleanup rules.
+
 ## Transport connection lifecycle
 
 Every dashboard turn first connects a JSON-RPC WebSocket to the gateway; that handshake must be time-bounded or a stalled socket wedges the whole transport with no error and no fallback (issue #718).
