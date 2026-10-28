@@ -470,6 +470,60 @@ afterEach(() => {
 });
 
 describe("syncSessionCache", () => {
+  // @lat: [[session-title-generation#Automatic session title generation#Unicode truncation]]
+  it.each([
+    ["repeated emoji", "😀".repeat(30), "😀".repeat(22) + "..."],
+    [
+      "mixed CJK and emoji",
+      "中".repeat(44) + "😀" + "文".repeat(20),
+      "中".repeat(44) + "...",
+    ],
+  ])(
+    "does not split a supplementary pair at the title cutoff: %s",
+    (_name, message, expected) => {
+      seedDb([
+        { id: "unicode-title", started_at: 1, firstUserMessage: message },
+      ]);
+
+      expect(syncSessionCache()[0]?.title).toBe(expected);
+      expect(listCachedSessions()[0]?.title).toBe(expected);
+    },
+  );
+
+  // @lat: [[session-title-generation#Automatic session title generation#Existing title budgets]]
+  it.each([
+    ["ASCII fallback", "a".repeat(60), "a".repeat(45) + "..."],
+    ["word selection", "alpha ".repeat(12), "alpha ".repeat(6) + "alpha"],
+    [
+      "pair just before the cutoff",
+      "中".repeat(42) + "😀" + "文".repeat(20),
+      "中".repeat(42) + "😀文...",
+    ],
+    [
+      "pair ending at the cutoff",
+      "中".repeat(43) + "😀" + "文".repeat(20),
+      "中".repeat(43) + "😀...",
+    ],
+    [
+      "pair after the cutoff",
+      "中".repeat(45) + "😀" + "文".repeat(20),
+      "中".repeat(45) + "...",
+    ],
+    ["short emoji message", "😀".repeat(20), "😀".repeat(20)],
+    ["50-unit message", "😀".repeat(25), "😀".repeat(25)],
+    ["51-unit message", "😀".repeat(25) + "a", "😀".repeat(22) + "..."],
+    [
+      "emoji word exceeding the 45-unit budget",
+      "😀".repeat(23) + " more words",
+      "😀".repeat(22) + "...",
+    ],
+  ])("preserves generated-title budgets: %s", (_name, message, expected) => {
+    seedDb([{ id: "budget-title", started_at: 1, firstUserMessage: message }]);
+
+    expect(syncSessionCache()[0]?.title).toBe(expected);
+    expect(listCachedSessions()[0]?.title).toBe(expected);
+  });
+
   it("returns an empty list when no DB exists yet", () => {
     expect(syncSessionCache()).toEqual([]);
   });

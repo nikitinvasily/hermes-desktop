@@ -227,10 +227,10 @@ sudo dnf install ./hermes-desktop-<version>.rpm
 - **Guided first-run install** for Hermes Agent with progress tracking and dependency resolution
 - **Local or remote backend**: run Hermes locally on `127.0.0.1:8642`, or connect to a remote server with an API key or browser OAuth. Main-process HTTPS accepts system-trusted roots while retaining certificate and hostname checks; OAuth recognizes secure session-cookie names.
 - **Multi-provider support** — OpenRouter, Anthropic, OpenAI, Google (Gemini), xAI (Grok), Nous Portal, Qwen, MiniMax, Hugging Face, Groq, and local OpenAI-compatible endpoints (LM Studio, Atomic Chat, Ollama, vLLM, llama.cpp)
-- **Streaming chat UI** with SSE streaming, tool progress indicators, markdown rendering, and syntax highlighting
+- **Streaming chat UI** with SSE streaming, tool progress indicators, markdown rendering, and syntax highlighting. Long paths wrap inside Markdown table cells without removing horizontal scrolling from fenced code.
 - **Token usage tracking** — live prompt/completion token counts and cost display in the chat footer, plus a `/usage` slash command
 - **22 slash commands** — `/new`, `/clear`, `/fast`, `/web`, `/image`, `/browse`, `/code`, `/shell`, `/usage`, `/help`, `/tools`, `/skills`, `/model`, `/memory`, `/persona`, `/version`, `/compact`, `/compress`, `/undo`, `/retry`, `/debug`, `/status`, and more
-- **Session management** — full-text search (SQLite FTS5), date-grouped history, resume and search across conversations
+- **Session management**: full-text search (SQLite FTS5), date-grouped history, resume and search across conversations. Generated titles preserve emoji and other supplementary Unicode characters at the truncation boundary.
 - **Profile switching** — create, delete, and switch between separate Hermes environments with isolated config
 - **14 toolsets** — web, browser, terminal, file, code execution, vision, image gen, TTS, skills, memory, session search, clarify, delegation, MoA, and task planning
 - **Memory system** — view/edit memory entries, user profile memory, capacity tracking, and discoverable memory providers (Honcho, Hindsight, Mem0, RetainDB, Supermemory, ByteRover)
