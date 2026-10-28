@@ -225,7 +225,7 @@ sudo dnf install ./hermes-desktop-<version>.rpm
 ## Features
 
 - **Guided first-run install** for Hermes Agent with progress tracking and dependency resolution
-- **Local or remote backend** — run Hermes locally on `127.0.0.1:8642`, or connect the desktop app to a remote Hermes API server with URL + API key
+- **Local or remote backend**: run Hermes locally on `127.0.0.1:8642`, or connect to a remote server with an API key or browser OAuth. Main-process HTTPS accepts system-trusted roots while retaining certificate and hostname checks; OAuth recognizes secure session-cookie names.
 - **Multi-provider support** — OpenRouter, Anthropic, OpenAI, Google (Gemini), xAI (Grok), Nous Portal, Qwen, MiniMax, Hugging Face, Groq, and local OpenAI-compatible endpoints (LM Studio, Atomic Chat, Ollama, vLLM, llama.cpp)
 - **Streaming chat UI** with SSE streaming, tool progress indicators, markdown rendering, and syntax highlighting
 - **Token usage tracking** — live prompt/completion token counts and cost display in the chat footer, plus a `/usage` slash command

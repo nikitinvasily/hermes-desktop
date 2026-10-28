@@ -270,6 +270,55 @@ describe("remote OAuth session boundary", () => {
     expect(cookiesHaveRemoteOAuthSession([{ name: "unrelated" }])).toBe(false);
   });
 
+  it.each([
+    "__Host-hermes_session_at",
+    "__Host-hermes_session_rt",
+    "__Secure-hermes_session_at",
+    "__Secure-hermes_session_rt",
+    "__Host-tenant_hermes_session_at",
+    "__Host-tenant_hermes_session_rt",
+    "__Secure-tenant_hermes_session_at",
+    "__Secure-tenant_hermes_session_rt",
+    "tenant_hermes_session_rt",
+  ])("recognizes session-cookie presence for %s", (name) => {
+    expect(cookiesHaveRemoteOAuthSession([{ name }])).toBe(true);
+  });
+
+  it.each([
+    "hermes_session_at_extra",
+    "hermes_session_rt_extra",
+    "otherhermes_session_at",
+    "otherhermes_session_rt",
+    "__Host-hermes_session_at_extra",
+    "__Host-hermes_session_rt_extra",
+    "__Secure-hermes_session_at_extra",
+    "__Secure-hermes_session_rt_extra",
+    "__Host-otherhermes_session_at",
+    "__Host-otherhermes_session_rt",
+    "__Secure-otherhermes_session_at",
+    "__Secure-otherhermes_session_rt",
+    "prefix__Host-hermes_session_at",
+    "prefix__Secure-hermes_session_rt",
+    "__Host-unrelated",
+    "__Secure-unrelated",
+    "hermes_session",
+    "",
+  ])("does not infer a session from unrelated cookie name %s", (name) => {
+    expect(cookiesHaveRemoteOAuthSession([{ name }])).toBe(false);
+  });
+
+  it("reports only name presence, without authenticating cookie contents", () => {
+    expect(cookiesHaveRemoteOAuthSession([])).toBe(false);
+    expect(
+      cookiesHaveRemoteOAuthSession([
+        { name: "unrelated" },
+        { name: "__Host-hermes_session_rt" },
+      ]),
+    ).toBe(true);
+    expect(mocks.request).not.toHaveBeenCalled();
+    expect(mocks.cookieGet).not.toHaveBeenCalled();
+  });
+
   it("uses a dedicated persistent Electron partition", async () => {
     mocks.cookieGet.mockResolvedValue([{ name: "hermes_session_rt" }]);
 

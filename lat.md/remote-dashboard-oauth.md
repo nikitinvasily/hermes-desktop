@@ -12,6 +12,14 @@ The first-run `connect-remote-gateway` operation in [[src/main/ipc/register.ts#r
 
 The public startup probe uses `/api/status` without a stored token after OAuth is selected, avoiding the authenticated `/health` redirect and stale-token false negatives.
 
+## Node system certificate trust
+
+Main-process Node HTTPS and onboarding fetch include trusted operating-system roots without weakening certificate or hostname verification.
+
+[[src/main/system-ca-trust.ts#initializeSystemCertificateTrust]] combines `tls.getCACertificates("default")` with `"system"` and installs the deduplicated result. Bundled, extra and existing custom defaults remain selected. Its side-effect import comes first in [[src/main/index.ts]], before network consumers can cache TLS sessions. Electron's cookie-backed transport remains unchanged.
+
+Both APIs are feature-detected. Unsupported development runtimes retain their defaults; lookup or setter failure reports unavailable and keeps verification enabled. Trust changes affect the current Node main thread, not the OS trust store or user configuration. A private root must already be trusted by the OS or supplied through supported extra-CA configuration; unrelated or hostname-invalid endpoints still fail.
+
 ## Credential boundary
 
 OAuth cookies live only in a dedicated persistent Electron session owned by main process.
@@ -60,7 +68,7 @@ Focused tests protect credential isolation, automatic routing, ticket freshness,
 
 ### Cookie session boundary
 
-Session recognition accepts only Hermes access or refresh cookie names and keeps cookie-backed requests inside the selected Electron partition.
+Session recognition accepts Hermes access or refresh cookie names, including bare, tenant-prefixed, `__Host-` and `__Secure-` forms, while keeping cookie-backed requests inside the selected URL-filtered Electron partition.
 
 ### Session token compatibility
 
@@ -117,3 +125,25 @@ OAuth and token operation rejections, including model-library 404 and version-co
 ### Management failure classification
 
 Token and OAuth HTTP failures expose the same structured status, with `404` identified as an unsupported feature instead of an application-wide connection failure.
+
+### Certificate defaults are preserved
+
+Adding system trust retains bundled, extra and existing custom roots, deduplicates overlaps, and leaves the input selection unchanged.
+
+### Unsupported TLS runtimes keep defaults
+
+A runtime missing either CA getter or setter keeps its existing trust without partially changing validation.
+
+### System trust lookup failures remain verified
+
+A failed system-store read never invokes the setter or enables a permissive certificate or hostname fallback.
+
+### Invalid system roots keep verification
+
+A setter rejection reports unavailable without disabling certificate verification or changing request options.
+
+### Real TLS requests honor selected system trust
+
+A real Electron run-as-Node child loads the production main entry before network consumers, accepts disposable selected system and extra roots, and rejects unrelated roots and hostname mismatches.
+
+The fixture substitutes the system-store getter and non-network UI startup. Production request clients, real loopback HTTPS, proxy/token headers and profile routing remain exercised. Keys and certificates stay in disposable scratch files; no OS Keychain, user configuration or application cookie store is modified. The fixture skips if OpenSSL is absent, so a skipped test must not be reported as a successful runtime check. It does not prove a native OS-store installation or a connection to the production gateway.
