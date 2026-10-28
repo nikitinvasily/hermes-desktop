@@ -43,3 +43,4 @@ This directory defines the high-level concepts, business logic, and architecture
 
 - [[dashboard-clarify]] — Interactive WebSocket clarification cards and answer delivery tests.
 - [[dashboard-detach]] — what happens to an in-flight chat turn when its dashboard event stream is torn down (connection switch, socket drop): clean retirement, revision gating, and resync on reactivation.
+- [[backup-import]] — native overwrite consent, explicit captured Local profile, and failure diagnostics for backup restore.
