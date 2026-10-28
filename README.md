@@ -230,7 +230,7 @@ sudo dnf install ./hermes-desktop-<version>.rpm
 - **Streaming chat UI** with SSE streaming, tool progress indicators, markdown rendering, and syntax highlighting. Long paths wrap inside Markdown table cells without removing horizontal scrolling from fenced code.
 - **Token usage tracking** — live prompt/completion token counts and cost display in the chat footer, plus a `/usage` slash command
 - **22 slash commands** — `/new`, `/clear`, `/fast`, `/web`, `/image`, `/browse`, `/code`, `/shell`, `/usage`, `/help`, `/tools`, `/skills`, `/model`, `/memory`, `/persona`, `/version`, `/compact`, `/compress`, `/undo`, `/retry`, `/debug`, `/status`, and more
-- **Session management**: full-text search (SQLite FTS5), date-grouped history, resume and search across conversations. Generated titles preserve emoji and other supplementary Unicode characters at the truncation boundary.
+- **Session management**: full-text search (SQLite FTS5), date-grouped history, resume and search across conversations. Generated titles preserve emoji and other supplementary Unicode characters at the truncation boundary. Retrying after a Dashboard `session busy` refusal keeps the same conversation without interrupting the work that already owns it.
 - **Profile switching** — create, delete, and switch between separate Hermes environments with isolated config
 - **14 toolsets** — web, browser, terminal, file, code execution, vision, image gen, TTS, skills, memory, session search, clarify, delegation, MoA, and task planning
 - **Memory system** — view/edit memory entries, user profile memory, capacity tracking, and discoverable memory providers (Honcho, Hindsight, Mem0, RetainDB, Supermemory, ByteRover)

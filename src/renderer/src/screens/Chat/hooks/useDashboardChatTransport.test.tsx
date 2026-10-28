@@ -1847,7 +1847,99 @@ describe("useDashboardChatTransport recovery", () => {
     vi.clearAllMocks();
   });
 
-  it("creates a clean runtime after a failed provider turn", async () => {
+  // @lat: [[chat-commands#Busy refusal preserves conversation]]
+  it.each(["Session busy", "Session is busy", "\tSeSsIoN   iS  BuSy \n"])(
+    "preserves the saved runtime on retry after a %s completion error",
+    async (error) => {
+      dashboardMock.request.mockImplementation(async (method: string) => {
+        if (method === "session.resume")
+          return {
+            session_id: "runtime-saved",
+            stored_session_id: "stored-saved",
+            running: false,
+          };
+        if (method === "session.create")
+          return { session_id: "runtime-new", stored_session_id: "stored-new" };
+        if (method === "model.options")
+          return {
+            model: "bad-model",
+            provider: "bad-provider",
+            providers: [],
+          };
+        return {};
+      });
+      const api: HarnessApi = {};
+      render(<Harness api={api} hermesSessionId="stored-saved" />);
+      await waitFor(() =>
+        expect(dashboardMock.request).toHaveBeenCalledWith("subagent.list", {
+          session_id: "runtime-saved",
+        }),
+      );
+      await act(async () => {
+        expect(await api.send!("refused turn")).toBe(true);
+        dashboardMock.onEvent?.({
+          type: "approval.request",
+          session_id: "runtime-saved",
+          payload: { request_id: "saved-owner-approval", choices: ["once"] },
+        });
+        dashboardMock.onEvent?.({
+          type: "message.complete",
+          session_id: "runtime-saved",
+          payload: { status: "error", error },
+        });
+      });
+      expect(api.isLoading).toBe(false);
+      expect(api.activeTurnRef!.current).toBeNull();
+      expect(api.messages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ error: error.trim() }),
+        ]),
+      );
+      expect(
+        api.messages?.find((message) => message.kind === "approval"),
+      ).toMatchObject({
+        requestId: "saved-owner-approval",
+        unavailable: true,
+      });
+      expect(await api.respondApproval!("saved-owner-approval", "once")).toBe(
+        false,
+      );
+      await act(async () => {
+        api.activeTurnRef!.current = { ...activeRecoveryTurn };
+        expect(await api.send!("retry turn")).toBe(true);
+      });
+      const calls = dashboardMock.request.mock.calls;
+      expect(
+        calls.filter(([method]) => method === "session.create"),
+      ).toHaveLength(0);
+      expect(
+        calls.filter(([method]) => method === "session.close"),
+      ).toHaveLength(0);
+      expect(calls.filter(([method]) => method === "session.resume")).toEqual([
+        ["session.resume", { session_id: "stored-saved", cols: 96 }],
+      ]);
+      expect(
+        calls
+          .filter(([method]) => method === "prompt.submit")
+          .map(([, params]) => params.session_id),
+      ).toEqual(["runtime-saved", "runtime-saved"]);
+      expect(
+        calls.filter(([method]) => method === "model.options"),
+      ).toHaveLength(4);
+      expect(
+        calls.filter(([method]) => method === "session.interrupt"),
+      ).toHaveLength(0);
+    },
+  );
+
+  it.each([
+    { error: "Invalid API Key" },
+    { error: "Error code: 503 - provider session is busy" },
+    { text: "Error code: 503 - provider session is busy" },
+    { rendered: "Error code: 503 - provider session is busy" },
+    { error: "Session is busy processing a provider request" },
+  ])("recreates runtime after provider failure %j", async (failure) => {
+    const error = failure.error || failure.text || failure.rendered!;
     const requests: Array<{ method: string; params: unknown }> = [];
     let liveModel = "bad-model";
     let liveProvider = "bad-provider";
@@ -1887,7 +1979,7 @@ describe("useDashboardChatTransport recovery", () => {
     await act(async () => {
       dashboardMock.onEvent?.({
         payload: {
-          error: "Invalid API Key",
+          ...failure,
           status: "error",
         },
         session_id: "live-bad",
@@ -1932,14 +2024,14 @@ describe("useDashboardChatTransport recovery", () => {
         cols: 96,
         messages: [
           { role: "user", content: "bad provider turn" },
-          { role: "assistant", content: "Error: Invalid API Key" },
+          { role: "assistant", content: `Error: ${error}` },
         ],
       },
     });
     expect(window.hermesAPI.recordSessionLocalError).toHaveBeenCalledWith(
       "stored-chat",
       {
-        error: "Invalid API Key",
+        error,
         userContent: "bad provider turn",
       },
     );
@@ -1947,7 +2039,11 @@ describe("useDashboardChatTransport recovery", () => {
       "stored-chat",
       [
         { kind: "user", content: "bad provider turn" },
-        { kind: "assistant", content: "", error: "Invalid API Key" },
+        {
+          kind: "assistant",
+          content: failure.text || failure.rendered || "",
+          error,
+        },
       ],
     );
   });
@@ -2081,6 +2177,89 @@ describe("useDashboardChatTransport approvals", () => {
   });
 
   afterEach(() => vi.clearAllMocks());
+
+  // @lat: [[chat-commands#Busy refusal approval cleanup]]
+  it.each([
+    ["Session busy", 0],
+    ["Session is busy", 0],
+    ["\tSeSsIoN   iS  BuSy \n", 0],
+    ["Invalid API Key", 1],
+    ["Error code: 503 - provider session is busy", 1],
+    ["Session is busy processing a provider request", 1],
+  ] as const)(
+    "expires approvals after RPC rejection %s with %i owner interruptions",
+    async (error, interruptions) => {
+      const api: HarnessApi = {};
+      const normalRequest = dashboardMock.request.getMockImplementation()!;
+      let rejectTurn = true;
+      dashboardMock.request.mockImplementation(async (method, params) => {
+        if (method === "session.resume")
+          return {
+            session_id: "live-1",
+            stored_session_id: "stored-1",
+            running: false,
+          };
+        if (method === "prompt.submit" && rejectTurn) {
+          dashboardMock.onEvent?.({
+            type: "approval.request",
+            session_id: "live-1",
+            payload: { request_id: "owner-approval", choices: ["once"] },
+          });
+          throw Object.assign(new Error(error), { rpcRejected: true });
+        }
+        return normalRequest(method, params);
+      });
+      render(<Harness api={api} hermesSessionId="stored-1" />);
+      await waitFor(() =>
+        expect(dashboardMock.request).toHaveBeenCalledWith("subagent.list", {
+          session_id: "live-1",
+        }),
+      );
+      await act(async () => {
+        expect(await api.send!("refused turn")).toBe("rejected");
+      });
+      expect(
+        api.messages?.find((message) => message.kind === "approval"),
+      ).toMatchObject({
+        requestId: "owner-approval",
+        unavailable: true,
+      });
+      expect(await api.respondApproval!("owner-approval", "once")).toBe(false);
+      expect(api.activeTurnRef!.current).toBeNull();
+      expect(api.isLoading).toBe(false);
+      const calls = dashboardMock.request.mock.calls;
+      expect(
+        calls.filter(([method]) => method === "session.interrupt"),
+      ).toHaveLength(interruptions);
+      expect(
+        calls.filter(([method]) => method === "approval.respond"),
+      ).toHaveLength(0);
+      rejectTurn = false;
+      await act(async () => {
+        api.activeTurnRef!.current = { ...activeRecoveryTurn };
+        expect(await api.send!("explicit retry")).toBe(true);
+      });
+      expect(
+        calls.filter(([method]) => method === "session.create"),
+      ).toHaveLength(0);
+      expect(
+        calls.filter(([method]) => method === "session.close"),
+      ).toHaveLength(0);
+      expect(calls.filter(([method]) => method === "session.resume")).toEqual([
+        ["session.resume", { session_id: "stored-1", cols: 96 }],
+      ]);
+      expect(
+        calls
+          .filter(([method]) => method === "model.options")
+          .map(([, params]) => params.session_id),
+      ).toEqual(["live-1", "live-1", "live-1"]);
+      expect(
+        calls
+          .filter(([method]) => method === "prompt.submit")
+          .map(([, params]) => params.session_id),
+      ).toEqual(["live-1", "live-1"]);
+    },
+  );
 
   it("responds only to the pending offered choice and clears after ack", async () => {
     const api: HarnessApi = {};
