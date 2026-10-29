@@ -213,7 +213,10 @@ export function escapeRegex(str: string): string {
  * Write a file, creating parent directories if they don't exist.
  * Prevents ENOENT crashes when ~/.hermes has been deleted or doesn't exist yet.
  */
-export function safeWriteFile(filePath: string, content: string): void {
+export function safeWriteFile(
+  filePath: string,
+  content: string | Buffer,
+): void {
   const dir = dirname(filePath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 

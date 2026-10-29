@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { profileHome, safeWriteFile } from "./utils";
+import { REGISTRY_COMMIT, registrySnapshot } from "./registry-integrity";
 import { installSkill, listInstalledSkills } from "./skills";
 import { createProfile } from "./profiles";
 import { writeSoul } from "./soul";
@@ -30,15 +31,10 @@ export type {
  * actions download the entry's files into the active profile.
  */
 const REGISTRY_REPO = "fathah/hermes-registry";
-const REGISTRY_BRANCH = "main";
-export const REGISTRY_RAW_BASE = `https://raw.githubusercontent.com/${REGISTRY_REPO}/refs/heads/${REGISTRY_BRANCH}`;
-const REGISTRY_REPO_BASE = `https://github.com/${REGISTRY_REPO}/tree/${REGISTRY_BRANCH}`;
+const REGISTRY_REPO_BASE = `https://github.com/${REGISTRY_REPO}/tree/${REGISTRY_COMMIT}`;
 // Icons are served by the registry web service (from its DB), not raw GitHub —
 // e.g. https://registry.hermesone.org/registry-icon/mcp/aws/icon.svg.
 const REGISTRY_ICON_BASE = "https://registry.hermesone.org/registry-icon";
-const INDEX_URL = `${REGISTRY_RAW_BASE}/index.json`;
-const MODELS_URL = `${REGISTRY_RAW_BASE}/models.json`;
-const TREE_URL = `https://api.github.com/repos/${REGISTRY_REPO}/git/trees/${REGISTRY_BRANCH}?recursive=1`;
 
 /** index.json entry shape. */
 interface IndexEntry {
@@ -91,11 +87,7 @@ const EMPTY_CATALOG: RegistryCatalog = {
   workflows: [],
 };
 
-// Short-lived cache so flipping between Discover sub-tabs doesn't refetch.
-// Covers the raw.githubusercontent fetches (index + models), which are
-// CDN-backed and not subject to the api.github.com rate limit — so this stays
-// short to keep the catalog/model list fresh. The rate-limited git-tree fetch
-// caches separately for far longer (see TREE_CACHE_TTL_MS).
+// UI cache contains only data read from the verified immutable snapshot.
 let cache: { at: number; data: RegistryCatalog } | null = null;
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 min
 
@@ -135,13 +127,9 @@ export async function fetchRegistry(
     return cache.data;
   }
   try {
-    const res = await fetch(INDEX_URL, {
-      headers: { Accept: "application/json" },
-    });
-    if (!res.ok) {
-      return { ...EMPTY_CATALOG, error: `Registry returned ${res.status}` };
-    }
-    const raw = (await res.json()) as { entries?: IndexEntry[] };
+    const raw = JSON.parse(await registrySnapshot.readText("index.json")) as {
+      entries?: IndexEntry[];
+    };
     const data: RegistryCatalog = {
       skills: [],
       mcps: [],
@@ -177,13 +165,9 @@ export async function fetchModelRegistry(
     return modelCache.data;
   }
   try {
-    const res = await fetch(MODELS_URL, {
-      headers: { Accept: "application/json" },
-    });
-    if (!res.ok) {
-      return { providers: [], error: `Registry returned ${res.status}` };
-    }
-    const raw = (await res.json()) as ModelRegistry;
+    const raw = JSON.parse(
+      await registrySnapshot.readText("models.json"),
+    ) as ModelRegistry;
     const data: ModelRegistry = {
       schemaVersion: raw.schemaVersion,
       generated: raw.generated,
@@ -239,14 +223,8 @@ export interface InstallResult {
 }
 
 async function tryFetchText(path: string): Promise<string> {
-  try {
-    const res = await fetch(`${REGISTRY_RAW_BASE}/${path}`);
-    if (!res.ok) return "";
-    const text = await res.text();
-    return text.trim() ? text : "";
-  } catch {
-    return "";
-  }
+  const text = await registrySnapshot.readOptionalText(path);
+  return text?.trim() ? text : "";
 }
 
 /** Build a structured spec (lead + labeled rows) from an entry's manifest. */
@@ -329,49 +307,68 @@ export async function fetchRegistryDetail(
   return detail;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export async function fetchManifest(
   path: string,
 ): Promise<EntryManifest | null> {
-  try {
-    const res = await fetch(`${REGISTRY_RAW_BASE}/${path}/manifest.json`);
-    if (!res.ok) return null;
-    return (await res.json()) as EntryManifest;
-  } catch {
-    return null;
-  }
+  const text = await registrySnapshot.readOptionalText(`${path}/manifest.json`);
+  if (text === null) return null;
+  const value: unknown = JSON.parse(text);
+  if (!isRecord(value)) throw new Error("Invalid registry manifest");
+  const strings = [
+    "description",
+    "command",
+    "url",
+    "entry",
+    "model",
+    "license",
+  ];
+  const arrays = ["args", "permissions", "requires", "tools"];
+  const compatibility = value.compatibility;
+  if (
+    strings.some(
+      (key) => value[key] !== undefined && typeof value[key] !== "string",
+    ) ||
+    arrays.some(
+      (key) =>
+        value[key] !== undefined &&
+        (!Array.isArray(value[key]) ||
+          !value[key].every((v: unknown) => typeof v === "string")),
+    ) ||
+    ["env", "headers"].some(
+      (key) =>
+        value[key] !== undefined &&
+        (!isRecord(value[key]) ||
+          !Object.values(value[key]).every((v) => typeof v === "string")),
+    ) ||
+    (value.transport !== undefined &&
+      (typeof value.transport !== "string" ||
+        !["stdio", "http", "sse"].includes(value.transport))) ||
+    (compatibility !== undefined &&
+      compatibility !== null &&
+      (!isRecord(compatibility) ||
+        ["hermes", "desktop"].some(
+          (key) =>
+            compatibility[key] !== undefined &&
+            typeof compatibility[key] !== "string",
+        )))
+  )
+    throw new Error("Invalid registry manifest");
+  return value as EntryManifest;
 }
 
-/** One blob in the repo's recursive git tree. */
-interface TreeBlob {
-  path: string;
-  type: string;
+/** Shared verified reads for local and remote registry installation. */
+export function readVerifiedRegistryFolder(
+  folder: string,
+): Promise<{ relativePath: string; bytes: Buffer }[]> {
+  return registrySnapshot.readFolder(folder);
 }
-let treeCache: { at: number; blobs: TreeBlob[] } | null = null;
-// The recursive git tree is fetched from api.github.com, which rate-limits
-// anonymous callers at 60 req/h (token auth below raises that ceiling). Cache
-// it far longer than the CDN-backed raw fetches to keep that pressure low.
-const TREE_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
-/** All file paths under a folder, via the cached recursive git tree. */
-export async function listFolderFiles(folder: string): Promise<string[]> {
-  if (!treeCache || Date.now() - treeCache.at >= TREE_CACHE_TTL_MS) {
-    // Use GITHUB_TOKEN / GH_TOKEN when available to avoid anonymous
-    // rate limits (60 req/h) on api.github.com.  Authenticated requests
-    // get 5 000 req/h instead.
-    const ghToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "";
-    const headers: Record<string, string> = {
-      Accept: "application/vnd.github+json",
-    };
-    if (ghToken) headers.Authorization = `Bearer ${ghToken}`;
-    const res = await fetch(TREE_URL, { headers });
-    if (!res.ok) throw new Error(`Tree fetch failed (${res.status})`);
-    const json = (await res.json()) as { tree?: TreeBlob[] };
-    treeCache = { at: Date.now(), blobs: json.tree ?? [] };
-  }
-  const prefix = `${folder}/`;
-  return treeCache.blobs
-    .filter((b) => b.type === "blob" && b.path.startsWith(prefix))
-    .map((b) => b.path);
+export function readVerifiedRegistryText(path: string): Promise<string> {
+  return registrySnapshot.readText(path);
 }
 
 /** Download every file under an entry's repo folder into a local directory. */
@@ -379,16 +376,12 @@ async function downloadFolder(
   repoFolder: string,
   destDir: string,
 ): Promise<InstallResult> {
-  const files = await listFolderFiles(repoFolder);
+  const files = await registrySnapshot.readFolder(repoFolder);
   if (files.length === 0) {
     return { success: false, error: "No files found for this entry" };
   }
   for (const file of files) {
-    const rel = file.slice(repoFolder.length + 1);
-    const res = await fetch(`${REGISTRY_RAW_BASE}/${file}`);
-    if (!res.ok) return { success: false, error: `Fetch failed: ${rel}` };
-    const body = await res.text();
-    safeWriteFile(join(destDir, rel), body);
+    safeWriteFile(join(destDir, file.relativePath), file.bytes);
   }
   return { success: true };
 }
@@ -511,18 +504,18 @@ async function installWorkflow(
  * the published agent.
  */
 async function installAgent(item: RegistryItem): Promise<InstallResult> {
+  if (!item.path) return { success: false, error: "Agent entry has no path" };
+  const m = await fetchManifest(item.path);
+  const entry = m?.entry || "AGENT.md";
+  const md = await registrySnapshot.readText(`${item.path}/${entry}`);
+  if (!md.trim()) return { success: false, error: "Agent persona is empty" };
   const created = createProfile(item.id, "default");
   if (!created.success) return created;
-  if (item.path) {
-    const m = await fetchManifest(item.path);
-    const entry = m?.entry || "AGENT.md";
-    const md = await tryFetchText(`${item.path}/${entry}`);
-    if (md && !writeSoul(md, item.id)) {
-      return {
-        success: false,
-        error: "Failed to write agent persona (SOUL.md)",
-      };
-    }
+  if (!writeSoul(md, item.id)) {
+    return {
+      success: false,
+      error: "Failed to write agent persona (SOUL.md)",
+    };
   }
   return { success: true };
 }

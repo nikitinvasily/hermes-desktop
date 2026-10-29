@@ -15,9 +15,9 @@ import { remoteHome, remoteInvalidateSettingsCaches } from "./remote-settings";
 import type { ConnectionConfig } from "./config";
 import {
   fetchManifest,
-  listFolderFiles,
+  readVerifiedRegistryFolder,
+  readVerifiedRegistryText,
   renderMcpYaml,
-  REGISTRY_RAW_BASE,
   type EntryManifest,
 } from "./registry";
 import type {
@@ -146,14 +146,25 @@ async function uploadRegistryFolder(
   destDir: string,
   profile?: string,
 ): Promise<RemoteInstallResult> {
-  const files = await listFolderFiles(repoFolder);
+  const files = await readVerifiedRegistryFolder(repoFolder);
   if (files.length === 0) {
     return { success: false, error: "No files found for this entry" };
   }
+  // The server only accepts text. Preflight every verified file before any
+  // mkdir/write so a later binary file cannot leave a partial installation.
+  const uploads = files.map(({ relativePath, bytes }) => {
+    const content = bytes.toString("utf8");
+    if (!Buffer.from(content, "utf8").equals(bytes)) {
+      throw new Error(
+        `Remote text API cannot losslessly upload non-UTF-8 file: ${relativePath}`,
+      );
+    }
+    return { relativePath, content };
+  });
   // Collect every directory we touch so mkdir calls can be deduplicated.
   const dirs = new Set<string>();
-  for (const file of files) {
-    const rel = file.slice(repoFolder.length + 1);
+  for (const file of uploads) {
+    const rel = file.relativePath;
     const parts = rel.split("/");
     parts.pop();
     let acc = destDir;
@@ -171,11 +182,9 @@ async function uploadRegistryFolder(
       // subsequent write with the server's own error text.
     }
   }
-  for (const file of files) {
-    const rel = file.slice(repoFolder.length + 1);
-    const res = await fetch(`${REGISTRY_RAW_BASE}/${file}`);
-    if (!res.ok) return { success: false, error: `Fetch failed: ${rel}` };
-    const body = await res.text();
+  for (const file of uploads) {
+    const rel = file.relativePath;
+    const body = file.content;
     try {
       await remoteWriteText(conn, joinPosix(destDir, rel), body, profile);
     } catch (err) {
@@ -287,6 +296,13 @@ async function remoteInstallAgent(
   conn: ConnectionConfig,
   item: RegistryItem,
 ): Promise<RemoteInstallResult> {
+  // Resolve all registry-controlled data before creating a server profile.
+  let md = "";
+  if (item.path) {
+    const m = await fetchManifest(item.path);
+    const entry = m?.entry || "AGENT.md";
+    md = await readVerifiedRegistryText(`${item.path}/${entry}`);
+  }
   try {
     await remoteDashboardRequestJson(
       conn,
@@ -308,26 +324,18 @@ async function remoteInstallAgent(
     };
   }
   remoteInvalidateSettingsCaches();
-  if (item.path) {
-    const m = await fetchManifest(item.path);
-    const entry = m?.entry || "AGENT.md";
-    const res = await fetch(`${REGISTRY_RAW_BASE}/${item.path}/${entry}`);
-    if (res.ok) {
-      const md = await res.text();
-      if (md.trim()) {
-        try {
-          const home = await remoteHome(conn, item.id);
-          await remoteWriteText(conn, joinPosix(home, "SOUL.md"), md, item.id);
-        } catch (err) {
-          return {
-            success: false,
-            error:
-              err instanceof Error
-                ? err.message
-                : "Failed to write agent persona (SOUL.md)",
-          };
-        }
-      }
+  if (md.trim()) {
+    try {
+      const home = await remoteHome(conn, item.id);
+      await remoteWriteText(conn, joinPosix(home, "SOUL.md"), md, item.id);
+    } catch (err) {
+      return {
+        success: false,
+        error:
+          err instanceof Error
+            ? err.message
+            : "Failed to write agent persona (SOUL.md)",
+      };
     }
   }
   return { success: true };
