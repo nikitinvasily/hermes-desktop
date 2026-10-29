@@ -1610,7 +1610,11 @@ function Layout({
 
           {visitedViews.has("schedules") && (
             <div style={paneStyle("schedules")}>
-              <Schedules profile={activeProfile} />
+              <Schedules
+                key={JSON.stringify([connectionId, activeProfile])}
+                connectionId={connectionId}
+                profile={activeProfile}
+              />
             </div>
           )}
 
