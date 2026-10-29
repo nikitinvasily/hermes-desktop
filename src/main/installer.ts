@@ -1,3 +1,5 @@
+import type { InstallProgress } from "../shared/update-progress";
+export type { InstallProgress } from "../shared/update-progress";
 import { spawn, execFile, execFileSync } from "child_process";
 import {
   existsSync,
@@ -244,14 +246,6 @@ export interface InstallStatus {
   hasApiKey: boolean;
   verified: boolean;
   activeProfile?: string;
-}
-
-export interface InstallProgress {
-  step: number;
-  totalSteps: number;
-  title: string;
-  detail: string;
-  log: string;
 }
 
 export function getEnhancedPath(): string {
@@ -817,8 +811,9 @@ export async function runHermesUpdate(
   function emit(text: string): void {
     log += text;
     onProgress({
-      step: 1,
-      totalSteps: 1,
+      operation: "update",
+      step: 0,
+      totalSteps: 0,
       title: "Updating Hermes Agent",
       detail: text.trim().slice(0, 120),
       log,
@@ -851,7 +846,7 @@ export async function runHermesUpdate(
 
     proc.on("close", (code) => {
       if (code === 0) {
-        emit("\nUpdate complete!\n");
+        emit("\nUpdate command finished.\n");
         resolve();
       } else {
         reject(new Error(`Update failed (exit code ${code}).`));

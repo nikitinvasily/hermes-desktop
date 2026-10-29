@@ -1,3 +1,7 @@
+import type {
+  DownloadProgress,
+  InstallProgress,
+} from "../shared/update-progress";
 import type { AppLocale } from "../shared/i18n/types";
 import type { Attachment } from "../shared/attachments";
 import type { SessionModelOverride } from "../shared/model-override";
@@ -61,14 +65,6 @@ interface InstallStatus {
   hasApiKey: boolean;
   verified: boolean;
   activeProfile?: string;
-}
-
-interface InstallProgress {
-  step: number;
-  totalSteps: number;
-  title: string;
-  detail: string;
-  log: string;
 }
 
 interface ConfigHealthIssue {
@@ -299,7 +295,9 @@ interface HermesAPI {
     connectionId?: string,
   ) => Promise<boolean>;
   runHermesDoctor: () => Promise<string>;
-  runHermesUpdate: () => Promise<{ success: boolean; error?: string }>;
+  runHermesUpdate: (
+    requestId?: string,
+  ) => Promise<{ success: boolean; error?: string }>;
 
   // OpenClaw migration
   checkOpenClaw: () => Promise<{ found: boolean; path: string | null }>;
@@ -1181,7 +1179,7 @@ interface HermesAPI {
     callback: (info: { version: string; releaseNotes: string }) => void,
   ) => () => void;
   onUpdateDownloadProgress: (
-    callback: (info: { percent: number }) => void,
+    callback: (info: DownloadProgress) => void,
   ) => () => void;
   onUpdateDownloaded: (callback: () => void) => () => void;
   onUpdateError: (callback: (message: string) => void) => () => void;
