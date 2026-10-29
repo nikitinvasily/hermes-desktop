@@ -10,6 +10,7 @@ export default {
   send: "Send",
   searchModels: "Search models...",
   searchMessages: "Find in this chat…",
+  jumpToLatest: "Jump to latest",
   searchCount: "{{current}} / {{total}}",
   searchPrevious: "Previous match (Shift+Enter)",
   searchNext: "Next match (Enter)",

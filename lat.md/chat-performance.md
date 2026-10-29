@@ -32,7 +32,7 @@ Scrolling near the top marker auto-reveals the next window (IntersectionObserver
 
 Two timing rules keep this correct:
 
-- The observer is recreated after every expansion (`extraRows` is an effect dependency). IntersectionObserver only reports *transitions*, so after revealing content shorter than the rootMargin (e.g. a tool run folding into one collapsed group) a persistent observer would go silent; re-observing delivers a fresh initial entry.
+- The observer is recreated after every expansion (`extraRows` is an effect dependency). IntersectionObserver only reports _transitions_, so after revealing content shorter than the rootMargin (e.g. a tool run folding into one collapsed group) a persistent observer would go silent; re-observing delivers a fresh initial entry.
 - History loads scroll to the bottom **instantly**, not smoothly ([[src/renderer/src/screens/Chat/hooks/useChatScroll.ts#useChatScroll]]). A smooth multi-frame scroll from the top races the observer's first callback (the marker is still in view), and the expansion's scroll restore would abort the smooth scroll and strand the view mid-transcript.
 
 Windowing behavior is specified by [[src/renderer/src/screens/Chat/MessageList.test.tsx]].
@@ -78,6 +78,24 @@ The flex `gap` that previously spaced rows is replaced by per-row spacing: `.cha
 On wide monitors the transcript and composer live in a centered 1300px column so message lines stay readable.
 
 The wrapper is `.chat-content-column` (`.chat-messages > .chat-content-column`, and one wrapping the input area's children), a plain block element with `max-width: 1300px` and `margin-inline: auto`; narrow windows are unaffected because the column simply fills the space. It stays block flow (no flex) so the `content-visibility` and `scrollHeight` contract above is preserved, and the worktree panel is a flex sibling of `.chat-messages`, outside the column.
+
+## Bottom follow ownership
+
+The scroll hook follows growth only while the reader owns bottom-follow intent; search and inactive mounted chats suspend all writes without losing that intent.
+
+[[src/renderer/src/screens/Chat/hooks/useChatScroll.ts#useChatScroll]] preserves the fork API: `messages`, `paused = false`, optional external viewport ref, then optional `scope = "chat"`. It returns that same viewport ref, the legacy bottom sentinel ref, `contentRef`, `isFollowing` and `jumpToLatest`.
+
+The observed content is the existing `.chat-content-column`, not a new flex wrapper. The 1300px transcript/composer alignment, block-flow `.chat-messages`, floating context panel and sibling worktree panel remain unchanged. The accessible localized jump button is an absolutely positioned sibling inside `ChatMessagesWrap`, outside the scrollable transcript.
+
+- ResizeObserver watches both the viewport and content, including same-row Markdown/media growth and viewport changes. Stream and resize writes coalesce into one animation frame and read current geometry at delivery; writes are instant, never smooth intermediate positions.
+- Initial nonempty history is placed at the bottom in a layout effect before history-window expansion can race it. Empty history rearms this even while paused.
+- Upward wheel, non-editor navigation keys or decreasing scroll position away from the actual bottom cancel queued work immediately. Tiny upward movement inside the 60px bottom tolerance still means reading; subpixel native bottom clamps do not. Height growth alone never changes intent.
+- Explicit jump, a new user row and downward bottom re-entry resume following. Editing navigation keys stay with their input, textarea, select or contenteditable ancestor.
+- Chat shares the search/scroll scope derived from run, connection, profile and initial session identity, not token contents or active state. Scope replacement resets follow and retires old work; token rerenders retain observers and reading intent.
+- `paused = messageSearch.open || !active` blocks initial placement, stream/resize writes and explicit jump. Search-owned scroll events do not change follow intent. Reactivation catches up only if following; readers keep their place. Search close restores its saved reading position before the hook decides whether to follow; pause transitions rebase scroll-direction tracking so that restoration itself is not mistaken for upward intent.
+- Scope changes, node replacement and unmount cancel frames, remove listeners and disconnect observers. Late old observer deliveries cannot schedule work against replacement nodes. The fork's external ref remains the search/scroll owner.
+
+Behavioral coverage lives in [[src/renderer/src/screens/Chat/hooks/useChatScroll.test.tsx]] and [[src/renderer/src/screens/Chat/Chat.scroll-follow.test.tsx]]. The latter renders the real Chat, MessageList and search hooks, verifying centered-column observation, jump placement, each scope axis, inactive history and streaming during search. DOM tests use controlled layout geometry; they are not Chromium layout or browser-performance evidence.
 
 ## Textarea auto-resize avoids per-keystroke reflow
 

@@ -5345,6 +5345,28 @@ body:has(.shell-vibrant),
   min-width: 0;
 }
 
+.chat-jump-latest {
+  position: absolute;
+  bottom: 16px;
+  left: calc((100% - var(--chat-scrollbar-gutter, 0px)) / 2);
+  transform: translateX(-50%);
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid var(--border-primary);
+  border-radius: 18px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  box-shadow: 0 4px 16px #0003;
+  cursor: pointer;
+}
+
+.chat-jump-latest:hover {
+  background: var(--bg-hover);
+}
+
 .chat-message-search {
   display: flex;
   align-items: center;
