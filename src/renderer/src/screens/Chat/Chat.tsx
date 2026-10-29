@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
-import { Zap, Globe } from "lucide-react";
+import { ArrowDown, Zap, Globe } from "lucide-react";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { ChatEmptyState } from "./ChatEmptyState";
 import { ApprovalToggle } from "./ApprovalToggle";
@@ -506,16 +506,23 @@ function Chat({
   }, [connectionId]);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const scrollScope = JSON.stringify([
+    runId,
+    connectionId,
+    profile,
+    initialSessionId,
+  ]);
   const messageSearch = useMessageSearch({
     messages,
     active,
-    scope: JSON.stringify([runId, connectionId, profile, initialSessionId]),
+    scope: scrollScope,
     containerRef,
   });
-  const { bottomRef } = useChatScroll(
+  const { bottomRef, contentRef, isFollowing, jumpToLatest } = useChatScroll(
     messages,
-    messageSearch.open,
+    messageSearch.open || !active,
     containerRef,
+    scrollScope,
   );
   const modelConfig = useModelConfig(profile, connectionId);
   const { reload: reloadModelConfig, selectModel } = modelConfig;
@@ -1205,7 +1212,7 @@ function Chat({
       <div className="chat-body">
         <ChatMessagesWrap>
           <div className="chat-messages" ref={containerRef}>
-            <div className="chat-content-column">
+            <div className="chat-content-column" ref={contentRef}>
               {messages.length === 0 ? (
                 <ChatEmptyState onSelectSuggestion={handleSuggestion} />
               ) : (
@@ -1227,6 +1234,19 @@ function Chat({
               <div ref={bottomRef} />
             </div>
           </div>
+
+          {!isFollowing && active && !messageSearch.open && (
+            <button
+              type="button"
+              className="chat-jump-latest"
+              onClick={jumpToLatest}
+              aria-label={t("chat.jumpToLatest")}
+              title={t("chat.jumpToLatest")}
+            >
+              <ArrowDown size={16} />
+              {t("chat.jumpToLatest")}
+            </button>
+          )}
 
           {active && (
             <ChatContextPanel
