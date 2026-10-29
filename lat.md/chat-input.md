@@ -16,6 +16,18 @@ The ChatInput integration test verifies the requested preset, strength, and them
 
 [[src/renderer/src/screens/Chat/ChatInput.test.tsx]] protects the component boundary and configuration without coupling tests to the dependency's generated animation CSS.
 
+## Attachment capacity
+
+Only successfully added files count toward the per-message attachment limit; rejected files leave room for later valid files in the same selection.
+
+[[src/renderer/src/screens/Chat/attachmentUtils.ts#processFiles]] preserves input order and reports each rejection separately. Once successful attachments fill the remaining capacity, later files are rejected without reading or staging them. The same accounting applies to Local file paths/staging and non-local document bytes, without changing image compression or transport.
+
+### Rejected files do not consume slots
+
+Oversized files, failed reads and failed Local staging leave the slot available for the next valid file. Mixed Local and non-local batches preserve successful order within the remaining limit.
+
+A full message does not read or stage more files.
+
 ## Queued message send-now
 
 Queued messages have stable IDs; Send now waits for the interrupted turn to become idle before submitting the selected message, without reordering the rest.

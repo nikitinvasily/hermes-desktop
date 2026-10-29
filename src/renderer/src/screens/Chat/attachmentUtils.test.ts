@@ -187,6 +187,198 @@ describe("processFiles", () => {
     });
   });
 
+  // @lat: [[chat-input#Attachment capacity#Rejected files do not consume slots]]
+  it("keeps the last slot for a valid file after an oversized text file", async () => {
+    const out = await processFiles(
+      [
+        makeFile("big.md", "text/markdown", "x", 300 * 1024),
+        makeFile("valid.txt", "text/plain", "hello"),
+      ],
+      9,
+    );
+    expect(out.attachments.map((attachment) => attachment.name)).toEqual([
+      "valid.txt",
+    ]);
+    expect(out.attachments[0].text).toBe("hello");
+    expect(out.errors).toEqual([
+      { code: "text-too-large", filename: "big.md" },
+    ]);
+  });
+
+  it("keeps the last slot after an oversized image", async () => {
+    const out = await processFiles(
+      [
+        makeFile("huge.png", "image/png", "x", 51 * 1024 * 1024),
+        makeFile("valid.txt", "text/plain", "hello"),
+      ],
+      9,
+    );
+    expect(out.attachments.map((attachment) => attachment.name)).toEqual([
+      "valid.txt",
+    ]);
+    expect(out.errors).toEqual([
+      { code: "image-too-large", filename: "huge.png" },
+    ]);
+  });
+
+  it("keeps the last slot after a text read fails", async () => {
+    const reader = vi
+      .spyOn(FileReader.prototype, "readAsText")
+      .mockImplementationOnce(() => {
+        throw new Error("fixture text read failure");
+      });
+    try {
+      const out = await processFiles(
+        [
+          makeFile("broken.txt", "text/plain", "broken"),
+          makeFile("valid.txt", "text/plain", "hello"),
+        ],
+        9,
+      );
+      expect(out.attachments.map((attachment) => attachment.name)).toEqual([
+        "valid.txt",
+      ]);
+      expect(out.errors).toEqual([
+        {
+          code: "read-failed",
+          filename: "broken.txt",
+          detail: "fixture text read failure",
+        },
+      ]);
+    } finally {
+      reader.mockRestore();
+    }
+  });
+
+  it("keeps the last Local slot after document staging fails", async () => {
+    const stage = vi.mocked(window.hermesAPI.stageAttachment);
+    stage.mockRejectedValueOnce(new Error("fixture staging failure"));
+    const out = await processFiles(
+      [
+        makeFile("broken.pdf", "application/pdf", "%PDF-broken"),
+        makeFile("valid.pdf", "application/pdf", "%PDF-valid"),
+      ],
+      9,
+      { sessionId: "capacity-session" },
+    );
+    expect(out.attachments).toEqual([
+      expect.objectContaining({
+        name: "valid.pdf",
+        kind: "path-ref",
+        path: "C:/staging/capacity-session/valid.pdf",
+      }),
+    ]);
+    expect(stage).toHaveBeenCalledTimes(2);
+    expect(out.errors).toEqual([
+      {
+        code: "read-failed",
+        filename: "broken.pdf",
+        detail: "fixture staging failure",
+      },
+    ]);
+  });
+
+  it("keeps the last Remote slot after document reading fails", async () => {
+    const reader = vi
+      .spyOn(FileReader.prototype, "readAsDataURL")
+      .mockImplementationOnce(() => {
+        throw new Error("fixture binary read failure");
+      });
+    try {
+      const out = await processFiles(
+        [
+          makeFile("broken.pdf", "application/pdf", "%PDF-broken"),
+          makeFile("valid.pdf", "application/pdf", "%PDF-valid"),
+        ],
+        9,
+        { remoteMode: true },
+      );
+      expect(out.attachments).toEqual([
+        expect.objectContaining({
+          name: "valid.pdf",
+          kind: "path-ref",
+          dataUrl: "data:application/pdf;base64," + btoa("%PDF-valid"),
+        }),
+      ]);
+      expect(out.attachments[0].path).toBeUndefined();
+      expect(window.hermesAPI.stageAttachment).not.toHaveBeenCalled();
+      expect(window.hermesAPI.getPathForFile).not.toHaveBeenCalled();
+      expect(out.errors).toEqual([
+        {
+          code: "read-failed",
+          filename: "broken.pdf",
+          detail: "fixture binary read failure",
+        },
+      ]);
+    } finally {
+      reader.mockRestore();
+    }
+  });
+
+  it.each([false, true])(
+    "preserves successful order and the cap in mixed files (remote=%s)",
+    async (remoteMode) => {
+      const out = await processFiles(
+        [
+          makeFile("big.md", "text/markdown", "x", 300 * 1024),
+          makeFile("first.txt", "text/plain", "first"),
+          makeFile("huge.png", "image/png", "x", 51 * 1024 * 1024),
+          makeFile("second.pdf", "application/pdf", "%PDF-second"),
+          makeFile("excess.txt", "text/plain", "excess"),
+        ],
+        8,
+        { remoteMode, sessionId: "mixed" },
+      );
+      expect(out.attachments.map((attachment) => attachment.name)).toEqual([
+        "first.txt",
+        "second.pdf",
+      ]);
+      expect(out.errors).toEqual([
+        { code: "text-too-large", filename: "big.md" },
+        { code: "image-too-large", filename: "huge.png" },
+        { code: "too-many", filename: "excess.txt" },
+      ]);
+      if (remoteMode) {
+        expect(out.attachments[1].dataUrl).toBe(
+          "data:application/pdf;base64," + btoa("%PDF-second"),
+        );
+        expect(out.attachments[1].path).toBeUndefined();
+        expect(window.hermesAPI.stageAttachment).not.toHaveBeenCalled();
+      } else {
+        expect(out.attachments[1].path).toBe("C:/staging/mixed/second.pdf");
+      }
+    },
+  );
+
+  it.each([10, 11])(
+    "does not read or stage files when %s attachments already exist",
+    async (existingCount) => {
+      const textReader = vi.spyOn(FileReader.prototype, "readAsText");
+      const binaryReader = vi.spyOn(FileReader.prototype, "readAsDataURL");
+      try {
+        const out = await processFiles(
+          [
+            makeFile("excess.txt", "text/plain", "excess"),
+            makeFile("excess.pdf", "application/pdf", "%PDF-excess"),
+          ],
+          existingCount,
+        );
+        expect(out.attachments).toEqual([]);
+        expect(out.errors).toEqual([
+          { code: "too-many", filename: "excess.txt" },
+          { code: "too-many", filename: "excess.pdf" },
+        ]);
+        expect(textReader).not.toHaveBeenCalled();
+        expect(binaryReader).not.toHaveBeenCalled();
+        expect(window.hermesAPI.stageAttachment).not.toHaveBeenCalled();
+        expect(window.hermesAPI.getPathForFile).not.toHaveBeenCalled();
+      } finally {
+        textReader.mockRestore();
+        binaryReader.mockRestore();
+      }
+    },
+  );
+
   it("accepts up to the per-message cap and emits too-many for the rest", async () => {
     // existingCount=8, cap=10 → only 2 slots remain.  Send 5 files.
     const files = [
