@@ -1,3 +1,4 @@
+import { useUpdateDownloadText } from "../common/useUpdateDownloadText";
 import {
   Bug,
   Calendar,
@@ -35,6 +36,7 @@ export default function AboutPane(): React.JSX.Element {
     doctorOutput,
     doctorRunning,
     updating,
+    agentUpdateProgress,
     updateResult,
     updateResultType,
     autoUpgradeEnabled,
@@ -48,11 +50,16 @@ export default function AboutPane(): React.JSX.Element {
     handleAutoUpgradeChange,
     desktopUpdateState,
     desktopUpdateVersion,
-    desktopUpdatePercent,
+    desktopUpdateProgress,
     desktopUpdateError,
     checkDesktopUpdate,
     handleDesktopUpdate,
   } = useSettings();
+
+  const downloadText = useUpdateDownloadText(
+    desktopUpdateProgress,
+    desktopUpdateState === "downloading",
+  );
 
   const engineHasUpdate =
     !!parsedVersion?.updateInfo ||
@@ -198,6 +205,12 @@ export default function AboutPane(): React.JSX.Element {
             </button>
           </div>
 
+          {updating && agentUpdateProgress && (
+            <div className="settings-hermes-result" role="status">
+              <strong>{agentUpdateProgress.title}</strong>
+              <div>{agentUpdateProgress.detail}</div>
+            </div>
+          )}
           {updateResult && (
             <div
               className={`settings-hermes-result ${updateResultType || "error"}`}
@@ -264,7 +277,7 @@ export default function AboutPane(): React.JSX.Element {
             <DesktopUpdateButton
               state={desktopUpdateState}
               version={desktopUpdateVersion}
-              percent={desktopUpdatePercent}
+              downloadTitle={downloadText.title}
               onCheck={checkDesktopUpdate}
               onAct={handleDesktopUpdate}
             />
@@ -275,6 +288,11 @@ export default function AboutPane(): React.JSX.Element {
             )}
           </div>
 
+          {desktopUpdateState === "downloading" && downloadText.detail && (
+            <p className="settings-card-actions-note" dir="ltr">
+              {downloadText.detail}
+            </p>
+          )}
           {desktopUpdateError && (
             <div className="settings-hermes-result error">
               {desktopUpdateError}
@@ -355,7 +373,7 @@ function MetaLogo({
 function DesktopUpdateButton({
   state,
   version,
-  percent,
+  downloadTitle,
   onCheck,
   onAct,
 }: {
@@ -368,7 +386,7 @@ function DesktopUpdateButton({
     | "uptodate"
     | null;
   version: string | null;
-  percent: number | null;
+  downloadTitle: string;
   onCheck: () => void;
   onAct: () => void;
 }): React.JSX.Element {
@@ -378,7 +396,7 @@ function DesktopUpdateButton({
     return (
       <button className="btn btn-primary" disabled>
         <Loader size={14} className="settings-spin" />
-        {t("common.downloading", { percent: percent ?? 0 })}
+        {downloadTitle}
       </button>
     );
   }

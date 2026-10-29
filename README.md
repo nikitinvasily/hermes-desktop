@@ -90,7 +90,7 @@ Changes in this fork that are **not** in upstream.
 - **Onboarding never writes to the remote agent** — completing the local Setup screen while an SSH connection is active no longer rewrites the remote agent's global model.
 - **Multi-question clarify prompts render** — each question gets its own interactive answer card; they used to be silently dropped, leaving the chat looking frozen.
 
-The updater publishes to and checks this fork's releases (`nikitinvasily/hermes-desktop`), so a fork install never auto-updates into an upstream build. Upstream merges are pulled regularly; fork commits live in `main` ahead of `upstream/main`.
+The updater publishes to and checks this fork's releases (`nikitinvasily/hermes-desktop`), so a fork install never auto-updates into an upstream build. Download feedback keeps measured bytes, total size, speed and fractional percentages. Unknown totals stay indeterminate; stalled transfers retain known bytes without showing stale speed. Agent updates show the current operation and report success only after it completes. Upstream merges are pulled regularly; fork commits live in `main` ahead of `upstream/main`.
 
 <br/>
 <p align="center">
