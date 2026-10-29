@@ -8,6 +8,7 @@ import {
   nativeTheme,
   dialog,
   clipboard,
+  session,
 } from "electron";
 import { extname, join, resolve } from "path";
 import { homedir } from "os";
@@ -177,6 +178,7 @@ import {
 } from "../dashboard";
 import {
   clearRemoteOAuthSession,
+  REMOTE_OAUTH_PARTITION,
   connectionConfigAfterRemoteOAuthLogin,
   openRemoteOAuthLogin,
   probeRemoteAuthMode,
@@ -415,6 +417,12 @@ import {
 } from "../skills";
 import {
   listCronJobs,
+  listCronRuns,
+  getCronRunOutput,
+  captureProfileEditorTarget,
+  withCronHistoryAuthChange,
+  observeCronHistoryCookies,
+  type ProfileEditorTarget,
   createCronJob,
   removeCronJob,
   pauseCronJob,
@@ -820,6 +828,15 @@ function resolveLibraryModelEntry(
 }
 
 export function registerIpcHandlers(context: IpcContext): void {
+  const observeCookies = (): void => {
+    observeCronHistoryCookies(
+      session.fromPartition(REMOTE_OAUTH_PARTITION).cookies,
+      context.notifyConnectionConfigChanged,
+    );
+  };
+  // IPC registers before app readiness; observe cookies before window creation.
+  if (app.isReady()) observeCookies();
+  else app.once("ready", observeCookies);
   const {
     activeRuns,
     getMainWindow,
@@ -1637,7 +1654,10 @@ export function registerIpcHandlers(context: IpcContext): void {
 
       const detected = await probeRemoteAuthMode(url, fetch, apiKey?.trim());
       if (detected.authMode === "oauth") {
-        await openRemoteOAuthLogin(url, context.getMainWindow());
+        await withCronHistoryAuthChange(
+          () => openRemoteOAuthLogin(url, context.getMainWindow()),
+          context.notifyConnectionConfigChanged,
+        );
       } else if (!(await testRemoteConnection(url, apiKey?.trim()))) {
         return { connected: false, authMode: "token" as const };
       }
@@ -1692,18 +1712,19 @@ export function registerIpcHandlers(context: IpcContext): void {
     if (loginConfig.mode !== "remote" || !loginConfig.remoteUrl.trim()) {
       throw new Error("Configure a Remote gateway URL before signing in.");
     }
-    const result = await openRemoteOAuthLogin(
-      loginConfig.remoteUrl,
-      context.getMainWindow(),
-    );
-    setConnectionConfig(
-      connectionConfigAfterRemoteOAuthLogin(
+    return withCronHistoryAuthChange(async () => {
+      const result = await openRemoteOAuthLogin(
         loginConfig.remoteUrl,
-        getConnectionConfig(),
-      ),
-    );
-    notifyConnectionConfigChanged();
-    return result;
+        context.getMainWindow(),
+      );
+      setConnectionConfig(
+        connectionConfigAfterRemoteOAuthLogin(
+          loginConfig.remoteUrl,
+          getConnectionConfig(),
+        ),
+      );
+      return result;
+    }, context.notifyConnectionConfigChanged);
   });
 
   ipcMain.handle("remote-oauth-logout", async () => {
@@ -1711,7 +1732,10 @@ export function registerIpcHandlers(context: IpcContext): void {
     if (conn.mode !== "remote" || !conn.remoteUrl.trim()) {
       throw new Error("Remote gateway is not configured.");
     }
-    await clearRemoteOAuthSession(conn.remoteUrl);
+    await withCronHistoryAuthChange(
+      () => clearRemoteOAuthSession(conn.remoteUrl),
+      context.notifyConnectionConfigChanged,
+    );
     return { signedIn: false };
   });
 
@@ -3855,6 +3879,31 @@ export function registerIpcHandlers(context: IpcContext): void {
     "list-cron-jobs",
     (_event, includeDisabled?: boolean, profile?: string) =>
       listCronJobs(includeDisabled, profile),
+  );
+  ipcMain.handle(
+    "get-profile-editor-target",
+    (_event, profile?: string, connectionId?: string) =>
+      captureProfileEditorTarget(profile, connectionId),
+  );
+  ipcMain.handle(
+    "list-cron-runs",
+    (
+      _event,
+      jobId: string,
+      limit?: number,
+      profile?: string,
+      target?: ProfileEditorTarget,
+    ) => listCronRuns(jobId, limit, profile, target),
+  );
+  ipcMain.handle(
+    "get-cron-run-output",
+    (
+      _event,
+      jobId: string,
+      runId: string,
+      profile?: string,
+      target?: ProfileEditorTarget,
+    ) => getCronRunOutput(jobId, runId, profile, target),
   );
   ipcMain.handle(
     "create-cron-job",

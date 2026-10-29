@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Plus,
   Trash,
@@ -10,8 +10,8 @@ import {
   Alert,
 } from "../../assets/icons";
 import { useI18n } from "../../components/useI18n";
-import { useConnectionChangeReload } from "../../hooks/useConnectionChangeReload";
 import { OrbLoader } from "../../components/OrbLoader";
+import { CronRunHistory } from "./CronRunHistory";
 
 const DELIVER_TARGETS = [
   { value: "local", label: "Local" },
@@ -53,9 +53,108 @@ type FrequencyType = "minutes" | "hourly" | "daily" | "weekly" | "custom";
 
 interface SchedulesProps {
   profile?: string;
+  connectionId?: string;
 }
 
-function Schedules({ profile }: SchedulesProps): React.JSX.Element {
+type Target = Awaited<
+  ReturnType<typeof window.hermesAPI.getProfileEditorTarget>
+>;
+
+function Schedules(props: SchedulesProps): React.JSX.Element {
+  return (
+    <ScheduleTarget
+      key={JSON.stringify([props.connectionId, props.profile])}
+      {...props}
+    />
+  );
+}
+
+function ScheduleTarget(props: SchedulesProps): React.JSX.Element {
+  const [target, setTarget] = useState<Target | null>(null);
+  const [checking, setChecking] = useState(true);
+  const [error, setError] = useState("");
+  const authority = useRef<Target | null>(null);
+  const pending = useRef<Promise<void> | null>(null);
+  const generation = useRef(0);
+  useEffect(() => {
+    let alive = true;
+    const capture = (): void => {
+      const request = ++generation.current;
+      setChecking(true);
+      // Revalidate against main's opaque semantic/auth token, never renderer
+      // credentials or the display-label-bearing public connection event.
+      pending.current = window.hermesAPI
+        .getProfileEditorTarget(props.profile || "default", props.connectionId)
+        .then((next) => {
+          if (!alive || request !== generation.current) return;
+          authority.current = next;
+          setTarget((previous) =>
+            previous?.scopeToken === next.scopeToken ? previous : next,
+          );
+          setError("");
+          setChecking(false);
+        })
+        .catch((reason: unknown) => {
+          if (!alive || request !== generation.current) return;
+          authority.current = null;
+          setTarget(null);
+          setError(reason instanceof Error ? reason.message : String(reason));
+          setChecking(false);
+        });
+    };
+    capture();
+    const unsubscribe = window.hermesAPI.onConnectionConfigChanged(capture);
+    return () => {
+      alive = false;
+      authority.current = null;
+      generation.current += 1;
+      unsubscribe();
+    };
+  }, [props.profile, props.connectionId]);
+  const isCurrent = useCallback(async (token: string): Promise<boolean> => {
+    // Hold old completions until validation finishes: unchanged-label events
+    // preserve in-flight work, while a new principal can never start followups.
+    let validation: Promise<void> | null;
+    do {
+      validation = pending.current;
+      await validation;
+    } while (validation !== pending.current);
+    return authority.current?.scopeToken === token;
+  }, []);
+  return (
+    <>
+      {checking && (
+        <div role="status">
+          <OrbLoader state="searching" size={64} />
+        </div>
+      )}
+      {error && <div role="alert">{error}</div>}
+      <div
+        hidden={checking}
+        style={checking ? undefined : { display: "contents" }}
+      >
+        {target && (
+          <ScopedSchedules
+            key={target.scopeToken}
+            {...props}
+            target={target}
+            isCurrent={isCurrent}
+          />
+        )}
+      </div>
+    </>
+  );
+}
+
+function ScopedSchedules({
+  profile,
+  connectionId,
+  target,
+  isCurrent,
+}: SchedulesProps & {
+  target: Target;
+  isCurrent: (token: string) => Promise<boolean>;
+}): React.JSX.Element {
   const { t } = useI18n();
   const [jobs, setJobs] = useState<CronJob[]>([]);
   const [loading, setLoading] = useState(true);
@@ -63,6 +162,15 @@ function Schedules({ profile }: SchedulesProps): React.JSX.Element {
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [historyJob, setHistoryJob] = useState<string | null>(null);
+  const [historyRefreshRevision, setHistoryRefreshRevision] = useState(0);
+  const listRequest = useRef(0);
+  const alive = useRef(true);
+  const ownsTarget = useCallback(
+    async (): Promise<boolean> =>
+      alive.current && (await isCurrent(target.scopeToken)) && alive.current,
+    [isCurrent, target.scopeToken],
+  );
 
   // Create form state
   const [newName, setNewName] = useState("");
@@ -79,30 +187,29 @@ function Schedules({ profile }: SchedulesProps): React.JSX.Element {
   const [customCron, setCustomCron] = useState("");
 
   const loadJobs = useCallback(async (): Promise<void> => {
+    if (!(await ownsTarget())) return;
+    const request = ++listRequest.current;
     try {
       const list = await window.hermesAPI.listCronJobs(true, profile);
+      if (!(await ownsTarget()) || request !== listRequest.current) return;
       setJobs(list);
     } catch {
-      setError(t("schedules.loadFailed"));
+      if ((await ownsTarget()) && request === listRequest.current)
+        setError(t("schedules.loadFailed"));
     } finally {
-      setLoading(false);
+      if ((await ownsTarget()) && request === listRequest.current)
+        setLoading(false);
     }
-  }, [profile, t]);
+  }, [profile, t, ownsTarget]);
 
   useEffect(() => {
-    loadJobs();
+    alive.current = true;
+    void loadJobs();
+    return () => {
+      alive.current = false;
+      listRequest.current += 1;
+    };
   }, [loadJobs]);
-
-  // Reload when the ACTIVE CONNECTION changes (issue #86): cron jobs are
-  // per-connection data (local jobs.json vs the remote dashboard), so a
-  // local/remote switch must refetch or the tab keeps showing the previous
-  // connection's list. Shared with the other per-connection screens
-  // (Discover, Kanban) via the hook; the same-signature rule lives there.
-  useConnectionChangeReload(() => {
-    setError("");
-    setLoading(true);
-    loadJobs();
-  });
 
   // Escape key to close modals
   useEffect(() => {
@@ -162,6 +269,7 @@ function Schedules({ profile }: SchedulesProps): React.JSX.Element {
   }
 
   async function handleCreate(): Promise<void> {
+    if (!(await ownsTarget())) return;
     if (!isScheduleValid()) return;
     setActionInProgress("creating");
     setError("");
@@ -173,6 +281,7 @@ function Schedules({ profile }: SchedulesProps): React.JSX.Element {
         newDeliver !== "local" ? newDeliver : undefined,
         profile,
       );
+      if (!(await ownsTarget())) return;
       if (result.success) {
         closeCreateModal();
         await loadJobs();
@@ -180,17 +289,20 @@ function Schedules({ profile }: SchedulesProps): React.JSX.Element {
         setError(result.error || "Failed to create job");
       }
     } catch {
+      if (!(await ownsTarget())) return;
       setError("Failed to create job");
     } finally {
-      setActionInProgress(null);
+      if (await ownsTarget()) setActionInProgress(null);
     }
   }
 
   async function handleRemove(jobId: string): Promise<void> {
+    if (!(await ownsTarget())) return;
     setActionInProgress(jobId);
     setError("");
     try {
       const result = await window.hermesAPI.removeCronJob(jobId, profile);
+      if (!(await ownsTarget())) return;
       setConfirmDelete(null);
       if (result.success) {
         await loadJobs();
@@ -198,13 +310,15 @@ function Schedules({ profile }: SchedulesProps): React.JSX.Element {
         setError(result.error || "Failed to remove job");
       }
     } catch {
+      if (!(await ownsTarget())) return;
       setError("Failed to remove job");
     } finally {
-      setActionInProgress(null);
+      if (await ownsTarget()) setActionInProgress(null);
     }
   }
 
   async function handleToggle(job: CronJob): Promise<void> {
+    if (!(await ownsTarget())) return;
     setActionInProgress(job.id);
     setError("");
     try {
@@ -212,32 +326,37 @@ function Schedules({ profile }: SchedulesProps): React.JSX.Element {
         job.state === "paused"
           ? await window.hermesAPI.resumeCronJob(job.id, profile)
           : await window.hermesAPI.pauseCronJob(job.id, profile);
+      if (!(await ownsTarget())) return;
       if (result.success) {
         await loadJobs();
       } else {
         setError(result.error || "Failed to update job");
       }
     } catch {
+      if (!(await ownsTarget())) return;
       setError("Failed to update job");
     } finally {
-      setActionInProgress(null);
+      if (await ownsTarget()) setActionInProgress(null);
     }
   }
 
   async function handleTrigger(jobId: string): Promise<void> {
+    if (!(await ownsTarget())) return;
     setActionInProgress(jobId);
     setError("");
     try {
       const result = await window.hermesAPI.triggerCronJob(jobId, profile);
+      if (!(await ownsTarget())) return;
       if (result.success) {
         await loadJobs();
       } else {
         setError(result.error || "Failed to trigger job");
       }
     } catch {
+      if (!(await ownsTarget())) return;
       setError("Failed to trigger job");
     } finally {
-      setActionInProgress(null);
+      if (await ownsTarget()) setActionInProgress(null);
     }
   }
 
@@ -529,7 +648,13 @@ function Schedules({ profile }: SchedulesProps): React.JSX.Element {
           <p className="schedules-subtitle">{t("schedules.subtitle")}</p>
         </div>
         <div className="schedules-header-actions">
-          <button className="btn btn-secondary" onClick={loadJobs}>
+          <button
+            className="btn btn-secondary"
+            onClick={() => {
+              setHistoryRefreshRevision((revision) => revision + 1);
+              void loadJobs();
+            }}
+          >
             <Refresh size={14} />
             {t("schedules.refresh")}
           </button>
@@ -662,6 +787,29 @@ function Schedules({ profile }: SchedulesProps): React.JSX.Element {
 
               {job.last_error && (
                 <div className="schedules-card-error">{job.last_error}</div>
+              )}
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                aria-expanded={historyJob === job.id}
+                onClick={() =>
+                  setHistoryJob(historyJob === job.id ? null : job.id)
+                }
+              >
+                {t(
+                  historyJob === job.id
+                    ? "schedules.historyClose"
+                    : "schedules.history",
+                )}
+              </button>
+              {historyJob === job.id && (
+                <CronRunHistory
+                  refreshRevision={historyRefreshRevision}
+                  capturedTarget={target}
+                  jobId={job.id}
+                  profile={profile}
+                  connectionId={connectionId}
+                />
               )}
             </div>
           ))}

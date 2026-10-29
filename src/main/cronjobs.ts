@@ -1,9 +1,10 @@
 import { existsSync } from "fs";
+import { createHmac, randomBytes } from "node:crypto";
 import { readFile } from "fs/promises";
 import { join } from "path";
 import { execFile } from "child_process";
 import { HERMES_HOME, HERMES_PYTHON, hermesCliArgs } from "./installer";
-import { profileHome } from "./utils";
+import { profileHome, getActiveProfileNameSync } from "./utils";
 import {
   isRemoteMode,
   isRemoteOnlyMode,
@@ -12,7 +13,13 @@ import {
   normaliseRemoteUrl,
 } from "./hermes";
 import { remoteDashboardRequestJson } from "./remote-api";
-import { getConnectionConfig } from "./config";
+import { probeRemoteAuthMode } from "./remote-oauth";
+import { dashboardApiUrl } from "./remote-sessions";
+import {
+  getActiveConnection,
+  getConnectionConfig,
+  type ConnectionConfig,
+} from "./config";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
 import { sshRunCron } from "./ssh-remote";
 import type { SshConfig } from "./ssh-tunnel";
@@ -670,4 +677,566 @@ export async function triggerCronJob(
   if (isRemoteMode()) return remoteJobAction(jobId, "run", profile);
   const result = await runCronCommand(["run", jobId], profile);
   return { success: result.success, error: result.error };
+}
+
+// This fork does not yet have the upstream shared profile-editor-target module.
+// Keep the history binding local rather than importing unrelated editor changes.
+export interface ProfileEditorTarget {
+  connectionId: string;
+  profile: string;
+  mode: "local" | "remote" | "ssh";
+  scopeToken: string;
+}
+
+const historyScopeKey = randomBytes(32);
+let historyAuthRevision = 0;
+let historyAuthChanges = 0;
+const observedCookieStores = new WeakSet<Electron.Cookies>();
+
+export function invalidateCronHistoryAuth(notify?: () => void): void {
+  historyAuthRevision++;
+  try {
+    notify?.();
+  } catch {
+    // A closed window or failed UI delivery must never interrupt authentication.
+  }
+}
+
+/** Cookie refresh/expiry also changes principal identity outside login IPC. */
+export function observeCronHistoryCookies(
+  cookies: Electron.Cookies,
+  notify?: () => void,
+): void {
+  if (observedCookieStores.has(cookies)) return;
+  observedCookieStores.add(cookies);
+  cookies.on("changed", () => invalidateCronHistoryAuth(notify));
+}
+
+/** Fence history while a dashboard sign-in/logout changes its principal. */
+export async function withCronHistoryAuthChange<T>(
+  action: () => Promise<T>,
+  notify?: () => void,
+): Promise<T> {
+  historyAuthChanges++;
+  invalidateCronHistoryAuth(notify);
+  try {
+    return await action();
+  } finally {
+    historyAuthChanges--;
+    invalidateCronHistoryAuth(notify);
+  }
+}
+
+function historyScopeToken(connectionId: string, profile: string): string {
+  const connection = getConnectionConfig(connectionId);
+  if (connection.mode === "remote" && historyAuthChanges)
+    throw new Error(
+      "Remote sign-in is changing; reload history after it finishes.",
+    );
+  return createHmac("sha256", historyScopeKey)
+    .update(
+      JSON.stringify([
+        connectionId,
+        profile,
+        connection,
+        connection.mode === "remote" ? historyAuthRevision : 0,
+      ]),
+    )
+    .digest("hex");
+}
+
+export function captureProfileEditorTarget(
+  profile?: string,
+  connectionId?: string,
+): ProfileEditorTarget {
+  const activeId = getActiveConnection().connectionId;
+  if (connectionId && connectionId !== activeId)
+    throw new Error("The editor connection is no longer selected.");
+  const conn = getConnectionConfig(activeId);
+  const selectedProfile =
+    profile?.trim() ||
+    (conn.mode === "remote" ? "default" : getActiveProfileNameSync());
+  return {
+    connectionId: activeId,
+    profile: selectedProfile,
+    mode: conn.mode,
+    scopeToken: historyScopeToken(activeId, selectedProfile),
+  };
+}
+
+function historyTarget(
+  profile?: string,
+  target?: ProfileEditorTarget,
+): {
+  connection: ConnectionConfig;
+  profile: string;
+  assertCurrent: () => void;
+} {
+  const captured = captureProfileEditorTarget(
+    profile ?? target?.profile,
+    target?.connectionId,
+  );
+  const matches = (a: ProfileEditorTarget, b: ProfileEditorTarget): boolean =>
+    a.connectionId === b.connectionId &&
+    a.profile === b.profile &&
+    a.mode === b.mode &&
+    a.scopeToken === b.scopeToken;
+  if (target && !matches(captured, target))
+    throw new Error("The editor target changed; reload history.");
+  const activeProfile = getActiveProfileNameSync();
+  const connection = structuredClone(
+    getConnectionConfig(captured.connectionId),
+  );
+  return {
+    connection,
+    profile: captured.profile,
+    assertCurrent: () => {
+      const current = captureProfileEditorTarget(
+        captured.profile,
+        captured.connectionId,
+      );
+      if (
+        !matches(captured, current) ||
+        getActiveProfileNameSync() !== activeProfile
+      )
+        throw new Error(
+          "The history connection, profile or authentication changed; reload history.",
+        );
+    },
+  };
+}
+
+// ── Run history / output ────────────────────────────────────────────────────
+
+export interface CronRun {
+  /** Opaque run id: a `cron_<job>_<ts>` session id, `cron_output:<job>:<stem>`, or `file:<name>` locally. */
+  id: string;
+  source: string;
+  started_at: number | string | null;
+  ended_at: number | string | null;
+  title: string;
+  preview: string;
+  message_count: number;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  is_active: boolean;
+}
+
+export interface CronRunsResult {
+  success: boolean;
+  runs: CronRun[];
+  error?: string;
+  /** The connection mode or server does not expose run history. */
+  unsupported?: boolean;
+}
+
+export interface CronRunOutputResult {
+  success: boolean;
+  output: string;
+  /** True when the text is only a preview of the real output. */
+  partial?: boolean;
+  /** True when the output was cut to fit MAX_RUN_OUTPUT_CHARS. */
+  truncated?: boolean;
+  error?: string;
+  unsupported?: boolean;
+}
+
+const MAX_RUN_OUTPUT_CHARS = 200_000;
+const SAFE_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+
+function clampRunOutput(text: string): { output: string; truncated: boolean } {
+  return text.length > MAX_RUN_OUTPUT_CHARS
+    ? { output: text.slice(0, MAX_RUN_OUTPUT_CHARS), truncated: true }
+    : { output: text, truncated: false };
+}
+
+function remoteRunsUnsupported(err: unknown): boolean {
+  const status = (err as { statusCode?: number } | null | undefined)
+    ?.statusCode;
+  return status === 404 || status === 405;
+}
+
+interface LocalRunDirectory {
+  path: string;
+  assertCurrent: () => Promise<void>;
+}
+
+/** Read a bounded prefix and bind the fd to the selected tree before release. */
+async function readFilePreview(
+  path: string,
+  chars: number,
+  directory: LocalRunDirectory,
+): Promise<string> {
+  const { open, lstat } = await import("fs/promises");
+  // Reject an observed ancestor swap before sampling a potentially foreign leaf.
+  // Recheck after open/read as well: O_NOFOLLOW protects only the final segment.
+  await directory.assertCurrent();
+  const expected = await lstat(path);
+  if (!expected.isFile()) throw new Error("Run output is not a file.");
+  const { constants } = await import("fs");
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const opened = await handle.stat();
+    if (
+      !opened.isFile() ||
+      opened.dev !== expected.dev ||
+      opened.ino !== expected.ino
+    )
+      throw new Error("Run output changed while it was being opened.");
+    const assertSelectedFile = async (): Promise<void> => {
+      await directory.assertCurrent();
+      const selected = await lstat(path);
+      if (
+        !selected.isFile() ||
+        selected.dev !== opened.dev ||
+        selected.ino !== opened.ino
+      )
+        throw new Error(
+          "Run output no longer belongs to the selected directory.",
+        );
+      await directory.assertCurrent();
+    };
+    await assertSelectedFile();
+    const buf = Buffer.alloc(chars * 4);
+    const { bytesRead } = await handle.read(buf, 0, buf.length, 0);
+    await assertSelectedFile();
+    return buf.toString("utf-8", 0, bytesRead).slice(0, chars);
+  } finally {
+    await handle.close();
+  }
+}
+
+async function localRunDir(
+  jobId: string,
+  profile?: string,
+): Promise<LocalRunDirectory> {
+  const { lstat, realpath } = await import("fs/promises");
+  const { relative, isAbsolute, sep } = await import("path");
+  const root = profileHome("default");
+  const selected = relative(root, profileHome(profile));
+  if (isAbsolute(selected) || selected.split(sep).includes(".."))
+    throw new Error("Run output profile is outside the Hermes home.");
+  // The configured home (including a root symlink/junction) is trusted relocation.
+  // Below it, neither the profiles container nor a named profile may be an alias.
+  let dir = await realpath(root);
+  const directories: { path: string; dev: number; ino: number }[] = [];
+  for (const segment of [
+    "",
+    ...selected.split(sep).filter(Boolean),
+    "cron",
+    "output",
+    jobId,
+  ]) {
+    dir = join(dir, segment);
+    const stat = await lstat(dir);
+    if (!stat.isDirectory() || stat.isSymbolicLink())
+      throw new Error("Run output directory is not a safe directory.");
+    directories.push({ path: dir, dev: stat.dev, ino: stat.ino });
+  }
+  // Node has no portable openat-style directory-relative open. These identity
+  // checks detect observed swaps (including restore around a read); they are
+  // not an atomic sandbox against an attacker racing every pathname lookup.
+  return {
+    path: dir,
+    assertCurrent: async () => {
+      for (const expected of directories) {
+        const current = await lstat(expected.path);
+        if (
+          !current.isDirectory() ||
+          current.dev !== expected.dev ||
+          current.ino !== expected.ino
+        )
+          throw new Error(
+            "Run output directory changed while it was being read.",
+          );
+      }
+    },
+  };
+}
+
+function runLimit(limit: number): number {
+  return Number.isFinite(limit)
+    ? Math.max(1, Math.min(100, Math.floor(limit)))
+    : 20;
+}
+
+function asRunNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function normalizeRun(
+  raw: Record<string, unknown>,
+  previewChars: number,
+): CronRun {
+  const time = (v: unknown): number | string | null =>
+    typeof v === "string" ? v : asRunNumber(v);
+  return {
+    id: String(raw.id ?? ""),
+    source: String(raw.source ?? ""),
+    started_at: time(raw.started_at),
+    ended_at: time(raw.ended_at),
+    title: typeof raw.title === "string" ? raw.title.slice(0, 300) : "",
+    preview:
+      typeof raw.preview === "string" ? raw.preview.slice(0, previewChars) : "",
+    message_count: asRunNumber(raw.message_count) ?? 0,
+    input_tokens: asRunNumber(raw.input_tokens),
+    output_tokens: asRunNumber(raw.output_tokens),
+    is_active: raw.is_active === true,
+  };
+}
+
+/** History is dashboard-only; never fall back to a gateway or local data. */
+async function historyJson<T>(
+  conn: ConnectionConfig,
+  path: string,
+  profile: string | undefined,
+  assertCurrent: () => void,
+): Promise<T> {
+  assertCurrent();
+  const mode =
+    conn.remoteAuthMode === "auto"
+      ? (await probeRemoteAuthMode(conn.remoteUrl)).authMode
+      : conn.remoteAuthMode;
+  assertCurrent();
+  const scopedPath = `${path}${path.includes("?") ? "&" : "?"}profile=${encodeURIComponent(profile || "default")}`;
+  let result: T;
+  if (mode === "token" && !conn.apiKey.trim()) {
+    const url = new URL(
+      dashboardApiUrl({ remoteUrl: conn.remoteUrl, apiKey: "" }, scopedPath),
+    );
+    const headers: Record<string, string> = {};
+    if (url.username || url.password) {
+      headers.Authorization = `Basic ${Buffer.from(`${decodeURIComponent(url.username)}:${decodeURIComponent(url.password)}`).toString("base64")}`;
+      url.username = "";
+      url.password = "";
+    }
+    const response = await fetch(url.toString(), {
+      headers,
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!response.ok)
+      throw Object.assign(new Error(`Run history HTTP ${response.status}`), {
+        statusCode: response.status,
+      });
+    result = (await response.json()) as T;
+  } else {
+    result = await remoteDashboardRequestJson<T>(
+      { ...conn, remoteAuthMode: mode },
+      scopedPath,
+      {},
+      profile,
+    );
+  }
+  assertCurrent();
+  return result;
+}
+
+async function remoteRunList(
+  jobId: string,
+  limit: number,
+  conn: ConnectionConfig,
+  profile: string | undefined,
+  assertCurrent: () => void,
+  previewChars = 300,
+): Promise<CronRun[]> {
+  const data = await historyJson<{ runs: unknown }>(
+    conn,
+    `/api/cron/jobs/${encodeURIComponent(jobId)}/runs?limit=${runLimit(limit)}`,
+    profile,
+    assertCurrent,
+  );
+  if (
+    !Array.isArray(data?.runs) ||
+    data.runs.some(
+      (row) =>
+        !row ||
+        typeof row !== "object" ||
+        typeof row.id !== "string" ||
+        !SAFE_SEGMENT.test(row.id),
+    )
+  )
+    throw new Error("Run history response was invalid.");
+  return data.runs
+    .slice(0, runLimit(limit))
+    .map((row) => normalizeRun(row, previewChars));
+}
+
+/** Newest markdown outputs for the selected local profile. */
+export async function listCronRuns(
+  jobId: string,
+  limit = 20,
+  profile?: string,
+  target?: ProfileEditorTarget,
+): Promise<CronRunsResult> {
+  try {
+    if (typeof jobId !== "string" || !SAFE_SEGMENT.test(jobId))
+      throw new Error("Invalid job ID");
+    if (getConnectionConfig().mode === "ssh")
+      return {
+        success: false,
+        runs: [],
+        unsupported: true,
+        error: "Run history is not available over SSH yet.",
+      };
+    const resolved = historyTarget(profile, target);
+    const { connection: conn, assertCurrent } = resolved;
+    profile = resolved.profile;
+    if (conn.mode === "remote") {
+      const runs = await remoteRunList(
+        jobId,
+        limit,
+        conn,
+        profile,
+        assertCurrent,
+      );
+      assertCurrent();
+      return { success: true, runs };
+    }
+    let directory: LocalRunDirectory;
+    try {
+      directory = await localRunDir(jobId, profile);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        assertCurrent();
+        return { success: true, runs: [] };
+      }
+      throw error;
+    }
+    const dir = directory.path;
+    const { readdir, lstat } = await import("fs/promises");
+    const stats = await Promise.all(
+      (await readdir(dir))
+        .filter((name) => name.endsWith(".md") && SAFE_SEGMENT.test(name))
+        .map(async (name) => {
+          const stat = await lstat(join(dir, name));
+          return stat.isFile() ? { name, mtimeMs: stat.mtimeMs } : null;
+        }),
+    );
+    const newest = stats
+      .filter(
+        (entry): entry is { name: string; mtimeMs: number } => entry !== null,
+      )
+      .sort((a, b) => b.mtimeMs - a.mtimeMs)
+      .slice(0, runLimit(limit));
+    const runs = await Promise.all(
+      newest.map(
+        async ({ name, mtimeMs }): Promise<CronRun> => ({
+          id: `file:${name}`,
+          source: "cron_output",
+          started_at: mtimeMs / 1000,
+          ended_at: null,
+          title: name.replace(/\.md$/, ""),
+          preview: await readFilePreview(join(dir, name), 300, directory),
+          message_count: 0,
+          input_tokens: null,
+          output_tokens: null,
+          is_active: false,
+        }),
+      ),
+    );
+    await directory.assertCurrent();
+    assertCurrent();
+    return { success: true, runs };
+  } catch (err) {
+    return {
+      success: false,
+      runs: [],
+      unsupported: remoteRunsUnsupported(err),
+      error: remoteCronErrorMessage(err),
+    };
+  }
+}
+
+export async function getCronRunOutput(
+  jobId: string,
+  runId: string,
+  profile?: string,
+  target?: ProfileEditorTarget,
+): Promise<CronRunOutputResult> {
+  try {
+    if (getConnectionConfig().mode === "ssh")
+      return {
+        success: false,
+        output: "",
+        unsupported: true,
+        error: "Run output is not available over SSH yet.",
+      };
+    const resolved = historyTarget(profile, target);
+    const { connection: conn, assertCurrent } = resolved;
+    profile = resolved.profile;
+    if (
+      typeof jobId !== "string" ||
+      typeof runId !== "string" ||
+      !SAFE_SEGMENT.test(jobId) ||
+      !SAFE_SEGMENT.test(runId)
+    )
+      throw new Error("Invalid run ID");
+    if (conn.mode === "remote") {
+      const runs = await remoteRunList(
+        jobId,
+        100,
+        conn,
+        profile,
+        assertCurrent,
+        MAX_RUN_OUTPUT_CHARS + 1,
+      );
+      assertCurrent();
+      const run = runs.find((item) => item.id === runId);
+      if (!run) throw new Error("Run not found in this job's history.");
+      if (run.source === "cron_output")
+        return { success: true, ...clampRunOutput(run.preview), partial: true };
+      const data = await historyJson<{ messages: unknown }>(
+        conn,
+        `/api/sessions/${encodeURIComponent(runId)}/messages?order=oldest&limit=500`,
+        profile,
+        assertCurrent,
+      );
+      if (
+        !Array.isArray(data?.messages) ||
+        data.messages.some((message) => !message || typeof message !== "object")
+      )
+        throw new Error("Run output response was invalid.");
+      const text = data.messages
+        .slice(0, 500)
+        .filter((m) => m.display_kind !== "hidden")
+        .map((m) => {
+          const role = String(m.role ?? "message");
+          const raw = m.display_content ?? m.content;
+          const content =
+            typeof raw === "string" ? raw : raw ? JSON.stringify(raw) : "";
+          return content.trim() ? `[${role}]\n${content}` : "";
+        })
+        .filter(Boolean)
+        .join("\n\n");
+      assertCurrent();
+      return {
+        success: true,
+        ...clampRunOutput(text),
+        partial: data.messages.length >= 500,
+      };
+    }
+    if (
+      !SAFE_SEGMENT.test(jobId) ||
+      !runId.startsWith("file:") ||
+      !SAFE_SEGMENT.test(runId.slice(5)) ||
+      !runId.endsWith(".md")
+    )
+      throw new Error("Invalid run ID");
+    const directory = await localRunDir(jobId, profile);
+    const text = await readFilePreview(
+      join(directory.path, runId.slice(5)),
+      MAX_RUN_OUTPUT_CHARS + 1,
+      directory,
+    );
+    await directory.assertCurrent();
+    assertCurrent();
+    return { success: true, ...clampRunOutput(text) };
+  } catch (err) {
+    return {
+      success: false,
+      output: "",
+      unsupported: remoteRunsUnsupported(err),
+      error: remoteCronErrorMessage(err),
+    };
+  }
 }

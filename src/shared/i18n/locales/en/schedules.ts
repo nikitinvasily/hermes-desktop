@@ -1,4 +1,17 @@
 export default {
+  history: "Run history",
+  historyLoading: "Loading runs…",
+  historyEmpty: "No runs recorded yet",
+  historyUnsupported: "Run history is not available for this connection",
+  historyRunOutput: "Output",
+  historyOutputPartial:
+    "Only the beginning of this run is available from the server.",
+  historyOutputTruncated: "Output was cut to fit.",
+  historyClose: "Hide",
+  historyRefresh: "Refresh history",
+  historyRunning: "Running",
+  historyLoadFailed: "Failed to load run history",
+  historyOutputFailed: "Failed to load run output",
   title: "Schedules",
   subtitle: "Automate tasks with scheduled agent runs",
   newTask: "New Task",
